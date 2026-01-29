@@ -1,223 +1,375 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { supabase, isSupabaseConfigured, DateIdea, Category } from '@/lib/supabase';
 
-interface DateIdea {
+interface LocalCategory {
   id: string;
-  title: string;
-  description?: string;
-  emoji?: string;
-}
-
-interface Category {
   name: string;
   emoji: string;
   ideas: DateIdea[];
 }
 
-const initialCategories: Category[] = [
-  {
-    name: 'Learn Things',
-    emoji: '📚',
-    ideas: [
-      { id: 'dnd', title: 'DND', description: 'Join a single season' },
-      { id: 'dancing', title: 'Dancing', emoji: '🕺', description: 'Go to a dance lesson together' },
-      { id: 'archery', title: 'Archery', emoji: '🏹' },
-      { id: 'website-battle', title: 'Website Battle', description: 'First to £10 profit' },
-      { id: 'kalimba', title: 'Kalimba' },
-      { id: 'navigation', title: 'Navigation', description: 'Map + compass' },
-      { id: 'memory-palaces', title: 'Memory Palaces' },
-      { id: 'calligraphy', title: 'Calligraphy' },
-      { id: 'poker', title: 'Poker' },
-      { id: 'trust-exercises', title: 'Trust-building Exercises' },
-      { id: 'fire-making', title: 'Fire-making' },
-      { id: 'conflict-resolution', title: 'Conflict Resolution Skills' },
-      { id: 'magic-trick', title: 'Magic Trick' },
-      { id: 'chess', title: 'Chess Properly', description: 'Openings, not vibes' },
-      { id: 'foraging', title: 'Foraging' },
-      { id: 'first-aid', title: 'First Aid' },
-      { id: 'negotiation', title: 'Negotiation Skills' },
-      { id: 'sign-language', title: 'Sign Language Basics' },
-      { id: 'morse-code', title: 'Morse Code', description: 'Ridiculous but fun' },
-      { id: 'memory-techniques', title: 'Memory Techniques' },
-      { id: 'car-maintenance', title: 'Car Maintenance Basics' },
-      { id: 'wilderness-survival', title: 'Wilderness Survival Basics' },
-      { id: 'interrogation', title: 'Interrogation Skills' },
-      { id: 'wild-hunting', title: 'Wild Hunting' },
-      { id: 'rubix-cube', title: 'Solve Rubix Cube' },
-    ],
-  },
-  {
-    name: 'Feeling Adventurous',
-    emoji: '🏔️',
-    ideas: [
-      { id: 'abseiling', title: 'Abseiling' },
-      { id: 'aqueduct', title: 'Aqueduct' },
-      { id: 'coastal-foraging', title: 'Coastal Foraging' },
-      { id: 'hilbre-island', title: 'Hilbre Island', description: 'Chicken edition' },
-      { id: 'waterfall-swim', title: 'Waterfall Pool Swim' },
-      { id: 'sea-swim', title: 'Swim in the Sea', emoji: '🦈' },
-      { id: 'beach-bbq', title: 'Beach Barbeque' },
-      { id: 'wild-camping', title: 'Wild Camping' },
-      { id: 'mountain-hike', title: 'Hike up a Mountain' },
-      { id: 'treasure-hunt', title: 'Treasure Hunting', emoji: '🧭' },
-      { id: 'sea-rock-walking', title: 'Sea Rock Walking' },
-      { id: 'adventure-hardmode', title: 'Adventure Hardmode', description: 'No GPS, no phones' },
-      { id: 'aurora', title: 'Find the Aurora' },
-    ],
-  },
-  {
-    name: 'Animals',
-    emoji: '🦁',
-    ideas: [
-      { id: 'aquarium', title: 'Aquarium', emoji: '🐠' },
-      { id: 'animal-shelter', title: 'Animal Shelter', emoji: '🐶' },
-      { id: 'chester-zoo', title: 'Chester Zoo', emoji: '🦁' },
-      { id: 'safari', title: 'Safari', emoji: '🐘' },
-    ],
-  },
-  {
-    name: 'Something Chilled',
-    emoji: '😌',
-    ideas: [
-      { id: 'escape-room', title: 'Escape Room', description: '✓ Done!' },
-      { id: 'startup', title: 'Plan a Start-up Together', emoji: '✨' },
-      { id: 'fort', title: 'Build a Fort and Sleep in it', emoji: '🛌' },
-      { id: 'board-game-cafe', title: 'Board Game Cafe', description: 'Spiel des Jahres games' },
-      { id: 'films', title: "Films Daniel Hasn't Seen" },
-      { id: 'dish-off', title: 'Dish Off', description: 'Compete to make the best meal' },
-    ],
-  },
-  {
-    name: 'Active & Fun',
-    emoji: '🎯',
-    ideas: [
-      { id: 'sport', title: 'Sport Fantastic', emoji: '🏑', description: 'Try a new sport group together' },
-      { id: 'eden-project', title: 'The Eden Project' },
-      { id: 'trampoline', title: 'Trampoline Park', emoji: '🦘' },
-      { id: 'go-karting', title: 'Real Go Karting', emoji: '🏎️' },
-      { id: 'arcade', title: 'Arcade', emoji: '🎟️', description: 'Old school ticket competition' },
-      { id: 'paintball', title: 'Paintball' },
-      { id: 'laser-tag', title: 'Laser Tag', emoji: '🔫' },
-      { id: 'random-country', title: 'Random European Country' },
-      { id: 'go-ape', title: 'Go Ape', emoji: '🦧' },
-      { id: 'ninja-warrior', title: 'Ninja Warrior' },
-    ],
-  },
-  {
-    name: 'Silly Ideas',
-    emoji: '🤪',
-    ideas: [
-      { id: 'ppt-offensive', title: 'PowerPoint V1', description: 'Most offensive' },
-      { id: 'ppt-lives', title: 'PowerPoint V2', description: 'Funny presentation about our lives' },
-      { id: 'fancy-dress', title: 'Fancy Dress', emoji: '🧓', description: 'Dress up as old people' },
-      { id: 'write-book', title: 'Write a Book', description: '✓ Done! Alternate sentences' },
-      { id: 'conspiracy', title: 'Conspiracy', description: 'Find one you believe and convince the other' },
-      { id: 'who-are-you', title: 'Who Are You?', description: 'Pretend we never met in public' },
-      { id: 'day-of-sins', title: 'Day of Sins', description: 'Complete the most sins in a day' },
-      { id: 'ppt-zombie', title: 'PowerPoint V3', description: 'Zombie apocalypse plan' },
-      { id: 'sex-club', title: 'Sex Club' },
-      { id: 'post-mortem', title: 'Post Mortem', description: 'Write a bibliography about each other' },
-      { id: 'stand-up', title: 'Stand Up', description: 'Write the best routine in 1-2 hours' },
-      { id: 'junky-hustling', title: 'Junky Hustling', description: 'Make £100 net profit first' },
-      { id: 'lightsaber', title: 'Lightsaber Combat Academy' },
-    ],
-  },
-  {
-    name: 'Other',
-    emoji: '✨',
-    ideas: [
-      { id: 'ice-skating', title: 'Ice Skating', emoji: '⛸️' },
-      { id: 'jury-experience', title: 'Jury Experience' },
-    ],
-  },
+// Default categories for initial setup
+const defaultCategories = [
+  { name: 'Learn Things', emoji: '📚', sort_order: 1 },
+  { name: 'Feeling Adventurous', emoji: '🏔️', sort_order: 2 },
+  { name: 'Animals', emoji: '🦁', sort_order: 3 },
+  { name: 'Something Chilled', emoji: '😌', sort_order: 4 },
+  { name: 'Active & Fun', emoji: '🎯', sort_order: 5 },
+  { name: 'Silly Ideas', emoji: '🤪', sort_order: 6 },
+  { name: 'Other', emoji: '✨', sort_order: 7 },
+];
+
+// Default ideas to seed
+const defaultIdeas: { category: string; title: string; description?: string; emoji?: string }[] = [
+  // Learn Things
+  { category: 'Learn Things', title: 'DND', description: 'Join a single season' },
+  { category: 'Learn Things', title: 'Dancing', emoji: '🕺', description: 'Go to a dance lesson together' },
+  { category: 'Learn Things', title: 'Archery', emoji: '🏹' },
+  { category: 'Learn Things', title: 'Website Battle', description: 'First to £10 profit' },
+  { category: 'Learn Things', title: 'Kalimba' },
+  { category: 'Learn Things', title: 'Navigation', description: 'Map + compass' },
+  { category: 'Learn Things', title: 'Memory Palaces' },
+  { category: 'Learn Things', title: 'Calligraphy' },
+  { category: 'Learn Things', title: 'Poker' },
+  { category: 'Learn Things', title: 'Trust-building Exercises' },
+  { category: 'Learn Things', title: 'Fire-making' },
+  { category: 'Learn Things', title: 'Conflict Resolution Skills' },
+  { category: 'Learn Things', title: 'Magic Trick' },
+  { category: 'Learn Things', title: 'Chess Properly', description: 'Openings, not vibes' },
+  { category: 'Learn Things', title: 'Foraging' },
+  { category: 'Learn Things', title: 'First Aid' },
+  { category: 'Learn Things', title: 'Negotiation Skills' },
+  { category: 'Learn Things', title: 'Sign Language Basics' },
+  { category: 'Learn Things', title: 'Morse Code', description: 'Ridiculous but fun' },
+  { category: 'Learn Things', title: 'Memory Techniques' },
+  { category: 'Learn Things', title: 'Car Maintenance Basics' },
+  { category: 'Learn Things', title: 'Wilderness Survival Basics' },
+  { category: 'Learn Things', title: 'Interrogation Skills' },
+  { category: 'Learn Things', title: 'Wild Hunting' },
+  { category: 'Learn Things', title: 'Solve Rubix Cube' },
+  // Feeling Adventurous
+  { category: 'Feeling Adventurous', title: 'Abseiling' },
+  { category: 'Feeling Adventurous', title: 'Aqueduct' },
+  { category: 'Feeling Adventurous', title: 'Coastal Foraging' },
+  { category: 'Feeling Adventurous', title: 'Hilbre Island', description: 'Chicken edition' },
+  { category: 'Feeling Adventurous', title: 'Waterfall Pool Swim' },
+  { category: 'Feeling Adventurous', title: 'Swim in the Sea', emoji: '🦈' },
+  { category: 'Feeling Adventurous', title: 'Beach Barbeque' },
+  { category: 'Feeling Adventurous', title: 'Wild Camping' },
+  { category: 'Feeling Adventurous', title: 'Hike up a Mountain' },
+  { category: 'Feeling Adventurous', title: 'Treasure Hunting', emoji: '🧭' },
+  { category: 'Feeling Adventurous', title: 'Sea Rock Walking' },
+  { category: 'Feeling Adventurous', title: 'Adventure Hardmode', description: 'No GPS, no phones' },
+  { category: 'Feeling Adventurous', title: 'Find the Aurora' },
+  // Animals
+  { category: 'Animals', title: 'Aquarium', emoji: '🐠' },
+  { category: 'Animals', title: 'Animal Shelter', emoji: '🐶' },
+  { category: 'Animals', title: 'Chester Zoo', emoji: '🦁' },
+  { category: 'Animals', title: 'Safari', emoji: '🐘' },
+  // Something Chilled
+  { category: 'Something Chilled', title: 'Escape Room', description: '✓ Done!' },
+  { category: 'Something Chilled', title: 'Plan a Start-up Together', emoji: '✨' },
+  { category: 'Something Chilled', title: 'Build a Fort and Sleep in it', emoji: '🛌' },
+  { category: 'Something Chilled', title: 'Board Game Cafe', description: 'Spiel des Jahres games' },
+  { category: 'Something Chilled', title: "Films Daniel Hasn't Seen" },
+  { category: 'Something Chilled', title: 'Dish Off', description: 'Compete to make the best meal' },
+  // Active & Fun
+  { category: 'Active & Fun', title: 'Sport Fantastic', emoji: '🏑', description: 'Try a new sport group together' },
+  { category: 'Active & Fun', title: 'The Eden Project' },
+  { category: 'Active & Fun', title: 'Trampoline Park', emoji: '🦘' },
+  { category: 'Active & Fun', title: 'Real Go Karting', emoji: '🏎️' },
+  { category: 'Active & Fun', title: 'Arcade', emoji: '🎟️', description: 'Old school ticket competition' },
+  { category: 'Active & Fun', title: 'Paintball' },
+  { category: 'Active & Fun', title: 'Laser Tag', emoji: '🔫' },
+  { category: 'Active & Fun', title: 'Random European Country' },
+  { category: 'Active & Fun', title: 'Go Ape', emoji: '🦧' },
+  { category: 'Active & Fun', title: 'Ninja Warrior' },
+  // Silly Ideas
+  { category: 'Silly Ideas', title: 'PowerPoint V1', description: 'Most offensive' },
+  { category: 'Silly Ideas', title: 'PowerPoint V2', description: 'Funny presentation about our lives' },
+  { category: 'Silly Ideas', title: 'Fancy Dress', emoji: '🧓', description: 'Dress up as old people' },
+  { category: 'Silly Ideas', title: 'Write a Book', description: '✓ Done! Alternate sentences' },
+  { category: 'Silly Ideas', title: 'Conspiracy', description: 'Find one you believe and convince the other' },
+  { category: 'Silly Ideas', title: 'Who Are You?', description: 'Pretend we never met in public' },
+  { category: 'Silly Ideas', title: 'Day of Sins', description: 'Complete the most sins in a day' },
+  { category: 'Silly Ideas', title: 'PowerPoint V3', description: 'Zombie apocalypse plan' },
+  { category: 'Silly Ideas', title: 'Sex Club' },
+  { category: 'Silly Ideas', title: 'Post Mortem', description: 'Write a bibliography about each other' },
+  { category: 'Silly Ideas', title: 'Stand Up', description: 'Write the best routine in 1-2 hours' },
+  { category: 'Silly Ideas', title: 'Junky Hustling', description: 'Make £100 net profit first' },
+  { category: 'Silly Ideas', title: 'Lightsaber Combat Academy' },
+  // Other
+  { category: 'Other', title: 'Ice Skating', emoji: '⛸️' },
+  { category: 'Other', title: 'Jury Experience' },
 ];
 
 export default function DateIdeas() {
-  const [categories, setCategories] = useState<Category[]>(initialCategories);
-  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
+  const [categories, setCategories] = useState<LocalCategory[]>([]);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(true);
   const [addingToCategory, setAddingToCategory] = useState<string | null>(null);
   const [newIdeaTitle, setNewIdeaTitle] = useState('');
   const [newIdeaDescription, setNewIdeaDescription] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
 
-  // Load categories and completed from localStorage
-  useEffect(() => {
-    const savedCategories = localStorage.getItem('date-ideas-categories');
-    if (savedCategories) {
-      setCategories(JSON.parse(savedCategories));
+  // Fetch data from Supabase
+  const fetchData = useCallback(async () => {
+    if (!isSupabaseConfigured) {
+      setIsLoading(false);
+      return;
     }
-    const saved = localStorage.getItem('date-ideas-completed');
-    if (saved) {
-      setCompletedIds(new Set(JSON.parse(saved)));
+
+    try {
+      // Fetch categories
+      const { data: catData, error: catError } = await supabase
+        .from('date_categories')
+        .select('*')
+        .order('sort_order', { ascending: true });
+
+      if (catError) throw catError;
+
+      // Fetch all ideas
+      const { data: ideasData, error: ideasError } = await supabase
+        .from('date_ideas')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (ideasError) throw ideasError;
+
+      // If no categories exist, seed the database
+      if (!catData || catData.length === 0) {
+        await seedDatabase();
+        return fetchData();
+      }
+
+      // Group ideas by category
+      const groupedCategories: LocalCategory[] = (catData as Category[]).map((cat) => ({
+        id: cat.id,
+        name: cat.name,
+        emoji: cat.emoji,
+        ideas: (ideasData as DateIdea[]).filter((idea) => idea.category_id === cat.id),
+      }));
+
+      setCategories(groupedCategories);
+    } catch (error) {
+      console.error('Error fetching data:', error);
     }
+
+    setIsLoading(false);
   }, []);
 
-  // Save completed to localStorage
-  const toggleCompleted = (id: string) => {
-    setCompletedIds((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-      } else {
-        newSet.add(id);
-      }
-      localStorage.setItem('date-ideas-completed', JSON.stringify([...newSet]));
-      return newSet;
-    });
+  // Seed the database with default data
+  const seedDatabase = async () => {
+    try {
+      // Insert categories
+      const { data: newCats, error: catError } = await supabase
+        .from('date_categories')
+        .insert(defaultCategories)
+        .select();
+
+      if (catError) throw catError;
+
+      // Create a map of category names to IDs
+      const catMap = new Map((newCats as Category[]).map((c) => [c.name, c.id]));
+
+      // Insert ideas
+      const ideasToInsert = defaultIdeas.map((idea) => ({
+        category_id: catMap.get(idea.category),
+        title: idea.title,
+        description: idea.description || null,
+        emoji: idea.emoji || null,
+        is_completed: false,
+      }));
+
+      const { error: ideasError } = await supabase
+        .from('date_ideas')
+        .insert(ideasToInsert);
+
+      if (ideasError) throw ideasError;
+    } catch (error) {
+      console.error('Error seeding database:', error);
+    }
   };
 
-  // Add a new idea to a category
-  const addIdea = (categoryName: string) => {
+  // Load data and set up realtime subscription
+  useEffect(() => {
+    // Check for saved user preference
+    const savedUser = localStorage.getItem('date-ideas-user') as 'daniel' | 'huaiyao' | null;
+    setCurrentUser(savedUser);
+
+    fetchData();
+
+    if (!isSupabaseConfigured) return;
+
+    // Subscribe to realtime changes
+    const channel = supabase
+      .channel('date-ideas-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'date_ideas' },
+        () => {
+          fetchData();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'date_categories' },
+        () => {
+          fetchData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchData]);
+
+  // Send notification
+  const sendNotification = async (action: 'added' | 'removed' | 'completed' | 'uncompleted', title: string) => {
+    if (!currentUser) return;
+
+    try {
+      await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, title, user: currentUser }),
+      });
+    } catch (error) {
+      console.error('Notification error:', error);
+    }
+  };
+
+  // Toggle completed status
+  const toggleCompleted = async (idea: DateIdea) => {
+    const newStatus = !idea.is_completed;
+
+    const { error } = await supabase
+      .from('date_ideas')
+      .update({ is_completed: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', idea.id);
+
+    if (error) {
+      console.error('Error updating idea:', error);
+      return;
+    }
+
+    sendNotification(newStatus ? 'completed' : 'uncompleted', idea.title);
+    fetchData();
+  };
+
+  // Add a new idea
+  const addIdea = async (categoryId: string) => {
     if (!newIdeaTitle.trim()) return;
 
-    const newIdea: DateIdea = {
-      id: `custom-${Date.now()}`,
+    const { error } = await supabase.from('date_ideas').insert({
+      category_id: categoryId,
       title: newIdeaTitle.trim(),
-      description: newIdeaDescription.trim() || undefined,
-    };
-
-    setCategories((prev) => {
-      const updated = prev.map((cat) =>
-        cat.name === categoryName
-          ? { ...cat, ideas: [...cat.ideas, newIdea] }
-          : cat
-      );
-      localStorage.setItem('date-ideas-categories', JSON.stringify(updated));
-      return updated;
+      description: newIdeaDescription.trim() || null,
+      is_completed: false,
     });
 
+    if (error) {
+      console.error('Error adding idea:', error);
+      return;
+    }
+
+    sendNotification('added', newIdeaTitle.trim());
     setNewIdeaTitle('');
     setNewIdeaDescription('');
     setAddingToCategory(null);
+    fetchData();
   };
 
-  // Remove an idea from a category
-  const removeIdea = (categoryName: string, ideaId: string) => {
-    setCategories((prev) => {
-      const updated = prev.map((cat) =>
-        cat.name === categoryName
-          ? { ...cat, ideas: cat.ideas.filter((i) => i.id !== ideaId) }
-          : cat
-      );
-      localStorage.setItem('date-ideas-categories', JSON.stringify(updated));
-      return updated;
-    });
+  // Remove an idea
+  const removeIdea = async (idea: DateIdea) => {
+    const { error } = await supabase
+      .from('date_ideas')
+      .delete()
+      .eq('id', idea.id);
 
-    // Also remove from completed if it was completed
-    setCompletedIds((prev) => {
-      const newSet = new Set(prev);
-      newSet.delete(ideaId);
-      localStorage.setItem('date-ideas-completed', JSON.stringify([...newSet]));
-      return newSet;
-    });
+    if (error) {
+      console.error('Error removing idea:', error);
+      return;
+    }
+
+    sendNotification('removed', idea.title);
+    fetchData();
+  };
+
+  // Select user
+  const selectUser = (user: 'daniel' | 'huaiyao') => {
+    setCurrentUser(user);
+    localStorage.setItem('date-ideas-user', user);
   };
 
   const totalIdeas = categories.reduce((sum, cat) => sum + cat.ideas.length, 0);
-  const completedCount = completedIds.size;
+  const completedCount = categories.reduce(
+    (sum, cat) => sum + cat.ideas.filter((i) => i.is_completed).length,
+    0
+  );
+
+  // User selection screen
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center max-w-md"
+        >
+          <motion.div
+            animate={{ y: [0, -5, 0] }}
+            transition={{ duration: 3, repeat: Infinity }}
+            className="text-6xl mb-6"
+          >
+            ✨
+          </motion.div>
+          <h1 className="text-3xl font-serif font-bold text-gray-800 mb-4">
+            Who are you?
+          </h1>
+          <p className="text-gray-500 mb-8">
+            So we know who to notify when you make changes
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => selectUser('daniel')}
+              className="px-8 py-4 rounded-xl bg-blue-500 text-white font-medium shadow-lg hover:bg-blue-600 transition-colors"
+            >
+              I'm Daniel
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => selectUser('huaiyao')}
+              className="px-8 py-4 rounded-xl bg-rose-500 text-white font-medium shadow-lg hover:bg-rose-600 transition-colors"
+            >
+              I'm Huaiyao
+            </motion.button>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 flex items-center justify-center">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+          className="w-8 h-8 border-4 border-purple-200 border-t-purple-500 rounded-full"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100">
@@ -246,7 +398,7 @@ export default function DateIdeas() {
             href="/"
             className="inline-block mb-4 px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 active:text-gray-800 transition-colors touch-manipulation"
           >
-            ← Back
+            ← Home
           </a>
           <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 mb-2">
             Date Ideas
@@ -260,7 +412,7 @@ export default function DateIdeas() {
             <motion.div
               className="h-full bg-gradient-to-r from-purple-500 to-amber-500"
               initial={{ width: 0 }}
-              animate={{ width: `${(completedCount / totalIdeas) * 100}%` }}
+              animate={{ width: `${totalIdeas > 0 ? (completedCount / totalIdeas) * 100 : 0}%` }}
               transition={{ duration: 0.5 }}
             />
           </div>
@@ -312,7 +464,7 @@ export default function DateIdeas() {
         {/* Categories */}
         <div className="space-y-4">
           {categories.map((category, catIndex) => {
-            const categoryCompleted = category.ideas.filter((i) => completedIds.has(i.id)).length;
+            const categoryCompleted = category.ideas.filter((i) => i.is_completed).length;
             const isSearching = searchQuery.trim().length > 0;
             const isExpanded = isSearching || expandedCategory === category.name;
 
@@ -327,7 +479,7 @@ export default function DateIdeas() {
             // Then filter by completed visibility
             const visibleIdeas = showCompleted
               ? searchFiltered
-              : searchFiltered.filter((i) => !completedIds.has(i.id));
+              : searchFiltered.filter((i) => !i.is_completed);
 
             // Hide category if searching and no matches
             if (isSearching && searchFiltered.length === 0) {
@@ -336,7 +488,7 @@ export default function DateIdeas() {
 
             return (
               <motion.div
-                key={category.name}
+                key={category.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: catIndex * 0.05 }}
@@ -374,7 +526,7 @@ export default function DateIdeas() {
                     >
                       <div className="px-4 pb-3 space-y-1">
                         {visibleIdeas.map((idea) => {
-                          const isCompleted = completedIds.has(idea.id);
+                          const isCompleted = idea.is_completed;
                           return (
                             <motion.div
                               key={idea.id}
@@ -396,7 +548,7 @@ export default function DateIdeas() {
                                     : 'border-gray-300'
                                   }
                                 `}
-                                onClick={() => toggleCompleted(idea.id)}
+                                onClick={() => toggleCompleted(idea)}
                               >
                                 {isCompleted && (
                                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -406,7 +558,7 @@ export default function DateIdeas() {
                               </div>
                               <div
                                 className="flex-1 min-w-0 cursor-pointer"
-                                onClick={() => toggleCompleted(idea.id)}
+                                onClick={() => toggleCompleted(idea)}
                               >
                                 <div className={`font-medium text-base ${isCompleted ? 'line-through text-gray-500' : 'text-gray-800'}`}>
                                   {idea.emoji && <span className="mr-1">{idea.emoji}</span>}
@@ -419,7 +571,7 @@ export default function DateIdeas() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  removeIdea(category.name, idea.id);
+                                  removeIdea(idea);
                                 }}
                                 className="opacity-0 group-hover:opacity-100 sm:opacity-0 sm:group-hover:opacity-100
                                            p-2 -mr-1 text-gray-400 hover:text-red-500 transition-all touch-manipulation
@@ -440,7 +592,7 @@ export default function DateIdeas() {
                         )}
 
                         {/* Add new idea section */}
-                        {addingToCategory === category.name ? (
+                        {addingToCategory === category.id ? (
                           <motion.div
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto' }}
@@ -463,7 +615,7 @@ export default function DateIdeas() {
                             />
                             <div className="flex gap-2 mt-2">
                               <button
-                                onClick={() => addIdea(category.name)}
+                                onClick={() => addIdea(category.id)}
                                 disabled={!newIdeaTitle.trim()}
                                 className="flex-1 px-3 py-2 text-sm bg-purple-500 text-white rounded-lg
                                            hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -484,7 +636,7 @@ export default function DateIdeas() {
                           </motion.div>
                         ) : (
                           <button
-                            onClick={() => setAddingToCategory(category.name)}
+                            onClick={() => setAddingToCategory(category.id)}
                             className="w-full mt-2 py-2 text-sm text-gray-400 hover:text-purple-500
                                        border border-dashed border-gray-200 hover:border-purple-300
                                        rounded-lg transition-colors"
@@ -525,6 +677,22 @@ export default function DateIdeas() {
           className="text-center mt-12 text-gray-400 text-sm"
         >
           <p>Tap to mark as done · Hover to remove</p>
+          <p className="mt-2">
+            Logged in as{' '}
+            <span className={currentUser === 'daniel' ? 'text-blue-500' : 'text-rose-500'}>
+              {currentUser === 'daniel' ? 'Daniel' : 'Huaiyao'}
+            </span>
+            {' · '}
+            <button
+              onClick={() => {
+                localStorage.removeItem('date-ideas-user');
+                setCurrentUser(null);
+              }}
+              className="underline hover:text-gray-600"
+            >
+              Switch
+            </button>
+          </p>
         </motion.footer>
       </main>
     </div>
