@@ -23,7 +23,7 @@ const defaultCategories = [
 ];
 
 // Default ideas to seed
-const defaultIdeas: { category: string; title: string; description?: string; emoji?: string }[] = [
+const defaultIdeas: { category: string; title: string; description?: string; emoji?: string; completed?: boolean }[] = [
   // Learn Things
   { category: 'Learn Things', title: 'DND', description: 'Join a single season' },
   { category: 'Learn Things', title: 'Dancing', emoji: '🕺', description: 'Go to a dance lesson together' },
@@ -70,7 +70,7 @@ const defaultIdeas: { category: string; title: string; description?: string; emo
   { category: 'Animals', title: 'Chester Zoo', emoji: '🦁' },
   { category: 'Animals', title: 'Safari', emoji: '🐘' },
   // Something Chilled
-  { category: 'Something Chilled', title: 'Escape Room', description: '✓ Done!' },
+  { category: 'Something Chilled', title: 'Escape Room', completed: true },
   { category: 'Something Chilled', title: 'Plan a Start-up Together', emoji: '✨' },
   { category: 'Something Chilled', title: 'Build a Fort and Sleep in it', emoji: '🛌' },
   { category: 'Something Chilled', title: 'Board Game Cafe', description: 'Spiel des Jahres games' },
@@ -91,7 +91,7 @@ const defaultIdeas: { category: string; title: string; description?: string; emo
   { category: 'Silly Ideas', title: 'PowerPoint V1', description: 'Most offensive' },
   { category: 'Silly Ideas', title: 'PowerPoint V2', description: 'Funny presentation about our lives' },
   { category: 'Silly Ideas', title: 'Fancy Dress', emoji: '🧓', description: 'Dress up as old people' },
-  { category: 'Silly Ideas', title: 'Write a Book', description: '✓ Done! Alternate sentences' },
+  { category: 'Silly Ideas', title: 'Write a Book', description: 'Alternate sentences', completed: true },
   { category: 'Silly Ideas', title: 'Conspiracy', description: 'Find one you believe and convince the other' },
   { category: 'Silly Ideas', title: 'Who Are You?', description: 'Pretend we never met in public' },
   { category: 'Silly Ideas', title: 'Day of Sins', description: 'Complete the most sins in a day' },
@@ -183,7 +183,7 @@ export default function DateIdeas() {
         title: idea.title,
         description: idea.description || null,
         emoji: idea.emoji || null,
-        is_completed: false,
+        is_completed: idea.completed || false,
       }));
 
       const { error: ideasError } = await supabase
