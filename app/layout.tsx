@@ -14,9 +14,9 @@ const crimsonPro = Crimson_Pro({
 
 export const metadata: Metadata = {
   title: "Daniel & Huaiyao",
-  description: "Our little corner of the internet",
+  description: "Some fun stuff we made",
   icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💕</text></svg>",
+    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👋</text></svg>",
   },
 };
 

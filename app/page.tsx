@@ -53,42 +53,34 @@ function AppCard({ title, description, icon, href, gradient }: AppCardProps) {
 
 const apps: AppCardProps[] = [
   {
-    title: 'Our Story Book',
-    description: 'Write our story together, one sentence at a time',
+    title: 'Story Book',
+    description: 'Writing a story together, one sentence at a time',
     icon: '📖',
     href: 'https://daniel-huaiyao-book.vercel.app',
     gradient: 'from-amber-600 to-orange-700',
   },
-  // Add more apps here as you create them!
 ];
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-rose-50 via-amber-50 to-sky-50">
-      {/* Ambient background effects */}
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100">
+      {/* Subtle background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <motion.div
-          className="absolute top-1/4 left-1/4 w-96 h-96 bg-rose-200/30 rounded-full blur-3xl"
+          className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-100/40 rounded-full blur-3xl"
           animate={{
-            scale: [1, 1.2, 1],
-            x: [0, 30, 0],
+            scale: [1, 1.1, 1],
+            x: [0, 20, 0],
           }}
-          transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+          transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
         />
         <motion.div
-          className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-sky-200/30 rounded-full blur-3xl"
+          className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-slate-200/40 rounded-full blur-3xl"
           animate={{
-            scale: [1.2, 1, 1.2],
-            x: [0, -30, 0],
+            scale: [1.1, 1, 1.1],
+            x: [0, -20, 0],
           }}
-          transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
-        />
-        <motion.div
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-amber-200/20 rounded-full blur-3xl"
-          animate={{
-            scale: [1, 1.3, 1],
-          }}
-          transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+          transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
         />
       </div>
 
@@ -101,19 +93,17 @@ export default function Home() {
           className="text-center mb-12 sm:mb-16"
         >
           <motion.div
-            className="text-6xl sm:text-7xl mb-6"
-            animate={{
-              rotate: [0, -5, 5, 0],
-            }}
-            transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+            className="text-5xl sm:text-6xl mb-6"
+            animate={{ rotate: [0, 5, -5, 0] }}
+            transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
           >
-            💕
+            👋
           </motion.div>
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-bold bg-gradient-to-r from-rose-600 via-amber-600 to-rose-600 bg-clip-text text-transparent mb-4">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-bold text-gray-800 mb-4">
             Daniel & Huaiyao
           </h1>
-          <p className="text-lg sm:text-xl text-gray-600 max-w-md mx-auto">
-            Our little corner of the internet
+          <p className="text-lg sm:text-xl text-gray-500 max-w-md mx-auto">
+            Some fun stuff we made
           </p>
         </motion.div>
 
@@ -142,7 +132,7 @@ export default function Home() {
             transition={{ delay: 0.5 }}
             className="rounded-2xl p-6 sm:p-8 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center min-h-[200px] text-gray-400"
           >
-            <div className="text-4xl mb-3">✨</div>
+            <div className="text-4xl mb-3">🚀</div>
             <p className="font-medium">More coming soon...</p>
           </motion.div>
         </motion.div>
@@ -152,9 +142,9 @@ export default function Home() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.8 }}
-          className="text-center mt-16 text-gray-500 text-sm"
+          className="text-center mt-16 text-gray-400 text-sm"
         >
-          <p>Made with love</p>
+          <p>Built for fun</p>
         </motion.footer>
       </main>
     </div>
