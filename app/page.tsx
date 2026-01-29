@@ -59,6 +59,13 @@ const apps: AppCardProps[] = [
     href: 'https://daniel-huaiyao-book.vercel.app',
     gradient: 'from-amber-600 to-orange-700',
   },
+  {
+    title: 'Hive',
+    description: 'The buzzing strategy board game',
+    icon: '🐝',
+    href: 'https://daniel-huaiyao-hive.vercel.app',
+    gradient: 'from-yellow-500 to-amber-600',
+  },
 ];
 
 export default function Home() {
