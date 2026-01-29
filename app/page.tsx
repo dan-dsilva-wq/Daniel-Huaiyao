@@ -22,10 +22,11 @@ function AppCard({ title, description, icon, href, gradient }: AppCardProps) {
       whileHover={{ scale: 1.02, y: -4 }}
       whileTap={{ scale: 0.98 }}
       className={`
-        relative overflow-hidden rounded-2xl p-6 sm:p-8
+        relative overflow-hidden rounded-2xl p-5 sm:p-8
         bg-gradient-to-br ${gradient}
         shadow-lg hover:shadow-xl transition-shadow
-        flex flex-col gap-4 min-h-[200px]
+        flex flex-col gap-3 sm:gap-4 min-h-[160px] sm:min-h-[200px]
+        active:scale-[0.98] touch-manipulation
       `}
     >
       <motion.div
