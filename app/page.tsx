@@ -11,11 +11,12 @@ interface AppCardProps {
 }
 
 function AppCard({ title, description, icon, href, gradient }: AppCardProps) {
+  const isExternal = href.startsWith('http');
   return (
     <motion.a
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+      target={isExternal ? '_blank' : undefined}
+      rel={isExternal ? 'noopener noreferrer' : undefined}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ scale: 1.02, y: -4 }}
@@ -65,6 +66,13 @@ const apps: AppCardProps[] = [
     icon: '🐝',
     href: 'https://daniel-huaiyao-hive.vercel.app',
     gradient: 'from-yellow-500 to-amber-600',
+  },
+  {
+    title: 'Date Ideas',
+    description: 'Track our bucket list of things to do',
+    icon: '✨',
+    href: '/dates',
+    gradient: 'from-purple-500 to-pink-500',
   },
 ];
 
