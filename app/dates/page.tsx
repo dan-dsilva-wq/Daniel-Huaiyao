@@ -139,9 +139,16 @@ export default function DateIdeas() {
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(true);
+  const [addingToCategory, setAddingToCategory] = useState<string | null>(null);
+  const [newIdeaTitle, setNewIdeaTitle] = useState('');
+  const [newIdeaDescription, setNewIdeaDescription] = useState('');
 
-  // Load completed from localStorage
+  // Load categories and completed from localStorage
   useEffect(() => {
+    const savedCategories = localStorage.getItem('date-ideas-categories');
+    if (savedCategories) {
+      setCategories(JSON.parse(savedCategories));
+    }
     const saved = localStorage.getItem('date-ideas-completed');
     if (saved) {
       setCompletedIds(new Set(JSON.parse(saved)));
@@ -157,6 +164,52 @@ export default function DateIdeas() {
       } else {
         newSet.add(id);
       }
+      localStorage.setItem('date-ideas-completed', JSON.stringify([...newSet]));
+      return newSet;
+    });
+  };
+
+  // Add a new idea to a category
+  const addIdea = (categoryName: string) => {
+    if (!newIdeaTitle.trim()) return;
+
+    const newIdea: DateIdea = {
+      id: `custom-${Date.now()}`,
+      title: newIdeaTitle.trim(),
+      description: newIdeaDescription.trim() || undefined,
+    };
+
+    setCategories((prev) => {
+      const updated = prev.map((cat) =>
+        cat.name === categoryName
+          ? { ...cat, ideas: [...cat.ideas, newIdea] }
+          : cat
+      );
+      localStorage.setItem('date-ideas-categories', JSON.stringify(updated));
+      return updated;
+    });
+
+    setNewIdeaTitle('');
+    setNewIdeaDescription('');
+    setAddingToCategory(null);
+  };
+
+  // Remove an idea from a category
+  const removeIdea = (categoryName: string, ideaId: string) => {
+    setCategories((prev) => {
+      const updated = prev.map((cat) =>
+        cat.name === categoryName
+          ? { ...cat, ideas: cat.ideas.filter((i) => i.id !== ideaId) }
+          : cat
+      );
+      localStorage.setItem('date-ideas-categories', JSON.stringify(updated));
+      return updated;
+    });
+
+    // Also remove from completed if it was completed
+    setCompletedIds((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(ideaId);
       localStorage.setItem('date-ideas-completed', JSON.stringify([...newSet]));
       return newSet;
     });
@@ -279,21 +332,21 @@ export default function DateIdeas() {
                               initial={{ opacity: 0, x: -10 }}
                               animate={{ opacity: 1, x: 0 }}
                               className={`
-                                flex items-start gap-3 p-3 rounded-lg cursor-pointer
+                                group flex items-start gap-3 p-3 rounded-lg
                                 hover:bg-gray-100/50 active:bg-gray-100 transition-colors touch-manipulation
                                 ${isCompleted ? 'opacity-60' : ''}
                               `}
-                              onClick={() => toggleCompleted(idea.id)}
                             >
                               <div
                                 className={`
                                   mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0
-                                  transition-colors
+                                  transition-colors cursor-pointer
                                   ${isCompleted
                                     ? 'bg-green-500 border-green-500 text-white'
                                     : 'border-gray-300'
                                   }
                                 `}
+                                onClick={() => toggleCompleted(idea.id)}
                               >
                                 {isCompleted && (
                                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -301,7 +354,10 @@ export default function DateIdeas() {
                                   </svg>
                                 )}
                               </div>
-                              <div className="flex-1 min-w-0">
+                              <div
+                                className="flex-1 min-w-0 cursor-pointer"
+                                onClick={() => toggleCompleted(idea.id)}
+                              >
                                 <div className={`font-medium text-base ${isCompleted ? 'line-through text-gray-500' : 'text-gray-800'}`}>
                                   {idea.emoji && <span className="mr-1">{idea.emoji}</span>}
                                   {idea.title}
@@ -310,6 +366,20 @@ export default function DateIdeas() {
                                   <div className="text-sm text-gray-500 mt-0.5">{idea.description}</div>
                                 )}
                               </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeIdea(category.name, idea.id);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 sm:opacity-0 sm:group-hover:opacity-100
+                                           p-2 -mr-1 text-gray-400 hover:text-red-500 transition-all touch-manipulation
+                                           active:opacity-100"
+                                title="Remove idea"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
                             </motion.div>
                           );
                         })}
@@ -317,6 +387,60 @@ export default function DateIdeas() {
                           <p className="text-sm text-gray-400 text-center py-2">
                             All done in this category! 🎉
                           </p>
+                        )}
+
+                        {/* Add new idea section */}
+                        {addingToCategory === category.name ? (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            className="pt-2 border-t border-gray-100 mt-2"
+                          >
+                            <input
+                              type="text"
+                              placeholder="Idea title"
+                              value={newIdeaTitle}
+                              onChange={(e) => setNewIdeaTitle(e.target.value)}
+                              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                              autoFocus
+                            />
+                            <input
+                              type="text"
+                              placeholder="Description (optional)"
+                              value={newIdeaDescription}
+                              onChange={(e) => setNewIdeaDescription(e.target.value)}
+                              className="w-full px-3 py-2 mt-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-300"
+                            />
+                            <div className="flex gap-2 mt-2">
+                              <button
+                                onClick={() => addIdea(category.name)}
+                                disabled={!newIdeaTitle.trim()}
+                                className="flex-1 px-3 py-2 text-sm bg-purple-500 text-white rounded-lg
+                                           hover:bg-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              >
+                                Add
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setAddingToCategory(null);
+                                  setNewIdeaTitle('');
+                                  setNewIdeaDescription('');
+                                }}
+                                className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </motion.div>
+                        ) : (
+                          <button
+                            onClick={() => setAddingToCategory(category.name)}
+                            className="w-full mt-2 py-2 text-sm text-gray-400 hover:text-purple-500
+                                       border border-dashed border-gray-200 hover:border-purple-300
+                                       rounded-lg transition-colors"
+                          >
+                            + Add idea
+                          </button>
                         )}
                       </div>
                     </motion.div>
@@ -334,7 +458,7 @@ export default function DateIdeas() {
           transition={{ delay: 0.5 }}
           className="text-center mt-12 text-gray-400 text-sm"
         >
-          <p>Tap to mark as done</p>
+          <p>Tap to mark as done · Hover to remove</p>
         </motion.footer>
       </main>
     </div>
