@@ -318,12 +318,12 @@ export default function Book({ currentWriter, title = 'To be seen...' }: BookPro
         {/* Home button */}
         <motion.a
           href="https://daniel-huaiyao.vercel.app"
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-sm font-medium shadow-lg bg-white/80 text-gray-600 hover:bg-white transition-colors"
+          className="fixed top-4 left-4 px-4 py-2 rounded-full text-sm font-medium shadow-lg bg-white/80 text-gray-600 hover:bg-white transition-colors"
         >
           ← Home
         </motion.a>
@@ -557,12 +557,12 @@ export default function Book({ currentWriter, title = 'To be seen...' }: BookPro
       {/* Home button */}
       <motion.a
         href="https://daniel-huaiyao.vercel.app"
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5 }}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
-        className="fixed bottom-2 left-2 sm:bottom-4 sm:left-4 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full text-xs sm:text-sm font-medium shadow-lg bg-white/80 text-gray-600 hover:bg-white transition-colors"
+        className="fixed top-2 left-2 sm:top-4 sm:left-4 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full text-xs sm:text-sm font-medium shadow-lg bg-white/80 text-gray-600 hover:bg-white transition-colors"
       >
         ← Home
       </motion.a>
