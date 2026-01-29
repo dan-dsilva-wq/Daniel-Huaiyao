@@ -1,0 +1,189 @@
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #FDF8F3;
+  --foreground: #3D3D3D;
+}
+
+body {
+  color: var(--foreground);
+  background: linear-gradient(135deg, #FDF8F3 0%, #F5EDE4 50%, #EDE4DA 100%);
+  font-family: 'Playfair Display', Georgia, serif;
+  min-height: 100vh;
+}
+
+/* Paper texture overlay */
+.paper-texture {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Book page styling */
+.book-page {
+  background: linear-gradient(to right,
+    #FFFEF7 0%,
+    #FFFDF5 85%,
+    #F5F0E8 100%
+  );
+  box-shadow:
+    inset -2px 0 10px rgba(0, 0, 0, 0.05),
+    inset 0 0 30px rgba(139, 115, 85, 0.03);
+}
+
+.book-page-left {
+  background: linear-gradient(to left,
+    #FFFEF7 0%,
+    #FFFDF5 85%,
+    #F5F0E8 100%
+  );
+  box-shadow:
+    inset 2px 0 10px rgba(0, 0, 0, 0.05),
+    inset 0 0 30px rgba(139, 115, 85, 0.03);
+}
+
+/* Handwriting style for sentences */
+.handwriting {
+  font-family: 'Caveat', cursive;
+  font-size: 1.5rem;
+  line-height: 1.3;
+}
+
+/* Sentence styling by writer */
+.sentence-daniel {
+  color: #1E40AF;
+  border-left: 3px solid #3B82F6;
+  padding-left: 1rem;
+  background: linear-gradient(90deg, rgba(219, 234, 254, 0.3) 0%, transparent 100%);
+}
+
+.sentence-huaiyao {
+  color: #9F1239;
+  border-left: 3px solid #E11D48;
+  padding-left: 1rem;
+  background: linear-gradient(90deg, rgba(255, 228, 232, 0.4) 0%, transparent 100%);
+}
+
+/* Page curl effect */
+.page-curl {
+  position: relative;
+}
+
+.page-curl::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, transparent 50%, #F5F0E8 50%);
+  border-radius: 0 0 0 10px;
+  box-shadow: -2px -2px 5px rgba(0, 0, 0, 0.05);
+}
+
+/* Input styling */
+.write-input {
+  font-family: 'Caveat', cursive;
+  font-size: 1.25rem;
+  background: rgba(255, 255, 255, 0.8);
+  border: 2px dashed #D4C5B5;
+  transition: all 0.3s ease;
+}
+
+.write-input:focus {
+  border-color: #8B7355;
+  box-shadow: 0 0 20px rgba(139, 115, 85, 0.2);
+  outline: none;
+}
+
+/* Book cover */
+.book-cover {
+  background: linear-gradient(180deg,
+    #8B7355 0%,
+    #6B5344 50%,
+    #5A4436 100%
+  );
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.3),
+    inset 0 0 40px rgba(255, 255, 255, 0.1);
+}
+
+/* Spine effect */
+.book-spine {
+  background: linear-gradient(90deg,
+    #4A3A2E 0%,
+    #6B5344 50%,
+    #5A4436 100%
+  );
+}
+
+/* Turn indicator pulse */
+.turn-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+
+/* Page flip animation */
+.page-flip-enter {
+  transform: rotateY(0deg);
+  transform-origin: left center;
+}
+
+.page-flip-exit {
+  transform: rotateY(-180deg);
+  transform-origin: left center;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #F5F0E8;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #D4C5B5;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #8B7355;
+}
+
+/* Loading shimmer */
+.shimmer {
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
