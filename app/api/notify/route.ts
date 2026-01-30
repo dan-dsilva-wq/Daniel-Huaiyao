@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 const PUSHOVER_API = 'https://api.pushover.net/1/messages.json';
 const PUSHOVER_APP_TOKEN = 'awjs2cyd1q9m56vrpyruv52y4826m6';
@@ -9,12 +8,18 @@ const USER_KEYS = {
   huaiyao: 'utu9t97tkvx5vvcookhhogqkh4axbf',
 };
 
-// Rate limit: 10 minutes
-const RATE_LIMIT_MS = 10 * 60 * 1000;
+// Quiet hours: only send between 9 AM and 11 PM (Eastern Time)
+const QUIET_HOURS_START = 23; // 11 PM
+const QUIET_HOURS_END = 9;    // 9 AM
+const TIMEZONE = 'America/New_York';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+function isWithinAllowedHours(): boolean {
+  const now = new Date();
+  const hour = parseInt(now.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: TIMEZONE }));
+  // Allowed: 9 AM (9) to 11 PM (23)
+  // NOT allowed: 11 PM (23) to 9 AM (9)
+  return hour >= QUIET_HOURS_END && hour < QUIET_HOURS_START;
+}
 
 type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited';
 
@@ -29,27 +34,6 @@ const ACTION_MESSAGES: Record<ActionType, string> = {
   place_visited: 'marked a place as visited',
 };
 
-async function canSendNotification(logId: string): Promise<boolean> {
-  const { data } = await supabase
-    .from('notification_log')
-    .select('last_sent')
-    .eq('id', logId)
-    .single();
-
-  if (!data) return true;
-
-  const lastSent = new Date(data.last_sent).getTime();
-  const now = Date.now();
-
-  return now - lastSent >= RATE_LIMIT_MS;
-}
-
-async function updateLastSent(logId: string): Promise<void> {
-  await supabase
-    .from('notification_log')
-    .upsert({ id: logId, last_sent: new Date().toISOString() });
-}
-
 export async function POST(request: Request) {
   try {
     const { action, title, user } = await request.json() as {
@@ -62,20 +46,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Determine notification type
-    const isQuiz = action === 'question_added' || action === 'question_answered';
-    const isMap = action === 'place_added' || action === 'place_visited';
-    const logId = isQuiz ? 'quiz' : isMap ? 'map' : 'date-ideas';
-
-    // Check rate limit
-    const canSend = await canSendNotification(logId);
-    if (!canSend) {
+    // Check if within allowed hours (9 AM - 11 PM Eastern)
+    if (!isWithinAllowedHours()) {
       return NextResponse.json({
         success: true,
         skipped: true,
-        reason: 'Rate limited (10 min cooldown)'
+        reason: 'Outside allowed hours (9 AM - 11 PM Eastern)'
       });
     }
+
+    // Determine notification type
+    const isQuiz = action === 'question_added' || action === 'question_answered';
+    const isMap = action === 'place_added' || action === 'place_visited';
 
     // Notify the OTHER person
     const recipientKey = user === 'daniel' ? USER_KEYS.huaiyao : USER_KEYS.daniel;
@@ -112,9 +94,6 @@ export async function POST(request: Request) {
       console.error('Pushover error:', errorText);
       return NextResponse.json({ error: 'Failed to send notification' }, { status: 500 });
     }
-
-    // Update last sent time
-    await updateLastSent(logId);
 
     return NextResponse.json({ success: true });
   } catch (error) {
