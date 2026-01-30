@@ -259,14 +259,32 @@ export default function MapPage() {
     setClickedLocation({ name, key: locationKey, isState });
   };
 
-  const getLocationStatus = (locationKey: string, name: string): 'none' | 'wishlist' | 'visited' => {
+  const getLocationInfo = (locationKey: string, name: string): { status: 'none' | 'wishlist' | 'visited'; owner: 'daniel' | 'huaiyao' | null } => {
     const place = placesByLocation.get(locationKey) || placesByLocation.get(name);
-    if (!place) return 'none';
-    return place.status;
+    if (!place) return { status: 'none', owner: null };
+    return { status: place.status, owner: place.added_by };
   };
 
   const getPlaceForLocation = (locationKey: string, name: string): Place | undefined => {
     return placesByLocation.get(locationKey) || placesByLocation.get(name);
+  };
+
+  // Color function based on owner and status
+  const getLocationColor = (locationKey: string, name: string, regionCode: string): string => {
+    const { status, owner } = getLocationInfo(locationKey, name);
+    const regionColors = REGION_COLORS[regionCode] || DEFAULT_COLOR;
+
+    if (status === 'none') return regionColors.default;
+
+    // Daniel = blue shades, Huaiyao = rose shades
+    if (owner === 'daniel') {
+      return status === 'visited' ? '#1d4ed8' : '#93c5fd'; // blue-700 : blue-300
+    } else if (owner === 'huaiyao') {
+      return status === 'visited' ? '#be123c' : '#fda4af'; // rose-700 : rose-300
+    }
+
+    // Fallback to region colors
+    return status === 'visited' ? regionColors.visited : regionColors.wishlist;
   };
 
   const totalWishlist = regions.reduce((sum, r) => sum + r.places.filter(p => p.status === 'wishlist').length, 0);
@@ -366,7 +384,7 @@ export default function MapPage() {
                   geographies.map((geo) => {
                     const stateName = geo.properties.name;
                     const stateCode = US_STATES[stateName];
-                    const status = getLocationStatus(stateCode, stateName);
+                    const fillColor = getLocationColor(stateCode, stateName, 'north-america');
                     const colors = REGION_COLORS['north-america'];
 
                     return (
@@ -376,7 +394,7 @@ export default function MapPage() {
                         onClick={() => handleLocationClick(stateName, stateCode, true)}
                         style={{
                           default: {
-                            fill: status === 'visited' ? colors.visited : status === 'wishlist' ? colors.wishlist : colors.default,
+                            fill: fillColor,
                             stroke: '#fff',
                             strokeWidth: 0.5,
                             outline: 'none',
@@ -418,7 +436,7 @@ export default function MapPage() {
                     .filter((geo) => COUNTRY_TO_REGION[geo.properties.name] === zoomedRegion)
                     .map((geo) => {
                       const countryName = geo.properties.name;
-                      const status = getLocationStatus(countryName, countryName);
+                      const fillColor = getLocationColor(countryName, countryName, zoomedRegion);
                       const colors = REGION_COLORS[zoomedRegion] || DEFAULT_COLOR;
 
                       return (
@@ -428,7 +446,7 @@ export default function MapPage() {
                           onClick={() => handleLocationClick(countryName, countryName, false)}
                           style={{
                             default: {
-                              fill: status === 'visited' ? colors.visited : status === 'wishlist' ? colors.wishlist : colors.default,
+                              fill: fillColor,
                               stroke: '#fff',
                               strokeWidth: 0.5,
                               outline: 'none',
@@ -467,7 +485,7 @@ export default function MapPage() {
                     const countryName = geo.properties.name;
                     const regionCode = COUNTRY_TO_REGION[countryName];
                     const colors = regionCode ? REGION_COLORS[regionCode] : DEFAULT_COLOR;
-                    const status = getLocationStatus(countryName, countryName);
+                    const fillColor = regionCode ? getLocationColor(countryName, countryName, regionCode) : colors.default;
 
                     return (
                       <Geography
@@ -476,7 +494,7 @@ export default function MapPage() {
                         onClick={() => regionCode && setZoomedRegion(regionCode)}
                         style={{
                           default: {
-                            fill: status === 'visited' ? colors.visited : status === 'wishlist' ? colors.wishlist : colors.default,
+                            fill: fillColor,
                             stroke: '#fff',
                             strokeWidth: 0.3,
                             outline: 'none',
@@ -507,16 +525,24 @@ export default function MapPage() {
           {/* Legend */}
           <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500">
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#38bdf8' }} />
-              <span>Not visited</span>
+              <div className="w-4 h-4 rounded bg-gray-300" />
+              <span>Not added</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#7dd3fc' }} />
-              <span>Wishlist</span>
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#93c5fd' }} />
+              <span>Daniel wishlist</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#0369a1' }} />
-              <span>Visited</span>
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#1d4ed8' }} />
+              <span>Daniel visited</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#fda4af' }} />
+              <span>Huaiyao wishlist</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#be123c' }} />
+              <span>Huaiyao visited</span>
             </div>
           </div>
 
@@ -579,21 +605,39 @@ export default function MapPage() {
                   if (!place) {
                     return (
                       <div className="space-y-3">
-                        <button
-                          onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'wishlist')}
-                          className="w-full py-3 bg-teal-500 text-white rounded-xl font-medium hover:bg-teal-600 transition-colors"
-                        >
-                          Add to Wishlist
-                        </button>
-                        <button
-                          onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'visited')}
-                          className="w-full py-3 bg-green-500 text-white rounded-xl font-medium hover:bg-green-600 transition-colors"
-                        >
-                          Mark as Visited
-                        </button>
+                        <p className="text-sm text-gray-500 mb-2">Add to wishlist:</p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'wishlist')}
+                            className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-medium hover:bg-blue-600 transition-colors"
+                          >
+                            Daniel
+                          </button>
+                          <button
+                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'wishlist')}
+                            className="flex-1 py-3 bg-rose-500 text-white rounded-xl font-medium hover:bg-rose-600 transition-colors"
+                          >
+                            Huaiyao
+                          </button>
+                        </div>
+                        <p className="text-sm text-gray-500 mb-2 mt-4">Or mark as visited:</p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'visited')}
+                            className="flex-1 py-3 bg-blue-700 text-white rounded-xl font-medium hover:bg-blue-800 transition-colors"
+                          >
+                            Daniel
+                          </button>
+                          <button
+                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'visited')}
+                            className="flex-1 py-3 bg-rose-700 text-white rounded-xl font-medium hover:bg-rose-800 transition-colors"
+                          >
+                            Huaiyao
+                          </button>
+                        </div>
                         <button
                           onClick={() => setClickedLocation(null)}
-                          className="w-full py-2 text-gray-500 hover:text-gray-700 transition-colors"
+                          className="w-full py-2 text-gray-500 hover:text-gray-700 transition-colors mt-2"
                         >
                           Cancel
                         </button>
@@ -601,23 +645,24 @@ export default function MapPage() {
                     );
                   }
 
+                  const isOwner = place.added_by === currentUser;
+                  const ownerName = place.added_by === 'daniel' ? 'Daniel' : 'Huaiyao';
+                  const ownerColor = place.added_by === 'daniel' ? 'blue' : 'rose';
+
                   return (
                     <div className="space-y-3">
                       <div className={`text-sm px-3 py-2 rounded-lg ${
-                        place.status === 'visited' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                        place.added_by === 'daniel'
+                          ? (place.status === 'visited' ? 'bg-blue-200 text-blue-800' : 'bg-blue-100 text-blue-700')
+                          : (place.status === 'visited' ? 'bg-rose-200 text-rose-800' : 'bg-rose-100 text-rose-700')
                       }`}>
-                        {place.status === 'visited' ? 'You have visited this place!' : 'On your wishlist'}
-                        {place.added_by && (
-                          <span className="ml-2 opacity-70">
-                            (added by {place.added_by === 'daniel' ? 'Daniel' : 'Huaiyao'})
-                          </span>
-                        )}
+                        <span className="font-medium">{ownerName}'s {place.status === 'visited' ? 'visited' : 'wishlist'}</span>
                       </div>
 
                       {place.status === 'wishlist' && (
                         <button
                           onClick={() => markAsVisited(place)}
-                          className="w-full py-3 bg-green-500 text-white rounded-xl font-medium hover:bg-green-600 transition-colors"
+                          className={`w-full py-3 ${place.added_by === 'daniel' ? 'bg-blue-700 hover:bg-blue-800' : 'bg-rose-700 hover:bg-rose-800'} text-white rounded-xl font-medium transition-colors`}
                         >
                           Mark as Visited
                         </button>
@@ -626,7 +671,7 @@ export default function MapPage() {
                       {place.status === 'visited' && (
                         <button
                           onClick={() => markAsVisited(place)}
-                          className="w-full py-3 bg-blue-500 text-white rounded-xl font-medium hover:bg-blue-600 transition-colors"
+                          className={`w-full py-3 ${place.added_by === 'daniel' ? 'bg-blue-500 hover:bg-blue-600' : 'bg-rose-500 hover:bg-rose-600'} text-white rounded-xl font-medium transition-colors`}
                         >
                           Move back to Wishlist
                         </button>
@@ -636,7 +681,7 @@ export default function MapPage() {
                         onClick={() => removePlace(place)}
                         className="w-full py-2 text-red-500 hover:text-red-700 transition-colors text-sm"
                       >
-                        Remove from list
+                        Remove
                       </button>
 
                       <button
