@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase, isSupabaseConfigured, DateIdea, Category } from '@/lib/supabase';
+import { supabase, isSupabaseConfigured, DateIdea } from '@/lib/supabase';
 
 interface LocalCategory {
   id: string;
@@ -11,100 +11,6 @@ interface LocalCategory {
   ideas: DateIdea[];
 }
 
-// Default categories for initial setup
-const defaultCategories = [
-  { name: 'Learn Things', emoji: '📚', sort_order: 1 },
-  { name: 'Feeling Adventurous', emoji: '🏔️', sort_order: 2 },
-  { name: 'Animals', emoji: '🦁', sort_order: 3 },
-  { name: 'Something Chilled', emoji: '😌', sort_order: 4 },
-  { name: 'Active & Fun', emoji: '🎯', sort_order: 5 },
-  { name: 'Silly Ideas', emoji: '🤪', sort_order: 6 },
-  { name: 'Other', emoji: '✨', sort_order: 7 },
-];
-
-// Default ideas to seed
-const defaultIdeas: { category: string; title: string; description?: string; emoji?: string; completed?: boolean }[] = [
-  // Learn Things
-  { category: 'Learn Things', title: 'DND', description: 'Join a single season' },
-  { category: 'Learn Things', title: 'Dancing', emoji: '🕺', description: 'Go to a dance lesson together' },
-  { category: 'Learn Things', title: 'Archery', emoji: '🏹' },
-  { category: 'Learn Things', title: 'Website Battle', description: 'First to £10 profit' },
-  { category: 'Learn Things', title: 'Kalimba' },
-  { category: 'Learn Things', title: 'Navigation', description: 'Map + compass' },
-  { category: 'Learn Things', title: 'Memory Palaces' },
-  { category: 'Learn Things', title: 'Calligraphy' },
-  { category: 'Learn Things', title: 'Poker' },
-  { category: 'Learn Things', title: 'Trust-building Exercises' },
-  { category: 'Learn Things', title: 'Fire-making' },
-  { category: 'Learn Things', title: 'Conflict Resolution Skills' },
-  { category: 'Learn Things', title: 'Magic Trick' },
-  { category: 'Learn Things', title: 'Chess Properly', description: 'Openings, not vibes' },
-  { category: 'Learn Things', title: 'Foraging' },
-  { category: 'Learn Things', title: 'First Aid' },
-  { category: 'Learn Things', title: 'Negotiation Skills' },
-  { category: 'Learn Things', title: 'Sign Language Basics' },
-  { category: 'Learn Things', title: 'Morse Code', description: 'Ridiculous but fun' },
-  { category: 'Learn Things', title: 'Memory Techniques' },
-  { category: 'Learn Things', title: 'Car Maintenance Basics' },
-  { category: 'Learn Things', title: 'Wilderness Survival Basics' },
-  { category: 'Learn Things', title: 'Interrogation Skills' },
-  { category: 'Learn Things', title: 'Wild Hunting' },
-  { category: 'Learn Things', title: 'Solve Rubix Cube' },
-  // Feeling Adventurous
-  { category: 'Feeling Adventurous', title: 'Abseiling' },
-  { category: 'Feeling Adventurous', title: 'Aqueduct' },
-  { category: 'Feeling Adventurous', title: 'Coastal Foraging' },
-  { category: 'Feeling Adventurous', title: 'Hilbre Island', description: 'Chicken edition' },
-  { category: 'Feeling Adventurous', title: 'Waterfall Pool Swim' },
-  { category: 'Feeling Adventurous', title: 'Swim in the Sea', emoji: '🦈' },
-  { category: 'Feeling Adventurous', title: 'Beach Barbeque' },
-  { category: 'Feeling Adventurous', title: 'Wild Camping' },
-  { category: 'Feeling Adventurous', title: 'Hike up a Mountain' },
-  { category: 'Feeling Adventurous', title: 'Treasure Hunting', emoji: '🧭' },
-  { category: 'Feeling Adventurous', title: 'Sea Rock Walking' },
-  { category: 'Feeling Adventurous', title: 'Adventure Hardmode', description: 'No GPS, no phones' },
-  { category: 'Feeling Adventurous', title: 'Find the Aurora' },
-  // Animals
-  { category: 'Animals', title: 'Aquarium', emoji: '🐠' },
-  { category: 'Animals', title: 'Animal Shelter', emoji: '🐶' },
-  { category: 'Animals', title: 'Chester Zoo', emoji: '🦁' },
-  { category: 'Animals', title: 'Safari', emoji: '🐘' },
-  // Something Chilled
-  { category: 'Something Chilled', title: 'Escape Room', completed: true },
-  { category: 'Something Chilled', title: 'Plan a Start-up Together', emoji: '✨' },
-  { category: 'Something Chilled', title: 'Build a Fort and Sleep in it', emoji: '🛌' },
-  { category: 'Something Chilled', title: 'Board Game Cafe', description: 'Spiel des Jahres games' },
-  { category: 'Something Chilled', title: "Films Daniel Hasn't Seen" },
-  { category: 'Something Chilled', title: 'Dish Off', description: 'Compete to make the best meal' },
-  // Active & Fun
-  { category: 'Active & Fun', title: 'Sport Fantastic', emoji: '🏑', description: 'Try a new sport group together' },
-  { category: 'Active & Fun', title: 'The Eden Project' },
-  { category: 'Active & Fun', title: 'Trampoline Park', emoji: '🦘' },
-  { category: 'Active & Fun', title: 'Real Go Karting', emoji: '🏎️' },
-  { category: 'Active & Fun', title: 'Arcade', emoji: '🎟️', description: 'Old school ticket competition' },
-  { category: 'Active & Fun', title: 'Paintball' },
-  { category: 'Active & Fun', title: 'Laser Tag', emoji: '🔫' },
-  { category: 'Active & Fun', title: 'Random European Country' },
-  { category: 'Active & Fun', title: 'Go Ape', emoji: '🦧' },
-  { category: 'Active & Fun', title: 'Ninja Warrior' },
-  // Silly Ideas
-  { category: 'Silly Ideas', title: 'PowerPoint V1', description: 'Most offensive' },
-  { category: 'Silly Ideas', title: 'PowerPoint V2', description: 'Funny presentation about our lives' },
-  { category: 'Silly Ideas', title: 'Fancy Dress', emoji: '🧓', description: 'Dress up as old people' },
-  { category: 'Silly Ideas', title: 'Write a Book', description: 'Alternate sentences', completed: true },
-  { category: 'Silly Ideas', title: 'Conspiracy', description: 'Find one you believe and convince the other' },
-  { category: 'Silly Ideas', title: 'Who Are You?', description: 'Pretend we never met in public' },
-  { category: 'Silly Ideas', title: 'Day of Sins', description: 'Complete the most sins in a day' },
-  { category: 'Silly Ideas', title: 'PowerPoint V3', description: 'Zombie apocalypse plan' },
-  { category: 'Silly Ideas', title: 'Sex Club' },
-  { category: 'Silly Ideas', title: 'Post Mortem', description: 'Write a bibliography about each other' },
-  { category: 'Silly Ideas', title: 'Stand Up', description: 'Write the best routine in 1-2 hours' },
-  { category: 'Silly Ideas', title: 'Junky Hustling', description: 'Make £100 net profit first' },
-  { category: 'Silly Ideas', title: 'Lightsaber Combat Academy' },
-  // Other
-  { category: 'Other', title: 'Ice Skating', emoji: '⛸️' },
-  { category: 'Other', title: 'Jury Experience' },
-];
 
 export default function DateIdeas() {
   const [categories, setCategories] = useState<LocalCategory[]>([]);
@@ -117,7 +23,7 @@ export default function DateIdeas() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
 
-  // Fetch data from Supabase
+  // Fetch data from Supabase using RPC
   const fetchData = useCallback(async () => {
     if (!isSupabaseConfigured) {
       setIsLoading(false);
@@ -125,34 +31,35 @@ export default function DateIdeas() {
     }
 
     try {
-      // Fetch categories
-      const { data: catData, error: catError } = await supabase
-        .from('date_categories')
-        .select('*')
-        .order('sort_order', { ascending: true });
+      // Use RPC function to get all categories with ideas
+      const { data, error } = await supabase.rpc('get_date_categories');
 
-      if (catError) throw catError;
-
-      // Fetch all ideas
-      const { data: ideasData, error: ideasError } = await supabase
-        .from('date_ideas')
-        .select('*')
-        .order('created_at', { ascending: true });
-
-      if (ideasError) throw ideasError;
-
-      // If no categories exist, seed the database
-      if (!catData || catData.length === 0) {
-        await seedDatabase();
-        return fetchData();
+      if (error) {
+        console.error('RPC error:', error);
+        throw error;
       }
 
-      // Group ideas by category
-      const groupedCategories: LocalCategory[] = (catData as Category[]).map((cat) => ({
+      // If no data, the function returns null
+      if (!data || (Array.isArray(data) && data.length === 0)) {
+        // Database is empty, but we can't seed via RPC without more functions
+        // Show empty state
+        setCategories([]);
+        setIsLoading(false);
+        return;
+      }
+
+      // Transform RPC response to LocalCategory format
+      const groupedCategories: LocalCategory[] = (data as {
+        id: string;
+        name: string;
+        emoji: string;
+        sort_order: number;
+        ideas: DateIdea[];
+      }[]).map((cat) => ({
         id: cat.id,
         name: cat.name,
         emoji: cat.emoji,
-        ideas: (ideasData as DateIdea[]).filter((idea) => idea.category_id === cat.id),
+        ideas: cat.ideas || [],
       }));
 
       setCategories(groupedCategories);
@@ -163,71 +70,14 @@ export default function DateIdeas() {
     setIsLoading(false);
   }, []);
 
-  // Seed the database with default data
-  const seedDatabase = async () => {
-    try {
-      // Insert categories
-      const { data: newCats, error: catError } = await supabase
-        .from('date_categories')
-        .insert(defaultCategories)
-        .select();
 
-      if (catError) throw catError;
-
-      // Create a map of category names to IDs
-      const catMap = new Map((newCats as Category[]).map((c) => [c.name, c.id]));
-
-      // Insert ideas
-      const ideasToInsert = defaultIdeas.map((idea) => ({
-        category_id: catMap.get(idea.category),
-        title: idea.title,
-        description: idea.description || null,
-        emoji: idea.emoji || null,
-        is_completed: idea.completed || false,
-      }));
-
-      const { error: ideasError } = await supabase
-        .from('date_ideas')
-        .insert(ideasToInsert);
-
-      if (ideasError) throw ideasError;
-    } catch (error) {
-      console.error('Error seeding database:', error);
-    }
-  };
-
-  // Load data and set up realtime subscription
+  // Load data on mount
   useEffect(() => {
     // Check for saved user preference
     const savedUser = localStorage.getItem('date-ideas-user') as 'daniel' | 'huaiyao' | null;
     setCurrentUser(savedUser);
 
     fetchData();
-
-    if (!isSupabaseConfigured) return;
-
-    // Subscribe to realtime changes
-    const channel = supabase
-      .channel('date-ideas-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'date_ideas' },
-        () => {
-          fetchData();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'date_categories' },
-        () => {
-          fetchData();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [fetchData]);
 
   // Send notification
@@ -245,33 +95,31 @@ export default function DateIdeas() {
     }
   };
 
-  // Toggle completed status
+  // Toggle completed status using RPC
   const toggleCompleted = async (idea: DateIdea) => {
-    const newStatus = !idea.is_completed;
-
-    const { error } = await supabase
-      .from('date_ideas')
-      .update({ is_completed: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', idea.id);
+    const { data, error } = await supabase.rpc('toggle_date_idea', {
+      p_idea_id: idea.id
+    });
 
     if (error) {
       console.error('Error updating idea:', error);
       return;
     }
 
+    const newStatus = data?.is_completed ?? !idea.is_completed;
     sendNotification(newStatus ? 'completed' : 'uncompleted', idea.title);
     fetchData();
   };
 
-  // Add a new idea
+  // Add a new idea using RPC
   const addIdea = async (categoryId: string) => {
     if (!newIdeaTitle.trim()) return;
 
-    const { error } = await supabase.from('date_ideas').insert({
-      category_id: categoryId,
-      title: newIdeaTitle.trim(),
-      description: newIdeaDescription.trim() || null,
-      is_completed: false,
+    const { error } = await supabase.rpc('add_date_idea', {
+      p_category_id: categoryId,
+      p_title: newIdeaTitle.trim(),
+      p_description: newIdeaDescription.trim() || null,
+      p_emoji: null
     });
 
     if (error) {
@@ -286,12 +134,11 @@ export default function DateIdeas() {
     fetchData();
   };
 
-  // Remove an idea
+  // Remove an idea using RPC
   const removeIdea = async (idea: DateIdea) => {
-    const { error } = await supabase
-      .from('date_ideas')
-      .delete()
-      .eq('id', idea.id);
+    const { error } = await supabase.rpc('remove_date_idea', {
+      p_idea_id: idea.id
+    });
 
     if (error) {
       console.error('Error removing idea:', error);

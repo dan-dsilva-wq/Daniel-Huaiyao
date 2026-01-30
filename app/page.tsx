@@ -8,9 +8,10 @@ interface AppCardProps {
   icon: string;
   href: string;
   gradient: string;
+  badge?: string;
 }
 
-function AppCard({ title, description, icon, href, gradient }: AppCardProps) {
+function AppCard({ title, description, icon, href, gradient, badge }: AppCardProps) {
   const isExternal = href.startsWith('http');
   return (
     <motion.a
@@ -29,6 +30,11 @@ function AppCard({ title, description, icon, href, gradient }: AppCardProps) {
         active:scale-[0.98] touch-manipulation
       `}
     >
+      {badge && (
+        <div className="absolute top-3 right-3 px-2 py-1 bg-white/20 backdrop-blur-sm rounded-full text-xs font-medium text-white">
+          {badge}
+        </div>
+      )}
       <motion.div
         className="text-5xl sm:text-6xl"
         animate={{ y: [0, -4, 0] }}
@@ -62,6 +68,13 @@ const apps: AppCardProps[] = [
     gradient: 'from-amber-600 to-orange-700',
   },
   {
+    title: 'Date Ideas',
+    description: 'Track our bucket list of things to do',
+    icon: '✨',
+    href: '/dates',
+    gradient: 'from-purple-500 to-pink-500',
+  },
+  {
     title: 'Hive',
     description: 'The buzzing strategy board game',
     icon: '🐝',
@@ -69,11 +82,18 @@ const apps: AppCardProps[] = [
     gradient: 'from-yellow-500 to-amber-600',
   },
   {
-    title: 'Date Ideas',
-    description: 'Track our bucket list of things to do',
-    icon: '✨',
-    href: '/dates',
-    gradient: 'from-purple-500 to-pink-500',
+    title: 'Quiz Time',
+    description: 'How well do you know each other?',
+    icon: '🧠',
+    href: '/quiz',
+    gradient: 'from-indigo-500 to-purple-600',
+  },
+  {
+    title: 'Our Map',
+    description: 'Places we want to go and have been',
+    icon: '🗺️',
+    href: '/map',
+    gradient: 'from-teal-500 to-cyan-500',
   },
 ];
 
@@ -123,7 +143,7 @@ export default function Home() {
           </p>
         </motion.div>
 
-        {/* App Grid */}
+        {/* Main Apps */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
