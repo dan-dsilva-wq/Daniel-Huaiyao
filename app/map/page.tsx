@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ComposableMap, Geographies, Geography, ZoomableGroup } from 'react-simple-maps';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
 interface Place {
@@ -24,25 +25,288 @@ interface Region {
   places: Place[];
 }
 
-// Simplified geometric SVG paths for each continent
-const REGION_PATHS: Record<string, string> = {
-  'north-america': 'M 80 60 L 120 45 L 180 50 L 200 80 L 190 120 L 160 140 L 130 135 L 100 150 L 80 130 L 60 100 Z',
-  'south-america': 'M 130 160 L 160 170 L 170 200 L 165 250 L 140 280 L 120 260 L 115 220 L 120 190 Z',
-  'europe': 'M 280 50 L 320 45 L 350 55 L 360 80 L 340 100 L 300 105 L 270 95 L 265 70 Z',
-  'africa': 'M 280 120 L 320 110 L 350 130 L 360 170 L 340 220 L 300 230 L 270 200 L 265 160 L 275 130 Z',
-  'asia': 'M 360 40 L 420 35 L 480 50 L 500 90 L 480 130 L 440 140 L 400 135 L 370 110 L 365 70 Z',
-  'oceania': 'M 440 180 L 480 175 L 510 190 L 500 220 L 470 235 L 440 220 L 435 195 Z',
+// TopoJSON world map
+const geoUrl = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+
+// Map countries to regions by continent
+const COUNTRY_TO_REGION: Record<string, string> = {
+  // North America
+  'United States of America': 'north-america',
+  'Canada': 'north-america',
+  'Mexico': 'north-america',
+  'Guatemala': 'north-america',
+  'Cuba': 'north-america',
+  'Haiti': 'north-america',
+  'Dominican Rep.': 'north-america',
+  'Honduras': 'north-america',
+  'Nicaragua': 'north-america',
+  'El Salvador': 'north-america',
+  'Costa Rica': 'north-america',
+  'Panama': 'north-america',
+  'Jamaica': 'north-america',
+  'Trinidad and Tobago': 'north-america',
+  'Belize': 'north-america',
+  'Bahamas': 'north-america',
+  'Greenland': 'north-america',
+  'Puerto Rico': 'north-america',
+
+  // South America
+  'Brazil': 'south-america',
+  'Colombia': 'south-america',
+  'Argentina': 'south-america',
+  'Peru': 'south-america',
+  'Venezuela': 'south-america',
+  'Chile': 'south-america',
+  'Ecuador': 'south-america',
+  'Bolivia': 'south-america',
+  'Paraguay': 'south-america',
+  'Uruguay': 'south-america',
+  'Guyana': 'south-america',
+  'Suriname': 'south-america',
+  'French Guiana': 'south-america',
+  'Falkland Is.': 'south-america',
+
+  // Europe
+  'Russia': 'europe',
+  'Germany': 'europe',
+  'United Kingdom': 'europe',
+  'France': 'europe',
+  'Italy': 'europe',
+  'Spain': 'europe',
+  'Ukraine': 'europe',
+  'Poland': 'europe',
+  'Romania': 'europe',
+  'Netherlands': 'europe',
+  'Belgium': 'europe',
+  'Czech Rep.': 'europe',
+  'Greece': 'europe',
+  'Portugal': 'europe',
+  'Sweden': 'europe',
+  'Hungary': 'europe',
+  'Belarus': 'europe',
+  'Austria': 'europe',
+  'Serbia': 'europe',
+  'Switzerland': 'europe',
+  'Bulgaria': 'europe',
+  'Denmark': 'europe',
+  'Finland': 'europe',
+  'Slovakia': 'europe',
+  'Norway': 'europe',
+  'Ireland': 'europe',
+  'Croatia': 'europe',
+  'Moldova': 'europe',
+  'Bosnia and Herz.': 'europe',
+  'Albania': 'europe',
+  'Lithuania': 'europe',
+  'Macedonia': 'europe',
+  'Slovenia': 'europe',
+  'Latvia': 'europe',
+  'Estonia': 'europe',
+  'Montenegro': 'europe',
+  'Luxembourg': 'europe',
+  'Malta': 'europe',
+  'Iceland': 'europe',
+  'Kosovo': 'europe',
+  'Cyprus': 'europe',
+
+  // Africa
+  'Nigeria': 'africa',
+  'Ethiopia': 'africa',
+  'Egypt': 'africa',
+  'Dem. Rep. Congo': 'africa',
+  'Tanzania': 'africa',
+  'South Africa': 'africa',
+  'Kenya': 'africa',
+  'Uganda': 'africa',
+  'Algeria': 'africa',
+  'Sudan': 'africa',
+  'Morocco': 'africa',
+  'Angola': 'africa',
+  'Mozambique': 'africa',
+  'Ghana': 'africa',
+  'Madagascar': 'africa',
+  'Cameroon': 'africa',
+  "Côte d'Ivoire": 'africa',
+  'Niger': 'africa',
+  'Burkina Faso': 'africa',
+  'Mali': 'africa',
+  'Malawi': 'africa',
+  'Zambia': 'africa',
+  'Senegal': 'africa',
+  'Chad': 'africa',
+  'Somalia': 'africa',
+  'Zimbabwe': 'africa',
+  'Guinea': 'africa',
+  'Rwanda': 'africa',
+  'Benin': 'africa',
+  'Burundi': 'africa',
+  'Tunisia': 'africa',
+  'S. Sudan': 'africa',
+  'Togo': 'africa',
+  'Sierra Leone': 'africa',
+  'Libya': 'africa',
+  'Central African Rep.': 'africa',
+  'Mauritania': 'africa',
+  'Eritrea': 'africa',
+  'Namibia': 'africa',
+  'Gambia': 'africa',
+  'Botswana': 'africa',
+  'Gabon': 'africa',
+  'Lesotho': 'africa',
+  'Guinea-Bissau': 'africa',
+  'Eq. Guinea': 'africa',
+  'Mauritius': 'africa',
+  'eSwatini': 'africa',
+  'Djibouti': 'africa',
+  'Réunion': 'africa',
+  'Comoros': 'africa',
+  'W. Sahara': 'africa',
+  'Congo': 'africa',
+  'Liberia': 'africa',
+
+  // Asia
+  'China': 'asia',
+  'India': 'asia',
+  'Indonesia': 'asia',
+  'Pakistan': 'asia',
+  'Bangladesh': 'asia',
+  'Japan': 'asia',
+  'Philippines': 'asia',
+  'Vietnam': 'asia',
+  'Turkey': 'asia',
+  'Iran': 'asia',
+  'Thailand': 'asia',
+  'Myanmar': 'asia',
+  'South Korea': 'asia',
+  'Iraq': 'asia',
+  'Afghanistan': 'asia',
+  'Saudi Arabia': 'asia',
+  'Uzbekistan': 'asia',
+  'Malaysia': 'asia',
+  'Yemen': 'asia',
+  'Nepal': 'asia',
+  'North Korea': 'asia',
+  'Sri Lanka': 'asia',
+  'Kazakhstan': 'asia',
+  'Syria': 'asia',
+  'Cambodia': 'asia',
+  'Jordan': 'asia',
+  'Azerbaijan': 'asia',
+  'United Arab Emirates': 'asia',
+  'Tajikistan': 'asia',
+  'Israel': 'asia',
+  'Laos': 'asia',
+  'Lebanon': 'asia',
+  'Kyrgyzstan': 'asia',
+  'Turkmenistan': 'asia',
+  'Singapore': 'asia',
+  'Oman': 'asia',
+  'Palestine': 'asia',
+  'Kuwait': 'asia',
+  'Georgia': 'asia',
+  'Mongolia': 'asia',
+  'Armenia': 'asia',
+  'Qatar': 'asia',
+  'Bahrain': 'asia',
+  'Timor-Leste': 'asia',
+  'Bhutan': 'asia',
+  'Brunei': 'asia',
+  'Taiwan': 'asia',
+
+  // Oceania
+  'Australia': 'oceania',
+  'Papua New Guinea': 'oceania',
+  'New Zealand': 'oceania',
+  'Fiji': 'oceania',
+  'Solomon Is.': 'oceania',
+  'Vanuatu': 'oceania',
+  'New Caledonia': 'oceania',
+  'Samoa': 'oceania',
 };
 
-// Gradient colors for each region
-const REGION_GRADIENTS: Record<string, { from: string; to: string; hover: string }> = {
-  'north-america': { from: '#60a5fa', to: '#06b6d4', hover: '#3b82f6' },
-  'south-america': { from: '#34d399', to: '#14b8a6', hover: '#10b981' },
-  'europe': { from: '#a78bfa', to: '#6366f1', hover: '#8b5cf6' },
-  'africa': { from: '#fbbf24', to: '#f97316', hover: '#f59e0b' },
-  'asia': { from: '#fb7185', to: '#ec4899', hover: '#f43f5e' },
-  'oceania': { from: '#38bdf8', to: '#3b82f6', hover: '#0ea5e9' },
+// Region colors for the map
+const REGION_COLORS: Record<string, { fill: string; hover: string }> = {
+  'north-america': { fill: '#38bdf8', hover: '#0ea5e9' },
+  'south-america': { fill: '#34d399', hover: '#10b981' },
+  'europe': { fill: '#a78bfa', hover: '#8b5cf6' },
+  'africa': { fill: '#fbbf24', hover: '#f59e0b' },
+  'asia': { fill: '#fb7185', hover: '#f43f5e' },
+  'oceania': { fill: '#60a5fa', hover: '#3b82f6' },
 };
+
+const DEFAULT_COLOR = { fill: '#e5e7eb', hover: '#d1d5db' };
+
+// Memoized map component for performance
+const WorldMap = memo(function WorldMap({
+  regions,
+  selectedRegion,
+  hoveredRegion,
+  onRegionHover,
+  onRegionClick,
+}: {
+  regions: Region[];
+  selectedRegion: Region | null;
+  hoveredRegion: string | null;
+  onRegionHover: (code: string | null) => void;
+  onRegionClick: (code: string) => void;
+}) {
+  return (
+    <ComposableMap
+      projection="geoMercator"
+      projectionConfig={{
+        scale: 120,
+        center: [0, 30],
+      }}
+      style={{ width: '100%', height: 'auto' }}
+    >
+      <ZoomableGroup zoom={1} minZoom={1} maxZoom={1}>
+        <Geographies geography={geoUrl}>
+          {({ geographies }) =>
+            geographies.map((geo) => {
+              const countryName = geo.properties.name;
+              const regionCode = COUNTRY_TO_REGION[countryName];
+              const colors = regionCode ? REGION_COLORS[regionCode] : DEFAULT_COLOR;
+              const isHovered = hoveredRegion === regionCode;
+              const isSelected = selectedRegion?.code === regionCode;
+
+              return (
+                <Geography
+                  key={geo.rsmKey}
+                  geography={geo}
+                  onMouseEnter={() => regionCode && onRegionHover(regionCode)}
+                  onMouseLeave={() => onRegionHover(null)}
+                  onClick={() => regionCode && onRegionClick(regionCode)}
+                  style={{
+                    default: {
+                      fill: isSelected ? colors.hover : colors.fill,
+                      stroke: '#fff',
+                      strokeWidth: 0.5,
+                      outline: 'none',
+                      cursor: regionCode ? 'pointer' : 'default',
+                    },
+                    hover: {
+                      fill: colors.hover,
+                      stroke: '#fff',
+                      strokeWidth: 0.75,
+                      outline: 'none',
+                      cursor: regionCode ? 'pointer' : 'default',
+                    },
+                    pressed: {
+                      fill: colors.hover,
+                      stroke: '#fff',
+                      strokeWidth: 0.75,
+                      outline: 'none',
+                    },
+                  }}
+                />
+              );
+            })
+          }
+        </Geographies>
+      </ZoomableGroup>
+    </ComposableMap>
+  );
+});
 
 export default function MapPage() {
   const [regions, setRegions] = useState<Region[]>([]);
@@ -162,6 +426,23 @@ export default function MapPage() {
     localStorage.setItem('map-user', user);
   };
 
+  const handleRegionClick = (regionCode: string) => {
+    const region = regions.find((r) => r.code === regionCode);
+    if (region) {
+      setSelectedRegion(region);
+    }
+  };
+
+  // Update selected region when data changes
+  useEffect(() => {
+    if (selectedRegion) {
+      const updated = regions.find((r) => r.code === selectedRegion.code);
+      if (updated) {
+        setSelectedRegion(updated);
+      }
+    }
+  }, [regions, selectedRegion]);
+
   const totalWishlist = regions.reduce((sum, r) => sum + r.places.filter(p => p.status === 'wishlist').length, 0);
   const totalVisited = regions.reduce((sum, r) => sum + r.places.filter(p => p.status === 'visited').length, 0);
 
@@ -259,105 +540,45 @@ export default function MapPage() {
           </p>
         </motion.div>
 
-        {/* World Map SVG */}
+        {/* World Map */}
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           className="relative bg-white/70 backdrop-blur rounded-2xl shadow-lg p-4 sm:p-6 mb-6 overflow-hidden"
         >
-          <svg
-            viewBox="0 0 550 300"
-            className="w-full h-auto"
-            style={{ minHeight: '200px' }}
-          >
-            {/* Background grid for aesthetics */}
-            <defs>
-              <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-                <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e5e7eb" strokeWidth="0.5" />
-              </pattern>
-              {/* Define gradients for each region */}
-              {Object.entries(REGION_GRADIENTS).map(([code, colors]) => (
-                <linearGradient key={code} id={`gradient-${code}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor={colors.from} />
-                  <stop offset="100%" stopColor={colors.to} />
-                </linearGradient>
-              ))}
-            </defs>
-            <rect width="100%" height="100%" fill="url(#grid)" />
-
-            {/* Render each region */}
-            {regions.map((region) => {
-              const path = REGION_PATHS[region.code];
-              const gradient = REGION_GRADIENTS[region.code];
-              const isHovered = hoveredRegion === region.code;
-              const isSelected = selectedRegion?.code === region.code;
-              const placeCount = region.places.length;
-
-              return (
-                <g key={region.code}>
-                  <motion.path
-                    d={path}
-                    fill={`url(#gradient-${region.code})`}
-                    stroke={isSelected ? '#1f2937' : isHovered ? gradient.hover : 'white'}
-                    strokeWidth={isSelected ? 3 : isHovered ? 2 : 1.5}
-                    className="cursor-pointer"
-                    initial={{ opacity: 0 }}
-                    animate={{
-                      opacity: 1,
-                      scale: isHovered ? 1.02 : 1,
-                    }}
-                    transition={{ duration: 0.2 }}
-                    onMouseEnter={() => setHoveredRegion(region.code)}
-                    onMouseLeave={() => setHoveredRegion(null)}
-                    onClick={() => setSelectedRegion(region)}
-                    style={{ transformOrigin: 'center', filter: isHovered ? 'drop-shadow(0 4px 6px rgba(0,0,0,0.2))' : 'none' }}
-                  />
-                  {/* Place count badge */}
-                  {placeCount > 0 && (
-                    <motion.g
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      transition={{ delay: 0.3 }}
-                    >
-                      <circle
-                        cx={getRegionCenter(region.code).x}
-                        cy={getRegionCenter(region.code).y}
-                        r="12"
-                        fill="white"
-                        stroke="#374151"
-                        strokeWidth="1.5"
-                      />
-                      <text
-                        x={getRegionCenter(region.code).x}
-                        y={getRegionCenter(region.code).y + 4}
-                        textAnchor="middle"
-                        className="text-xs font-bold fill-gray-700"
-                        style={{ fontSize: '10px' }}
-                      >
-                        {placeCount}
-                      </text>
-                    </motion.g>
-                  )}
-                </g>
-              );
-            })}
-          </svg>
+          <WorldMap
+            regions={regions}
+            selectedRegion={selectedRegion}
+            hoveredRegion={hoveredRegion}
+            onRegionHover={setHoveredRegion}
+            onRegionClick={handleRegionClick}
+          />
 
           {/* Legend */}
           <div className="flex flex-wrap justify-center gap-2 mt-4 text-xs sm:text-sm">
-            {regions.map((region) => (
-              <button
-                key={region.code}
-                onClick={() => setSelectedRegion(region)}
-                className={`px-2 py-1 rounded-full transition-all ${
-                  selectedRegion?.code === region.code
-                    ? 'bg-gray-800 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                {region.display_name}
-              </button>
-            ))}
+            {regions.map((region) => {
+              const colors = REGION_COLORS[region.code];
+              const placeCount = region.places.length;
+              return (
+                <button
+                  key={region.code}
+                  onClick={() => setSelectedRegion(region)}
+                  className={`px-3 py-1.5 rounded-full transition-all flex items-center gap-2 ${
+                    selectedRegion?.code === region.code
+                      ? 'ring-2 ring-offset-2 ring-gray-400'
+                      : 'hover:scale-105'
+                  }`}
+                  style={{ backgroundColor: colors?.fill || '#e5e7eb' }}
+                >
+                  <span className="text-white font-medium">{region.display_name}</span>
+                  {placeCount > 0 && (
+                    <span className="bg-white/30 text-white text-xs px-1.5 py-0.5 rounded-full">
+                      {placeCount}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </motion.div>
 
@@ -368,7 +589,10 @@ export default function MapPage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className={`bg-gradient-to-br ${selectedRegion.color_from} ${selectedRegion.color_to} rounded-2xl shadow-lg p-4 sm:p-6 mb-6`}
+              className="rounded-2xl shadow-lg p-4 sm:p-6 mb-6"
+              style={{
+                background: `linear-gradient(135deg, ${REGION_COLORS[selectedRegion.code]?.fill || '#e5e7eb'}, ${REGION_COLORS[selectedRegion.code]?.hover || '#d1d5db'})`,
+              }}
             >
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl sm:text-2xl font-serif font-bold text-white">
@@ -622,17 +846,4 @@ export default function MapPage() {
       </main>
     </div>
   );
-}
-
-// Helper function to get approximate center of each region for badge placement
-function getRegionCenter(code: string): { x: number; y: number } {
-  const centers: Record<string, { x: number; y: number }> = {
-    'north-america': { x: 140, y: 95 },
-    'south-america': { x: 145, y: 215 },
-    'europe': { x: 310, y: 75 },
-    'africa': { x: 310, y: 170 },
-    'asia': { x: 430, y: 85 },
-    'oceania': { x: 470, y: 200 },
-  };
-  return centers[code] || { x: 0, y: 0 };
 }
