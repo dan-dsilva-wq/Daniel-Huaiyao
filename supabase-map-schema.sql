@@ -17,6 +17,7 @@ CREATE TABLE map_places (
   region_id UUID REFERENCES map_regions(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   country TEXT,
+  location_key TEXT, -- Country name or "US-XX" for US states
   status TEXT CHECK (status IN ('wishlist', 'visited')) DEFAULT 'wishlist',
   added_by TEXT CHECK (added_by IN ('daniel', 'huaiyao')),
   notes TEXT,
@@ -66,6 +67,7 @@ BEGIN
                 'id', p.id,
                 'name', p.name,
                 'country', p.country,
+                'location_key', p.location_key,
                 'status', p.status,
                 'added_by', p.added_by,
                 'notes', p.notes,
@@ -90,6 +92,7 @@ CREATE OR REPLACE FUNCTION add_map_place(
   p_region_id UUID,
   p_name TEXT,
   p_country TEXT DEFAULT NULL,
+  p_location_key TEXT DEFAULT NULL,
   p_status TEXT DEFAULT 'wishlist',
   p_added_by TEXT DEFAULT NULL,
   p_notes TEXT DEFAULT NULL
@@ -101,8 +104,8 @@ AS $$
 DECLARE
   new_place map_places;
 BEGIN
-  INSERT INTO map_places (region_id, name, country, status, added_by, notes)
-  VALUES (p_region_id, p_name, p_country, p_status, p_added_by, p_notes)
+  INSERT INTO map_places (region_id, name, country, location_key, status, added_by, notes)
+  VALUES (p_region_id, p_name, p_country, p_location_key, p_status, p_added_by, p_notes)
   RETURNING * INTO new_place;
 
   RETURN row_to_json(new_place);

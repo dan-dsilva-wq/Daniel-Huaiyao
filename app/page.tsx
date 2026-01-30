@@ -88,12 +88,16 @@ const apps: AppCardProps[] = [
     href: '/quiz',
     gradient: 'from-indigo-500 to-purple-600',
   },
+];
+
+const wipApps: AppCardProps[] = [
   {
     title: 'Our Map',
     description: 'Places we want to go and have been',
     icon: '🗺️',
     href: '/map',
     gradient: 'from-teal-500 to-cyan-500',
+    badge: 'WIP',
   },
 ];
 
@@ -160,18 +164,32 @@ export default function Home() {
               <AppCard {...app} />
             </motion.div>
           ))}
-
-          {/* Coming Soon placeholder */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.5 }}
-            className="rounded-2xl p-6 sm:p-8 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center min-h-[200px] text-gray-400"
-          >
-            <div className="text-4xl mb-3">🚀</div>
-            <p className="font-medium">More coming soon...</p>
-          </motion.div>
         </motion.div>
+
+        {/* Work in Progress Section */}
+        {wipApps.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+            className="mt-12"
+          >
+            <h2 className="text-lg font-medium text-gray-400 mb-4 text-center">Work in Progress</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              {wipApps.map((app, index) => (
+                <motion.div
+                  key={app.title}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.7 + index * 0.1 }}
+                  className="opacity-80 hover:opacity-100 transition-opacity"
+                >
+                  <AppCard {...app} />
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {/* Footer */}
         <motion.footer
