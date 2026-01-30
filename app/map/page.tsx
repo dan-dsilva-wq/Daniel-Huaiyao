@@ -9,7 +9,7 @@ interface Place {
   id: string;
   name: string;
   country: string | null;
-  location_key: string | null; // Country name or "US-XX" for US states
+  location_key: string | null;
   status: 'wishlist' | 'visited';
   added_by: 'daniel' | 'huaiyao' | null;
   notes: string | null;
@@ -48,71 +48,7 @@ const US_STATES: Record<string, string> = {
   'Puerto Rico': 'US-PR',
 };
 
-// Reverse lookup for US states
-const US_STATE_CODES: Record<string, string> = Object.fromEntries(
-  Object.entries(US_STATES).map(([name, code]) => [code, name])
-);
-
-// All countries list for autocomplete
-const COUNTRIES = [
-  'Afghanistan', 'Albania', 'Algeria', 'Argentina', 'Armenia', 'Australia', 'Austria',
-  'Azerbaijan', 'Bahamas', 'Bahrain', 'Bangladesh', 'Belarus', 'Belgium', 'Belize',
-  'Benin', 'Bhutan', 'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil',
-  'Brunei', 'Bulgaria', 'Burkina Faso', 'Burundi', 'Cambodia', 'Cameroon', 'Canada',
-  'Central African Republic', 'Chad', 'Chile', 'China', 'Colombia', 'Comoros',
-  'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czech Republic', 'Denmark', 'Djibouti',
-  'Dominican Republic', 'DR Congo', 'Ecuador', 'Egypt', 'El Salvador', 'Equatorial Guinea',
-  'Eritrea', 'Estonia', 'Eswatini', 'Ethiopia', 'Fiji', 'Finland', 'France', 'Gabon',
-  'Gambia', 'Georgia', 'Germany', 'Ghana', 'Greece', 'Greenland', 'Guatemala', 'Guinea',
-  'Guinea-Bissau', 'Guyana', 'Haiti', 'Honduras', 'Hungary', 'Iceland', 'India',
-  'Indonesia', 'Iran', 'Iraq', 'Ireland', 'Israel', 'Italy', 'Ivory Coast', 'Jamaica',
-  'Japan', 'Jordan', 'Kazakhstan', 'Kenya', 'Kosovo', 'Kuwait', 'Kyrgyzstan', 'Laos',
-  'Latvia', 'Lebanon', 'Lesotho', 'Liberia', 'Libya', 'Lithuania', 'Luxembourg',
-  'Madagascar', 'Malawi', 'Malaysia', 'Mali', 'Malta', 'Mauritania', 'Mauritius',
-  'Mexico', 'Moldova', 'Mongolia', 'Montenegro', 'Morocco', 'Mozambique', 'Myanmar',
-  'Namibia', 'Nepal', 'Netherlands', 'New Zealand', 'Nicaragua', 'Niger', 'Nigeria',
-  'North Korea', 'North Macedonia', 'Norway', 'Oman', 'Pakistan', 'Palestine', 'Panama',
-  'Papua New Guinea', 'Paraguay', 'Peru', 'Philippines', 'Poland', 'Portugal', 'Qatar',
-  'Romania', 'Russia', 'Rwanda', 'Saudi Arabia', 'Senegal', 'Serbia', 'Sierra Leone',
-  'Singapore', 'Slovakia', 'Slovenia', 'Solomon Islands', 'Somalia', 'South Africa',
-  'South Korea', 'South Sudan', 'Spain', 'Sri Lanka', 'Sudan', 'Suriname', 'Sweden',
-  'Switzerland', 'Syria', 'Taiwan', 'Tajikistan', 'Tanzania', 'Thailand', 'Timor-Leste',
-  'Togo', 'Trinidad and Tobago', 'Tunisia', 'Turkey', 'Turkmenistan', 'Uganda', 'Ukraine',
-  'United Arab Emirates', 'United Kingdom', 'Uruguay', 'Uzbekistan', 'Vanuatu',
-  'Venezuela', 'Vietnam', 'Yemen', 'Zambia', 'Zimbabwe',
-];
-
-// Map country names to their TopoJSON names (for matching)
-const COUNTRY_NAME_MAP: Record<string, string> = {
-  'United States': 'United States of America',
-  'USA': 'United States of America',
-  'UK': 'United Kingdom',
-  'Czech Republic': 'Czech Rep.',
-  'Dominican Republic': 'Dominican Rep.',
-  'DR Congo': 'Dem. Rep. Congo',
-  'Central African Republic': 'Central African Rep.',
-  'Ivory Coast': "Côte d'Ivoire",
-  'North Macedonia': 'Macedonia',
-  'Bosnia and Herzegovina': 'Bosnia and Herz.',
-  'South Sudan': 'S. Sudan',
-  'Equatorial Guinea': 'Eq. Guinea',
-  'Solomon Islands': 'Solomon Is.',
-  'Eswatini': 'eSwatini',
-  'Western Sahara': 'W. Sahara',
-};
-
-// Reverse mapping for display
-const TOPO_TO_DISPLAY: Record<string, string> = Object.fromEntries(
-  Object.entries(COUNTRY_NAME_MAP).map(([display, topo]) => [topo, display])
-);
-
-// All autocomplete options: US states + countries
-const ALL_LOCATIONS = [
-  ...Object.keys(US_STATES).map(state => ({ name: state, type: 'state' as const, key: US_STATES[state] })),
-  ...COUNTRIES.map(country => ({ name: country, type: 'country' as const, key: country })),
-];
-
-// Map countries to regions by continent
+// Map countries to regions
 const COUNTRY_TO_REGION: Record<string, string> = {
   // North America
   'United States of America': 'north-america', 'Canada': 'north-america', 'Mexico': 'north-america',
@@ -171,295 +107,50 @@ const COUNTRY_TO_REGION: Record<string, string> = {
   'Fiji': 'oceania', 'Solomon Is.': 'oceania', 'Vanuatu': 'oceania', 'New Caledonia': 'oceania',
 };
 
-// Region colors
-const REGION_COLORS: Record<string, { default: string; visited: string; hover: string }> = {
-  'north-america': { default: '#38bdf8', visited: '#0369a1', hover: '#0ea5e9' },
-  'south-america': { default: '#34d399', visited: '#047857', hover: '#10b981' },
-  'europe': { default: '#a78bfa', visited: '#6d28d9', hover: '#8b5cf6' },
-  'africa': { default: '#fbbf24', visited: '#b45309', hover: '#f59e0b' },
-  'asia': { default: '#fb7185', visited: '#be123c', hover: '#f43f5e' },
-  'oceania': { default: '#60a5fa', visited: '#1d4ed8', hover: '#3b82f6' },
+// Region zoom configurations
+const REGION_ZOOM: Record<string, { center: [number, number]; scale: number }> = {
+  'north-america': { center: [-100, 45], scale: 300 },
+  'south-america': { center: [-60, -20], scale: 300 },
+  'europe': { center: [15, 54], scale: 500 },
+  'africa': { center: [20, 0], scale: 280 },
+  'asia': { center: [100, 35], scale: 250 },
+  'oceania': { center: [140, -25], scale: 350 },
 };
 
-const DEFAULT_COLOR = { default: '#e5e7eb', visited: '#9ca3af', hover: '#d1d5db' };
+// Region colors
+const REGION_COLORS: Record<string, { default: string; visited: string; wishlist: string; hover: string }> = {
+  'north-america': { default: '#38bdf8', visited: '#0369a1', wishlist: '#7dd3fc', hover: '#0ea5e9' },
+  'south-america': { default: '#34d399', visited: '#047857', wishlist: '#6ee7b7', hover: '#10b981' },
+  'europe': { default: '#a78bfa', visited: '#6d28d9', wishlist: '#c4b5fd', hover: '#8b5cf6' },
+  'africa': { default: '#fbbf24', visited: '#b45309', wishlist: '#fcd34d', hover: '#f59e0b' },
+  'asia': { default: '#fb7185', visited: '#be123c', wishlist: '#fda4af', hover: '#f43f5e' },
+  'oceania': { default: '#60a5fa', visited: '#1d4ed8', wishlist: '#93c5fd', hover: '#3b82f6' },
+};
 
-// Memoized World Map component
-const WorldMap = memo(function WorldMap({
-  visitedLocations,
-  selectedRegion,
-  hoveredRegion,
-  onRegionHover,
-  onRegionClick,
-}: {
-  visitedLocations: Set<string>;
-  selectedRegion: Region | null;
-  hoveredRegion: string | null;
-  onRegionHover: (code: string | null) => void;
-  onRegionClick: (code: string) => void;
-}) {
-  return (
-    <ComposableMap
-      projection="geoMercator"
-      projectionConfig={{ scale: 120, center: [0, 30] }}
-      style={{ width: '100%', height: 'auto' }}
-    >
-      <ZoomableGroup zoom={1} minZoom={1} maxZoom={1}>
-        <Geographies geography={worldGeoUrl}>
-          {({ geographies }) =>
-            geographies.map((geo) => {
-              const countryName = geo.properties.name;
-              // Skip USA - we render it with states
-              if (countryName === 'United States of America') return null;
-
-              const regionCode = COUNTRY_TO_REGION[countryName];
-              const colors = regionCode ? REGION_COLORS[regionCode] : DEFAULT_COLOR;
-              const isVisited = visitedLocations.has(countryName) ||
-                visitedLocations.has(TOPO_TO_DISPLAY[countryName] || countryName);
-              const isHovered = hoveredRegion === regionCode;
-              const isSelected = selectedRegion?.code === regionCode;
-
-              return (
-                <Geography
-                  key={geo.rsmKey}
-                  geography={geo}
-                  onMouseEnter={() => regionCode && onRegionHover(regionCode)}
-                  onMouseLeave={() => onRegionHover(null)}
-                  onClick={() => regionCode && onRegionClick(regionCode)}
-                  style={{
-                    default: {
-                      fill: isVisited ? colors.visited : (isSelected ? colors.hover : colors.default),
-                      stroke: '#fff',
-                      strokeWidth: 0.5,
-                      outline: 'none',
-                      cursor: regionCode ? 'pointer' : 'default',
-                    },
-                    hover: {
-                      fill: isVisited ? colors.visited : colors.hover,
-                      stroke: '#fff',
-                      strokeWidth: 0.75,
-                      outline: 'none',
-                      cursor: regionCode ? 'pointer' : 'default',
-                    },
-                    pressed: {
-                      fill: colors.hover,
-                      stroke: '#fff',
-                      strokeWidth: 0.75,
-                      outline: 'none',
-                    },
-                  }}
-                />
-              );
-            })
-          }
-        </Geographies>
-      </ZoomableGroup>
-    </ComposableMap>
-  );
-});
-
-// Memoized US States Map component
-const USMap = memo(function USMap({
-  visitedStates,
-  onStateClick,
-}: {
-  visitedStates: Set<string>;
-  onStateClick: (stateName: string) => void;
-}) {
-  return (
-    <ComposableMap
-      projection="geoAlbersUsa"
-      projectionConfig={{ scale: 800 }}
-      style={{ width: '100%', height: 'auto' }}
-    >
-      <Geographies geography={usGeoUrl}>
-        {({ geographies }) =>
-          geographies.map((geo) => {
-            const stateName = geo.properties.name;
-            const stateCode = US_STATES[stateName];
-            const isVisited = visitedStates.has(stateCode) || visitedStates.has(stateName);
-            const colors = REGION_COLORS['north-america'];
-
-            return (
-              <Geography
-                key={geo.rsmKey}
-                geography={geo}
-                onClick={() => onStateClick(stateName)}
-                style={{
-                  default: {
-                    fill: isVisited ? colors.visited : colors.default,
-                    stroke: '#fff',
-                    strokeWidth: 0.5,
-                    outline: 'none',
-                    cursor: 'pointer',
-                  },
-                  hover: {
-                    fill: isVisited ? colors.visited : colors.hover,
-                    stroke: '#fff',
-                    strokeWidth: 0.75,
-                    outline: 'none',
-                    cursor: 'pointer',
-                  },
-                  pressed: {
-                    fill: colors.hover,
-                    stroke: '#fff',
-                    strokeWidth: 0.75,
-                    outline: 'none',
-                  },
-                }}
-              />
-            );
-          })
-        }
-      </Geographies>
-    </ComposableMap>
-  );
-});
-
-// Autocomplete component
-function LocationAutocomplete({
-  onSelect,
-  placeholder,
-  initialValue = '',
-}: {
-  onSelect: (location: { name: string; type: 'state' | 'country'; key: string }) => void;
-  placeholder: string;
-  initialValue?: string;
-}) {
-  const [searchQuery, setSearchQuery] = useState(initialValue);
-  const [isOpen, setIsOpen] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-
-  // Update search query when initial value changes (e.g., from state click)
-  useEffect(() => {
-    setSearchQuery(initialValue);
-  }, [initialValue]);
-
-  const filteredLocations = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    const search = searchQuery.toLowerCase();
-    return ALL_LOCATIONS
-      .filter(loc => loc.name.toLowerCase().includes(search))
-      .slice(0, 8);
-  }, [searchQuery]);
-
-  useEffect(() => {
-    setHighlightedIndex(0);
-  }, [filteredLocations]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (!filteredLocations.length) return;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setHighlightedIndex(i => Math.min(i + 1, filteredLocations.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setHighlightedIndex(i => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter' && filteredLocations[highlightedIndex]) {
-      e.preventDefault();
-      onSelect(filteredLocations[highlightedIndex]);
-      setSearchQuery(filteredLocations[highlightedIndex].name);
-      setIsOpen(false);
-    } else if (e.key === 'Escape') {
-      setIsOpen(false);
-    }
-  };
-
-  return (
-    <div className="relative">
-      <input
-        type="text"
-        value={searchQuery}
-        onChange={(e) => {
-          setSearchQuery(e.target.value);
-          setIsOpen(true);
-        }}
-        onFocus={() => setIsOpen(true)}
-        onBlur={() => setTimeout(() => setIsOpen(false), 200)}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 text-gray-800"
-        autoComplete="off"
-      />
-      <AnimatePresence>
-        {isOpen && filteredLocations.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="absolute z-50 w-full mt-1 bg-white rounded-lg shadow-lg border border-gray-200 max-h-60 overflow-auto"
-          >
-            {filteredLocations.map((loc, index) => (
-              <button
-                key={loc.key}
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  onSelect(loc);
-                  setSearchQuery(loc.name);
-                  setIsOpen(false);
-                }}
-                className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-gray-50 text-gray-800 ${
-                  index === highlightedIndex ? 'bg-teal-50' : ''
-                }`}
-              >
-                <span>{loc.name}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  loc.type === 'state' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
-                }`}>
-                  {loc.type === 'state' ? 'US State' : 'Country'}
-                </span>
-              </button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
+const DEFAULT_COLOR = { default: '#e5e7eb', visited: '#6b7280', wishlist: '#d1d5db', hover: '#9ca3af' };
 
 export default function MapPage() {
   const [regions, setRegions] = useState<Region[]>([]);
-  const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
+  const [zoomedRegion, setZoomedRegion] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [hoveredRegion, setHoveredRegion] = useState<string | null>(null);
-  const [showUSMap, setShowUSMap] = useState(false);
+  const [clickedLocation, setClickedLocation] = useState<{ name: string; key: string; isState: boolean } | null>(null);
 
-  // Form state
-  const [newPlaceName, setNewPlaceName] = useState('');
-  const [selectedLocation, setSelectedLocation] = useState<{ name: string; type: 'state' | 'country'; key: string } | null>(null);
-  const [newPlaceNotes, setNewPlaceNotes] = useState('');
-  const [addingToRegion, setAddingToRegion] = useState<string | null>(null);
-
-  // Compute visited locations from all places
-  const visitedLocations = useMemo(() => {
-    const visited = new Set<string>();
+  // Get all places as a map for quick lookup
+  const placesByLocation = useMemo(() => {
+    const map = new Map<string, Place>();
     regions.forEach(region => {
       region.places.forEach(place => {
-        if (place.status === 'visited' && place.location_key) {
-          visited.add(place.location_key);
+        if (place.location_key) {
+          map.set(place.location_key, place);
         }
-        // Also add country for backwards compatibility
-        if (place.status === 'visited' && place.country) {
-          visited.add(place.country);
+        if (place.country) {
+          map.set(place.country, place);
         }
       });
     });
-    return visited;
+    return map;
   }, [regions]);
-
-  // Compute visited US states
-  const visitedStates = useMemo(() => {
-    const states = new Set<string>();
-    visitedLocations.forEach(loc => {
-      if (loc.startsWith('US-')) {
-        states.add(loc);
-      }
-    });
-    return states;
-  }, [visitedLocations]);
 
   const fetchData = useCallback(async () => {
     if (!isSupabaseConfigured) {
@@ -496,24 +187,21 @@ export default function MapPage() {
     }
   };
 
-  const addPlace = async () => {
-    if (!newPlaceName.trim() || !addingToRegion) return;
+  const addToWishlist = async (name: string, locationKey: string, isState: boolean) => {
+    const regionCode = isState ? 'north-america' : COUNTRY_TO_REGION[name];
+    const region = regions.find(r => r.code === regionCode);
+    if (!region) return;
 
-    const locationKey = selectedLocation?.key || null;
-    const country = selectedLocation?.type === 'country'
-      ? selectedLocation.name
-      : selectedLocation?.type === 'state'
-        ? 'United States'
-        : null;
+    const country = isState ? 'United States' : name;
 
     const { error } = await supabase.rpc('add_map_place', {
-      p_region_id: addingToRegion,
-      p_name: newPlaceName.trim(),
+      p_region_id: region.id,
+      p_name: name,
       p_country: country,
       p_location_key: locationKey,
       p_status: 'wishlist',
       p_added_by: currentUser,
-      p_notes: newPlaceNotes.trim() || null,
+      p_notes: null,
     });
 
     if (error) {
@@ -521,39 +209,40 @@ export default function MapPage() {
       return;
     }
 
-    sendNotification('place_added', newPlaceName.trim());
-    resetForm();
+    sendNotification('place_added', name);
     fetchData();
+    setClickedLocation(null);
   };
 
-  const resetForm = () => {
-    setNewPlaceName('');
-    setSelectedLocation(null);
-    setNewPlaceNotes('');
-    setShowAddModal(false);
-    setAddingToRegion(null);
-  };
-
-  const togglePlaceStatus = async (place: Place) => {
-    const { data, error } = await supabase.rpc('toggle_map_place_status', {
+  const markAsVisited = async (place: Place) => {
+    const { error } = await supabase.rpc('toggle_map_place_status', {
       p_place_id: place.id,
     });
 
     if (error) {
-      console.error('Error toggling status:', error);
+      console.error('Error updating place:', error);
       return;
     }
 
-    if (data?.status === 'visited') {
+    if (place.status === 'wishlist') {
       sendNotification('place_visited', place.name);
     }
     fetchData();
+    setClickedLocation(null);
   };
 
-  const deletePlace = async (place: Place) => {
-    const { error } = await supabase.rpc('delete_map_place', { p_place_id: place.id });
-    if (error) console.error('Error deleting place:', error);
-    else fetchData();
+  const removePlace = async (place: Place) => {
+    const { error } = await supabase.rpc('delete_map_place', {
+      p_place_id: place.id,
+    });
+
+    if (error) {
+      console.error('Error removing place:', error);
+      return;
+    }
+
+    fetchData();
+    setClickedLocation(null);
   };
 
   const selectUser = (user: 'daniel' | 'huaiyao') => {
@@ -561,25 +250,19 @@ export default function MapPage() {
     localStorage.setItem('map-user', user);
   };
 
-  const handleRegionClick = (regionCode: string) => {
-    const region = regions.find((r) => r.code === regionCode);
-    if (region) setSelectedRegion(region);
+  const handleLocationClick = (name: string, locationKey: string, isState: boolean) => {
+    setClickedLocation({ name, key: locationKey, isState });
   };
 
-  const handleLocationSelect = (location: { name: string; type: 'state' | 'country'; key: string }) => {
-    setSelectedLocation(location);
-    if (!newPlaceName) {
-      setNewPlaceName(location.name);
-    }
+  const getLocationStatus = (locationKey: string, name: string): 'none' | 'wishlist' | 'visited' => {
+    const place = placesByLocation.get(locationKey) || placesByLocation.get(name);
+    if (!place) return 'none';
+    return place.status;
   };
 
-  // Update selected region when data changes
-  useEffect(() => {
-    if (selectedRegion) {
-      const updated = regions.find((r) => r.code === selectedRegion.code);
-      if (updated) setSelectedRegion(updated);
-    }
-  }, [regions, selectedRegion]);
+  const getPlaceForLocation = (locationKey: string, name: string): Place | undefined => {
+    return placesByLocation.get(locationKey) || placesByLocation.get(name);
+  };
 
   const totalWishlist = regions.reduce((sum, r) => sum + r.places.filter(p => p.status === 'wishlist').length, 0);
   const totalVisited = regions.reduce((sum, r) => sum + r.places.filter(p => p.status === 'visited').length, 0);
@@ -622,6 +305,9 @@ export default function MapPage() {
     );
   }
 
+  // Show US states when zoomed into North America
+  const showUSStates = zoomedRegion === 'north-america';
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100">
       {/* Background effects */}
@@ -642,25 +328,20 @@ export default function MapPage() {
           <p className="text-gray-500">{totalWishlist} wishlist · {totalVisited} visited</p>
         </motion.div>
 
-        {/* Map Toggle */}
-        <div className="flex justify-center gap-2 mb-4">
-          <button
-            onClick={() => setShowUSMap(false)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              !showUSMap ? 'bg-teal-500 text-white' : 'bg-white/70 text-gray-600 hover:bg-white'
-            }`}
+        {/* Back button when zoomed */}
+        {zoomedRegion && (
+          <motion.button
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            onClick={() => setZoomedRegion(null)}
+            className="mb-4 px-4 py-2 bg-white/80 backdrop-blur rounded-lg shadow-sm text-gray-600 hover:text-gray-800 transition-colors flex items-center gap-2"
           >
-            World Map
-          </button>
-          <button
-            onClick={() => setShowUSMap(true)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              showUSMap ? 'bg-teal-500 text-white' : 'bg-white/70 text-gray-600 hover:bg-white'
-            }`}
-          >
-            USA States
-          </button>
-        </div>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back to World Map
+          </motion.button>
+        )}
 
         {/* Map Container */}
         <motion.div
@@ -668,61 +349,185 @@ export default function MapPage() {
           animate={{ opacity: 1, scale: 1 }}
           className="relative bg-white/70 backdrop-blur rounded-2xl shadow-lg p-4 sm:p-6 mb-6 overflow-hidden"
         >
-          {showUSMap ? (
-            <USMap
-              visitedStates={visitedStates}
-              onStateClick={(stateName) => {
-                const naRegion = regions.find(r => r.code === 'north-america');
-                if (naRegion) {
-                  const stateCode = US_STATES[stateName];
-                  setSelectedLocation({ name: stateName, type: 'state', key: stateCode });
-                  setNewPlaceName(stateName);
-                  setAddingToRegion(naRegion.id);
-                  setShowAddModal(true);
+          {showUSStates ? (
+            // US States Map
+            <ComposableMap
+              projection="geoAlbersUsa"
+              projectionConfig={{ scale: 800 }}
+              style={{ width: '100%', height: 'auto' }}
+            >
+              <Geographies geography={usGeoUrl}>
+                {({ geographies }) =>
+                  geographies.map((geo) => {
+                    const stateName = geo.properties.name;
+                    const stateCode = US_STATES[stateName];
+                    const status = getLocationStatus(stateCode, stateName);
+                    const colors = REGION_COLORS['north-america'];
+
+                    return (
+                      <Geography
+                        key={geo.rsmKey}
+                        geography={geo}
+                        onClick={() => handleLocationClick(stateName, stateCode, true)}
+                        style={{
+                          default: {
+                            fill: status === 'visited' ? colors.visited : status === 'wishlist' ? colors.wishlist : colors.default,
+                            stroke: '#fff',
+                            strokeWidth: 0.5,
+                            outline: 'none',
+                            cursor: 'pointer',
+                          },
+                          hover: {
+                            fill: colors.hover,
+                            stroke: '#fff',
+                            strokeWidth: 0.75,
+                            outline: 'none',
+                            cursor: 'pointer',
+                          },
+                          pressed: {
+                            fill: colors.hover,
+                            stroke: '#fff',
+                            strokeWidth: 0.75,
+                            outline: 'none',
+                          },
+                        }}
+                      />
+                    );
+                  })
                 }
+              </Geographies>
+            </ComposableMap>
+          ) : zoomedRegion ? (
+            // Zoomed region map
+            <ComposableMap
+              projection="geoMercator"
+              projectionConfig={{
+                scale: REGION_ZOOM[zoomedRegion].scale,
+                center: REGION_ZOOM[zoomedRegion].center,
               }}
-            />
+              style={{ width: '100%', height: 'auto' }}
+            >
+              <Geographies geography={worldGeoUrl}>
+                {({ geographies }) =>
+                  geographies
+                    .filter((geo) => COUNTRY_TO_REGION[geo.properties.name] === zoomedRegion)
+                    .map((geo) => {
+                      const countryName = geo.properties.name;
+                      const status = getLocationStatus(countryName, countryName);
+                      const colors = REGION_COLORS[zoomedRegion] || DEFAULT_COLOR;
+
+                      return (
+                        <Geography
+                          key={geo.rsmKey}
+                          geography={geo}
+                          onClick={() => handleLocationClick(countryName, countryName, false)}
+                          style={{
+                            default: {
+                              fill: status === 'visited' ? colors.visited : status === 'wishlist' ? colors.wishlist : colors.default,
+                              stroke: '#fff',
+                              strokeWidth: 0.5,
+                              outline: 'none',
+                              cursor: 'pointer',
+                            },
+                            hover: {
+                              fill: colors.hover,
+                              stroke: '#fff',
+                              strokeWidth: 0.75,
+                              outline: 'none',
+                              cursor: 'pointer',
+                            },
+                            pressed: {
+                              fill: colors.hover,
+                              stroke: '#fff',
+                              strokeWidth: 0.75,
+                              outline: 'none',
+                            },
+                          }}
+                        />
+                      );
+                    })
+                }
+              </Geographies>
+            </ComposableMap>
           ) : (
-            <WorldMap
-              visitedLocations={visitedLocations}
-              selectedRegion={selectedRegion}
-              hoveredRegion={hoveredRegion}
-              onRegionHover={setHoveredRegion}
-              onRegionClick={handleRegionClick}
-            />
+            // World overview map
+            <ComposableMap
+              projection="geoMercator"
+              projectionConfig={{ scale: 120, center: [0, 30] }}
+              style={{ width: '100%', height: 'auto' }}
+            >
+              <Geographies geography={worldGeoUrl}>
+                {({ geographies }) =>
+                  geographies.map((geo) => {
+                    const countryName = geo.properties.name;
+                    const regionCode = COUNTRY_TO_REGION[countryName];
+                    const colors = regionCode ? REGION_COLORS[regionCode] : DEFAULT_COLOR;
+                    const status = getLocationStatus(countryName, countryName);
+
+                    return (
+                      <Geography
+                        key={geo.rsmKey}
+                        geography={geo}
+                        onClick={() => regionCode && setZoomedRegion(regionCode)}
+                        style={{
+                          default: {
+                            fill: status === 'visited' ? colors.visited : status === 'wishlist' ? colors.wishlist : colors.default,
+                            stroke: '#fff',
+                            strokeWidth: 0.3,
+                            outline: 'none',
+                            cursor: regionCode ? 'pointer' : 'default',
+                          },
+                          hover: {
+                            fill: regionCode ? colors.hover : colors.default,
+                            stroke: '#fff',
+                            strokeWidth: 0.5,
+                            outline: 'none',
+                            cursor: regionCode ? 'pointer' : 'default',
+                          },
+                          pressed: {
+                            fill: colors.hover,
+                            stroke: '#fff',
+                            strokeWidth: 0.5,
+                            outline: 'none',
+                          },
+                        }}
+                      />
+                    );
+                  })
+                }
+              </Geographies>
+            </ComposableMap>
           )}
 
           {/* Legend */}
-          <div className="flex flex-wrap justify-center gap-2 mt-4">
-            <div className="flex items-center gap-2 text-xs text-gray-500">
+          <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500">
+            <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded" style={{ backgroundColor: '#38bdf8' }} />
+              <span>Not visited</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded" style={{ backgroundColor: '#7dd3fc' }} />
               <span>Wishlist</span>
             </div>
-            <div className="flex items-center gap-2 text-xs text-gray-500">
+            <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded" style={{ backgroundColor: '#0369a1' }} />
               <span>Visited</span>
             </div>
           </div>
 
-          {/* Region buttons */}
-          {!showUSMap && (
+          {/* Region buttons (only on world view) */}
+          {!zoomedRegion && (
             <div className="flex flex-wrap justify-center gap-2 mt-4 text-xs sm:text-sm">
               {regions.map((region) => {
                 const colors = REGION_COLORS[region.code];
-                const placeCount = region.places.length;
                 return (
                   <button
                     key={region.code}
-                    onClick={() => setSelectedRegion(region)}
-                    className={`px-3 py-1.5 rounded-full transition-all flex items-center gap-2 ${
-                      selectedRegion?.code === region.code ? 'ring-2 ring-offset-2 ring-gray-400' : 'hover:scale-105'
-                    }`}
+                    onClick={() => setZoomedRegion(region.code)}
+                    className="px-3 py-1.5 rounded-full transition-all hover:scale-105"
                     style={{ backgroundColor: colors?.default || '#e5e7eb' }}
                   >
                     <span className="text-white font-medium">{region.display_name}</span>
-                    {placeCount > 0 && (
-                      <span className="bg-white/30 text-white text-xs px-1.5 py-0.5 rounded-full">{placeCount}</span>
-                    )}
                   </button>
                 );
               })}
@@ -730,195 +535,108 @@ export default function MapPage() {
           )}
         </motion.div>
 
-        {/* Region Panel */}
+        {/* Instructions */}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white/70 backdrop-blur rounded-xl shadow-sm p-4 mb-6">
+          <p className="text-center text-gray-500 text-sm">
+            {zoomedRegion
+              ? 'Click a country or state to add it to your wishlist or mark as visited'
+              : 'Click a region to zoom in, then click countries to add them'}
+          </p>
+        </motion.div>
+
+        {/* Location Action Modal */}
         <AnimatePresence>
-          {selectedRegion && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-              className="rounded-2xl shadow-lg p-4 sm:p-6 mb-6"
-              style={{
-                background: `linear-gradient(135deg, ${REGION_COLORS[selectedRegion.code]?.default || '#e5e7eb'}, ${REGION_COLORS[selectedRegion.code]?.hover || '#d1d5db'})`,
-              }}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl sm:text-2xl font-serif font-bold text-white">{selectedRegion.display_name}</h2>
-                <button onClick={() => setSelectedRegion(null)} className="p-2 text-white/70 hover:text-white transition-colors">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Places list */}
-              <div className="space-y-2 mb-4">
-                {selectedRegion.places.length === 0 ? (
-                  <p className="text-white/70 text-center py-4">No places added yet</p>
-                ) : (
-                  selectedRegion.places.map((place) => (
-                    <motion.div
-                      key={place.id}
-                      layout
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="group flex items-center gap-3 bg-white/20 backdrop-blur rounded-lg p-3"
-                    >
-                      <button
-                        onClick={() => togglePlaceStatus(place)}
-                        className={`flex-shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                          place.status === 'visited' ? 'bg-white border-white text-green-600' : 'border-white/70 hover:border-white'
-                        }`}
-                      >
-                        {place.status === 'visited' && (
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                      </button>
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`font-medium text-white ${place.status === 'visited' ? 'line-through opacity-70' : ''}`}>
-                            {place.name}
-                          </span>
-                          {place.added_by && (
-                            <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                              place.added_by === 'daniel' ? 'bg-blue-500/50' : 'bg-rose-500/50'
-                            } text-white/90`}>
-                              {place.added_by === 'daniel' ? 'D' : 'H'}
-                            </span>
-                          )}
-                        </div>
-                        {place.country && <div className="text-sm text-white/70">{place.country}</div>}
-                        {place.notes && <div className="text-sm text-white/60 mt-1">{place.notes}</div>}
-                        {place.visit_date && (
-                          <div className="text-xs text-white/50 mt-1">
-                            Visited: {new Date(place.visit_date).toLocaleDateString()}
-                          </div>
-                        )}
-                      </div>
-
-                      <button
-                        onClick={() => deletePlace(place)}
-                        className="opacity-0 group-hover:opacity-100 p-2 text-white/50 hover:text-white transition-all"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </motion.div>
-                  ))
-                )}
-              </div>
-
-              <button
-                onClick={() => {
-                  setAddingToRegion(selectedRegion.id);
-                  setShowAddModal(true);
-                }}
-                className="w-full py-2 text-sm text-white/80 hover:text-white border border-dashed border-white/40 hover:border-white/70 rounded-lg transition-colors"
-              >
-                + Add place to {selectedRegion.display_name}
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Quick add section */}
-        {!selectedRegion && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white/70 backdrop-blur rounded-xl shadow-sm p-4 mb-6">
-            <p className="text-center text-gray-500">Click a region on the map to see places or add new ones</p>
-          </motion.div>
-        )}
-
-        {/* Add Place Modal */}
-        <AnimatePresence>
-          {showAddModal && (
+          {clickedLocation && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-              onClick={resetForm}
+              onClick={() => setClickedLocation(null)}
             >
               <motion.div
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.9, opacity: 0 }}
-                className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md"
+                className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm"
                 onClick={(e) => e.stopPropagation()}
               >
-                <h3 className="text-xl font-serif font-bold text-gray-800 mb-4">Add New Place</h3>
+                <h3 className="text-xl font-serif font-bold text-gray-800 mb-2">
+                  {clickedLocation.name}
+                </h3>
+                {clickedLocation.isState && (
+                  <p className="text-sm text-gray-500 mb-4">United States</p>
+                )}
 
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Location (type to search)
-                    </label>
-                    <LocationAutocomplete
-                      initialValue={selectedLocation?.name || ''}
-                      onSelect={handleLocationSelect}
-                      placeholder="e.g., Florida, Japan, France..."
-                    />
-                    {selectedLocation && (
-                      <div className="mt-2 flex items-center gap-2">
-                        <span className={`text-xs px-2 py-1 rounded-full ${
-                          selectedLocation.type === 'state' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
-                        }`}>
-                          {selectedLocation.type === 'state' ? `US State: ${selectedLocation.name}` : `Country: ${selectedLocation.name}`}
-                        </span>
+                {(() => {
+                  const place = getPlaceForLocation(clickedLocation.key, clickedLocation.name);
+
+                  if (!place) {
+                    return (
+                      <div className="space-y-3">
                         <button
-                          onClick={() => setSelectedLocation(null)}
-                          className="text-gray-400 hover:text-gray-600"
+                          onClick={() => addToWishlist(clickedLocation.name, clickedLocation.key, clickedLocation.isState)}
+                          className="w-full py-3 bg-teal-500 text-white rounded-xl font-medium hover:bg-teal-600 transition-colors"
                         >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
+                          Add to Wishlist
+                        </button>
+                        <button
+                          onClick={() => setClickedLocation(null)}
+                          className="w-full py-2 text-gray-500 hover:text-gray-700 transition-colors"
+                        >
+                          Cancel
                         </button>
                       </div>
-                    )}
-                  </div>
+                    );
+                  }
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Place Name *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g., Tokyo Tower, Grand Canyon"
-                      value={newPlaceName}
-                      onChange={(e) => setNewPlaceName(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 text-gray-800"
-                    />
-                  </div>
+                  return (
+                    <div className="space-y-3">
+                      <div className={`text-sm px-3 py-2 rounded-lg ${
+                        place.status === 'visited' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                      }`}>
+                        {place.status === 'visited' ? 'You have visited this place!' : 'On your wishlist'}
+                        {place.added_by && (
+                          <span className="ml-2 opacity-70">
+                            (added by {place.added_by === 'daniel' ? 'Daniel' : 'Huaiyao'})
+                          </span>
+                        )}
+                      </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Notes (optional)
-                    </label>
-                    <textarea
-                      placeholder="Why do you want to go here?"
-                      value={newPlaceNotes}
-                      onChange={(e) => setNewPlaceNotes(e.target.value)}
-                      rows={2}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 resize-none"
-                    />
-                  </div>
-                </div>
+                      {place.status === 'wishlist' && (
+                        <button
+                          onClick={() => markAsVisited(place)}
+                          className="w-full py-3 bg-green-500 text-white rounded-xl font-medium hover:bg-green-600 transition-colors"
+                        >
+                          Mark as Visited
+                        </button>
+                      )}
 
-                <div className="flex gap-3 mt-6">
-                  <button onClick={resetForm} className="flex-1 px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors">
-                    Cancel
-                  </button>
-                  <button
-                    onClick={addPlace}
-                    disabled={!newPlaceName.trim() || !addingToRegion}
-                    className="flex-1 px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    Add Place
-                  </button>
-                </div>
+                      {place.status === 'visited' && (
+                        <button
+                          onClick={() => markAsVisited(place)}
+                          className="w-full py-3 bg-blue-500 text-white rounded-xl font-medium hover:bg-blue-600 transition-colors"
+                        >
+                          Move back to Wishlist
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => removePlace(place)}
+                        className="w-full py-2 text-red-500 hover:text-red-700 transition-colors text-sm"
+                      >
+                        Remove from list
+                      </button>
+
+                      <button
+                        onClick={() => setClickedLocation(null)}
+                        className="w-full py-2 text-gray-500 hover:text-gray-700 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  );
+                })()}
               </motion.div>
             </motion.div>
           )}
@@ -927,7 +645,6 @@ export default function MapPage() {
         {/* Footer */}
         <motion.footer initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
           className="text-center mt-12 text-gray-400 text-sm">
-          <p>Click a region · Tap to mark visited</p>
           <p className="mt-2">
             Logged in as{' '}
             <span className={currentUser === 'daniel' ? 'text-blue-500' : 'text-rose-500'}>
