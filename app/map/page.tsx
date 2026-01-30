@@ -187,10 +187,14 @@ export default function MapPage() {
     }
   };
 
-  const addToWishlist = async (name: string, locationKey: string, isState: boolean) => {
+  const addPlace = async (name: string, locationKey: string, isState: boolean, status: 'wishlist' | 'visited') => {
     const regionCode = isState ? 'north-america' : COUNTRY_TO_REGION[name];
     const region = regions.find(r => r.code === regionCode);
-    if (!region) return;
+
+    if (!region) {
+      alert(`Could not find region for ${name}. Make sure you've run the SQL schema in Supabase.`);
+      return;
+    }
 
     const country = isState ? 'United States' : name;
 
@@ -199,17 +203,18 @@ export default function MapPage() {
       p_name: name,
       p_country: country,
       p_location_key: locationKey,
-      p_status: 'wishlist',
+      p_status: status,
       p_added_by: currentUser,
       p_notes: null,
     });
 
     if (error) {
       console.error('Error adding place:', error);
+      alert(`Error adding place: ${error.message}`);
       return;
     }
 
-    sendNotification('place_added', name);
+    sendNotification(status === 'visited' ? 'place_visited' : 'place_added', name);
     fetchData();
     setClickedLocation(null);
   };
@@ -575,10 +580,16 @@ export default function MapPage() {
                     return (
                       <div className="space-y-3">
                         <button
-                          onClick={() => addToWishlist(clickedLocation.name, clickedLocation.key, clickedLocation.isState)}
+                          onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'wishlist')}
                           className="w-full py-3 bg-teal-500 text-white rounded-xl font-medium hover:bg-teal-600 transition-colors"
                         >
                           Add to Wishlist
+                        </button>
+                        <button
+                          onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'visited')}
+                          className="w-full py-3 bg-green-500 text-white rounded-xl font-medium hover:bg-green-600 transition-colors"
+                        >
+                          Mark as Visited
                         </button>
                         <button
                           onClick={() => setClickedLocation(null)}
