@@ -263,7 +263,7 @@ const USMap = memo(function USMap({
   onStateClick,
 }: {
   visitedStates: Set<string>;
-  onStateClick: () => void;
+  onStateClick: (stateName: string) => void;
 }) {
   return (
     <ComposableMap
@@ -283,7 +283,7 @@ const USMap = memo(function USMap({
               <Geography
                 key={geo.rsmKey}
                 geography={geo}
-                onClick={onStateClick}
+                onClick={() => onStateClick(stateName)}
                 style={{
                   default: {
                     fill: isVisited ? colors.visited : colors.default,
@@ -317,26 +317,30 @@ const USMap = memo(function USMap({
 
 // Autocomplete component
 function LocationAutocomplete({
-  value,
-  onChange,
   onSelect,
   placeholder,
+  initialValue = '',
 }: {
-  value: string;
-  onChange: (value: string) => void;
   onSelect: (location: { name: string; type: 'state' | 'country'; key: string }) => void;
   placeholder: string;
+  initialValue?: string;
 }) {
+  const [searchQuery, setSearchQuery] = useState(initialValue);
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
+  // Update search query when initial value changes (e.g., from state click)
+  useEffect(() => {
+    setSearchQuery(initialValue);
+  }, [initialValue]);
+
   const filteredLocations = useMemo(() => {
-    if (!value.trim()) return [];
-    const search = value.toLowerCase();
+    if (!searchQuery.trim()) return [];
+    const search = searchQuery.toLowerCase();
     return ALL_LOCATIONS
       .filter(loc => loc.name.toLowerCase().includes(search))
       .slice(0, 8);
-  }, [value]);
+  }, [searchQuery]);
 
   useEffect(() => {
     setHighlightedIndex(0);
@@ -354,6 +358,7 @@ function LocationAutocomplete({
     } else if (e.key === 'Enter' && filteredLocations[highlightedIndex]) {
       e.preventDefault();
       onSelect(filteredLocations[highlightedIndex]);
+      setSearchQuery(filteredLocations[highlightedIndex].name);
       setIsOpen(false);
     } else if (e.key === 'Escape') {
       setIsOpen(false);
@@ -364,16 +369,16 @@ function LocationAutocomplete({
     <div className="relative">
       <input
         type="text"
-        value={value}
+        value={searchQuery}
         onChange={(e) => {
-          onChange(e.target.value);
+          setSearchQuery(e.target.value);
           setIsOpen(true);
         }}
         onFocus={() => setIsOpen(true)}
         onBlur={() => setTimeout(() => setIsOpen(false), 200)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
-        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300"
+        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 text-gray-800"
         autoComplete="off"
       />
       <AnimatePresence>
@@ -391,9 +396,10 @@ function LocationAutocomplete({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onSelect(loc);
+                  setSearchQuery(loc.name);
                   setIsOpen(false);
                 }}
-                className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-gray-50 ${
+                className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-gray-50 text-gray-800 ${
                   index === highlightedIndex ? 'bg-teal-50' : ''
                 }`}
               >
@@ -665,9 +671,15 @@ export default function MapPage() {
           {showUSMap ? (
             <USMap
               visitedStates={visitedStates}
-              onStateClick={() => {
+              onStateClick={(stateName) => {
                 const naRegion = regions.find(r => r.code === 'north-america');
-                if (naRegion) setSelectedRegion(naRegion);
+                if (naRegion) {
+                  const stateCode = US_STATES[stateName];
+                  setSelectedLocation({ name: stateName, type: 'state', key: stateCode });
+                  setNewPlaceName(stateName);
+                  setAddingToRegion(naRegion.id);
+                  setShowAddModal(true);
+                }
               }}
             />
           ) : (
@@ -845,10 +857,7 @@ export default function MapPage() {
                       Location (type to search)
                     </label>
                     <LocationAutocomplete
-                      value={selectedLocation?.name || ''}
-                      onChange={(value) => {
-                        if (!value) setSelectedLocation(null);
-                      }}
+                      initialValue={selectedLocation?.name || ''}
                       onSelect={handleLocationSelect}
                       placeholder="e.g., Florida, Japan, France..."
                     />
@@ -880,7 +889,7 @@ export default function MapPage() {
                       placeholder="e.g., Tokyo Tower, Grand Canyon"
                       value={newPlaceName}
                       onChange={(e) => setNewPlaceName(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-300 text-gray-800"
                     />
                   </div>
 
