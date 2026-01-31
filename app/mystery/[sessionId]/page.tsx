@@ -511,6 +511,10 @@ export default function MysterySessionPage() {
                     onVote={handleVote}
                     disabled={isVoting}
                   />
+                  {/* Debug: show isVoting state */}
+                  <div className="text-xs text-gray-500 mt-1">
+                    Debug: isVoting={String(isVoting)}, player={currentUser}
+                  </div>
                 </div>
               ))}
 
