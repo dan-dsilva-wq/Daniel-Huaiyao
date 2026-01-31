@@ -22,8 +22,10 @@ export default function TypewriterText({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const hasSpokenRef = useRef(false);
+  const currentTextRef = useRef(text);
 
   // Reset when text changes
   useEffect(() => {
@@ -31,11 +33,15 @@ export default function TypewriterText({
     setCurrentIndex(0);
     setIsComplete(false);
     hasSpokenRef.current = false;
+    currentTextRef.current = text;
 
-    // Cancel any ongoing speech
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+    // Stop any ongoing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
     }
+    setIsSpeaking(false);
+    setIsLoading(false);
   }, [text]);
 
   // Typewriter effect
@@ -52,52 +58,102 @@ export default function TypewriterText({
     }
   }, [currentIndex, text, speed, onComplete, isComplete]);
 
-  // Auto-speak when text changes
+  // Auto-speak using ElevenLabs
   useEffect(() => {
     if (!autoSpeak || hasSpokenRef.current || !text) return;
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
 
     hasSpokenRef.current = true;
 
     // Small delay to let the UI render first
     const speakTimeout = setTimeout(() => {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.9;
-      utterance.pitch = 1;
-
-      // Try to get a good voice
-      const voices = window.speechSynthesis.getVoices();
-      const preferredVoice = voices.find(v =>
-        v.name.includes('Samantha') ||
-        v.name.includes('Google') ||
-        v.name.includes('Microsoft Zira') ||
-        v.lang.startsWith('en')
-      );
-      if (preferredVoice) {
-        utterance.voice = preferredVoice;
-      }
-
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-
-      utteranceRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
-    }, 300);
+      speakText(text);
+    }, 500);
 
     return () => {
       clearTimeout(speakTimeout);
     };
   }, [text, autoSpeak]);
 
-  // Cleanup speech on unmount
+  // Cleanup audio on unmount
   useEffect(() => {
     return () => {
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
       }
     };
   }, []);
+
+  const speakText = async (textToSpeak: string) => {
+    // Stop any existing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+
+    setIsLoading(true);
+    setIsSpeaking(false);
+
+    try {
+      const response = await fetch('/api/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: textToSpeak }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate speech');
+      }
+
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      // Check if text has changed while loading
+      if (currentTextRef.current !== textToSpeak) {
+        URL.revokeObjectURL(audioUrl);
+        return;
+      }
+
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+
+      audio.onplay = () => {
+        setIsLoading(false);
+        setIsSpeaking(true);
+      };
+
+      audio.onended = () => {
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      audio.onerror = () => {
+        setIsLoading(false);
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+        // Fallback to Web Speech API
+        fallbackSpeak(textToSpeak);
+      };
+
+      await audio.play();
+    } catch (error) {
+      console.error('ElevenLabs error:', error);
+      setIsLoading(false);
+      // Fallback to Web Speech API
+      fallbackSpeak(textToSpeak);
+    }
+  };
+
+  const fallbackSpeak = (textToSpeak: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    utterance.rate = 0.9;
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  };
 
   const handleSkip = () => {
     setDisplayedText(text);
@@ -107,18 +163,14 @@ export default function TypewriterText({
   };
 
   const toggleSpeech = () => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    if (isLoading) return;
 
-    if (isSpeaking) {
-      window.speechSynthesis.cancel();
+    if (isSpeaking && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
       setIsSpeaking(false);
     } else {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.9;
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-      window.speechSynthesis.speak(utterance);
+      speakText(text);
     }
   };
 
@@ -148,20 +200,31 @@ export default function TypewriterText({
 
         <button
           onClick={toggleSpeech}
+          disabled={isLoading}
           className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full transition-colors ${
-            isSpeaking
+            isLoading
+              ? 'bg-white/5 text-purple-400'
+              : isSpeaking
               ? 'bg-amber-500/20 text-amber-400'
               : 'bg-white/10 text-purple-300 hover:text-white'
           }`}
         >
-          {isSpeaking ? (
+          {isLoading ? (
             <>
-              <span className="animate-pulse">🔊</span> Speaking...
+              <motion.span
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+              >
+                ⏳
+              </motion.span>{' '}
+              Loading...
+            </>
+          ) : isSpeaking ? (
+            <>
+              <span className="animate-pulse">🔊</span> Playing...
             </>
           ) : (
-            <>
-              🔈 Read aloud
-            </>
+            <>🔈 Read aloud</>
           )}
         </button>
       </div>
