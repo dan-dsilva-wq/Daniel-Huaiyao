@@ -561,35 +561,35 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Escape room puzzles
 INSERT INTO mystery_puzzles (id, scene_id, puzzle_type, difficulty, title, description, puzzle_data, answer_type, answer_config, hints, max_hints, is_blocking, next_scene_on_solve)
-VALUES ('p2000000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000002', 'research', 2,
+VALUES ('a2000000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000002', 'research', 2,
   'Einstein''s Year', 'E=mc² was published in what year? Subtract 100.',
   '{"clue": "Einstein''s special relativity paper"}', 'numeric', '{"correct_value": 1805, "tolerance": 0}',
   '["Einstein''s miracle year was 1905", "1905 - 100 = 1805"]', 2, true, 'b1000000-0000-0000-0000-000000000003')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO mystery_puzzles (id, scene_id, puzzle_type, difficulty, title, description, puzzle_data, answer_type, answer_config, hints, max_hints, is_blocking, next_scene_on_solve)
-VALUES ('p2000000-0000-0000-0000-000000000002', 'b1000000-0000-0000-0000-000000000004', 'sequence', 3,
+VALUES ('a2000000-0000-0000-0000-000000000002', 'b1000000-0000-0000-0000-000000000004', 'sequence', 3,
   'Three Sequences', 'Color: alternates. Number: ×3 each time. Letter: gaps +2,+3,+4,+5,+6',
   '{"sequences": "See description"}', 'exact', ('{"answer_hash": "' || encode(sha256('blue162u'::bytea), 'hex') || '"}')::jsonb,
   '["Color alternates: Blue", "2×3=6, 6×3=18, 54×3=162", "O(15)+6=U(21). Answer: Blue162U"]', 3, true, 'b1000000-0000-0000-0000-000000000005')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO mystery_puzzles (id, scene_id, puzzle_type, difficulty, title, description, puzzle_data, answer_type, answer_config, hints, max_hints, is_blocking, next_scene_on_solve)
-VALUES ('p2000000-0000-0000-0000-000000000003', 'b1000000-0000-0000-0000-000000000006', 'number_theory', 3,
+VALUES ('a2000000-0000-0000-0000-000000000003', 'b1000000-0000-0000-0000-000000000006', 'number_theory', 3,
   'The Safe Code', '♠ + 3×7 = 52Jean solve for ♠, then ♣ = ♠ - 26. Enter as: ♠,♣',
   '{"equation": "♠ + 21 = 52"}', 'exact', ('{"answer_hash": "' || encode(sha256('31,5'::bytea), 'hex') || '"}')::jsonb,
   '["♠ + 21 = 52, so ♠ = 31", "♣ = 31 - 26 = 5", "Answer: 31,5"]', 3, true, 'b1000000-0000-0000-0000-000000000007')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO mystery_puzzles (id, scene_id, puzzle_type, difficulty, title, description, puzzle_data, answer_type, answer_config, hints, max_hints, is_blocking, next_scene_on_solve)
-VALUES ('p2000000-0000-0000-0000-000000000004', 'b1000000-0000-0000-0000-000000000008', 'number_theory', 2,
+VALUES ('a2000000-0000-0000-0000-000000000004', 'b1000000-0000-0000-0000-000000000008', 'number_theory', 2,
   'Clock Time', 'Smallest prime, twice. Format: HH:MM',
   '{"clue": "smallest prime number"}', 'exact', ('{"answer_hash": "' || encode(sha256('02:02'::bytea), 'hex') || '"}')::jsonb,
   '["Smallest prime is 2", "Hours=2, Minutes=2", "Answer: 02:02"]', 3, true, 'b1000000-0000-0000-0000-000000000009')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO mystery_puzzles (id, scene_id, puzzle_type, difficulty, title, description, puzzle_data, answer_type, answer_config, hints, max_hints, is_blocking, next_scene_on_solve)
-VALUES ('p2000000-0000-0000-0000-000000000005', 'b1000000-0000-0000-0000-000000000010', 'number_theory', 3,
+VALUES ('a2000000-0000-0000-0000-000000000005', 'b1000000-0000-0000-0000-000000000010', 'number_theory', 3,
   'Key Order', 'π=key1, e=key2, φ=key3, |i|=key4. Order smallest→largest value.',
   '{"values": "|i|=1, φ≈1.618, e≈2.718, π≈3.14"}', 'exact', ('{"answer_hash": "' || encode(sha256('4321'::bytea), 'hex') || '"}')::jsonb,
   '["Smallest to largest: |i|, φ, e, π", "That''s keys: 4, 3, 2, 1", "Answer: 4321"]', 3, true, 'b1000000-0000-0000-0000-000000000011')
