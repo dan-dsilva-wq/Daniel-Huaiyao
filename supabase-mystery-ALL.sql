@@ -418,32 +418,32 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Test choices
 INSERT INTO mystery_choices (id, scene_id, choice_order, choice_text, next_scene_id)
-VALUES ('ch100000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000001', 1, 'Start Test', 'c1000000-0000-0000-0000-000000000002')
+VALUES ('cc100000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000001', 1, 'Start Test', 'c1000000-0000-0000-0000-000000000002')
 ON CONFLICT (id) DO NOTHING;
 
 -- Test puzzles
 INSERT INTO mystery_puzzles (id, scene_id, puzzle_type, difficulty, title, description, puzzle_data, answer_type, answer_config, hints, max_hints, is_blocking, next_scene_on_solve)
-VALUES ('pt000000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000002', 'number_theory', 1,
+VALUES ('dd000000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000002', 'number_theory', 1,
   'Number Test', 'What is 6 × 7?', '{"equations": ["6 × 7 = ?"]}', 'numeric', '{"correct_value": 42, "tolerance": 0}',
   '["The answer is 42"]', 1, true, 'c1000000-0000-0000-0000-000000000003')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO mystery_puzzles (id, scene_id, puzzle_type, difficulty, title, description, puzzle_data, answer_type, answer_config, hints, max_hints, is_blocking, next_scene_on_solve)
-VALUES ('pt000000-0000-0000-0000-000000000002', 'c1000000-0000-0000-0000-000000000003', 'cryptography', 1,
+VALUES ('dd000000-0000-0000-0000-000000000002', 'c1000000-0000-0000-0000-000000000003', 'cryptography', 1,
   'Text Test', 'Decode: IFMMP (shift -1)', '{"ciphertext": "IFMMP"}', 'exact',
   '{"answer_hash": "' || encode(sha256('hello'::bytea), 'hex') || '"}',
   '["Answer: hello"]', 1, true, 'c1000000-0000-0000-0000-000000000004')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO mystery_puzzles (id, scene_id, puzzle_type, difficulty, title, description, puzzle_data, answer_type, answer_config, hints, max_hints, is_blocking, next_scene_on_solve)
-VALUES ('pt000000-0000-0000-0000-000000000003', 'c1000000-0000-0000-0000-000000000004', 'logic', 1,
+VALUES ('dd000000-0000-0000-0000-000000000003', 'c1000000-0000-0000-0000-000000000004', 'logic', 1,
   'Logic Test', 'What is on the mat?', '{"question": "Fish=tank, Dog=yard, ?=mat"}', 'exact',
   '{"answer_hash": "' || encode(sha256('cat'::bytea), 'hex') || '"}',
   '["Answer: cat"]', 1, true, 'c1000000-0000-0000-0000-000000000005')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO mystery_puzzles (id, scene_id, puzzle_type, difficulty, title, description, puzzle_data, answer_type, answer_config, hints, max_hints, is_blocking, next_scene_on_solve)
-VALUES ('pt000000-0000-0000-0000-000000000004', 'c1000000-0000-0000-0000-000000000005', 'sequence', 1,
+VALUES ('dd000000-0000-0000-0000-000000000004', 'c1000000-0000-0000-0000-000000000005', 'sequence', 1,
   'Sequence Test', '2, 4, 6, 8, ?', '{"sequence": [2,4,6,8]}', 'numeric', '{"correct_value": 10, "tolerance": 0}',
   '["Answer: 10"]', 1, true, 'c1000000-0000-0000-0000-000000000006')
 ON CONFLICT (id) DO NOTHING;
@@ -544,19 +544,19 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Escape room choices
 INSERT INTO mystery_choices (id, scene_id, choice_order, choice_text, next_scene_id) VALUES
-('ch200000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000001', 1, 'Examine the desk', 'b1000000-0000-0000-0000-000000000002')
+('cc200000-0000-0000-0000-000000000001', 'b1000000-0000-0000-0000-000000000001', 1, 'Examine the desk', 'b1000000-0000-0000-0000-000000000002')
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO mystery_choices (id, scene_id, choice_order, choice_text, next_scene_id) VALUES
-('ch200000-0000-0000-0000-000000000002', 'b1000000-0000-0000-0000-000000000003', 1, 'Check the bookshelf', 'b1000000-0000-0000-0000-000000000004')
+('cc200000-0000-0000-0000-000000000002', 'b1000000-0000-0000-0000-000000000003', 1, 'Check the bookshelf', 'b1000000-0000-0000-0000-000000000004')
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO mystery_choices (id, scene_id, choice_order, choice_text, next_scene_id) VALUES
-('ch200000-0000-0000-0000-000000000003', 'b1000000-0000-0000-0000-000000000005', 1, 'Examine the painting', 'b1000000-0000-0000-0000-000000000006')
+('cc200000-0000-0000-0000-000000000003', 'b1000000-0000-0000-0000-000000000005', 1, 'Examine the painting', 'b1000000-0000-0000-0000-000000000006')
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO mystery_choices (id, scene_id, choice_order, choice_text, next_scene_id) VALUES
-('ch200000-0000-0000-0000-000000000004', 'b1000000-0000-0000-0000-000000000007', 1, 'Check the clock', 'b1000000-0000-0000-0000-000000000008')
+('cc200000-0000-0000-0000-000000000004', 'b1000000-0000-0000-0000-000000000007', 1, 'Check the clock', 'b1000000-0000-0000-0000-000000000008')
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO mystery_choices (id, scene_id, choice_order, choice_text, next_scene_id) VALUES
-('ch200000-0000-0000-0000-000000000005', 'b1000000-0000-0000-0000-000000000009', 1, 'Go to the door', 'b1000000-0000-0000-0000-000000000010')
+('cc200000-0000-0000-0000-000000000005', 'b1000000-0000-0000-0000-000000000009', 1, 'Go to the door', 'b1000000-0000-0000-0000-000000000010')
 ON CONFLICT (id) DO NOTHING;
 
 -- Escape room puzzles
