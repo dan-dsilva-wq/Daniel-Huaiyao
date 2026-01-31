@@ -21,7 +21,7 @@ function isWithinAllowedHours(): boolean {
   return hour >= QUIET_HOURS_END && hour < QUIET_HOURS_START;
 }
 
-type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited';
+type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed';
 
 const ACTION_MESSAGES: Record<ActionType, string> = {
   added: 'added a new date idea',
@@ -32,6 +32,9 @@ const ACTION_MESSAGES: Record<ActionType, string> = {
   question_answered: 'answered your quiz question',
   place_added: 'added a new place to the map',
   place_visited: 'marked a place as visited',
+  mystery_started: 'started a mystery game',
+  mystery_waiting: 'is waiting for you to join a mystery',
+  mystery_agreed: 'made a decision together in the mystery',
 };
 
 export async function POST(request: Request) {
@@ -58,19 +61,22 @@ export async function POST(request: Request) {
     // Determine notification type
     const isQuiz = action === 'question_added' || action === 'question_answered';
     const isMap = action === 'place_added' || action === 'place_visited';
+    const isMystery = action === 'mystery_started' || action === 'mystery_waiting' || action === 'mystery_agreed';
 
     // Notify the OTHER person
     const recipientKey = user === 'daniel' ? USER_KEYS.huaiyao : USER_KEYS.daniel;
     const senderName = user === 'daniel' ? 'Daniel' : 'Huaiyao';
 
-    const notificationTitle = isQuiz ? 'Quiz Time' : isMap ? 'Our Map' : 'Date Ideas Updated';
+    const notificationTitle = isQuiz ? 'Quiz Time' : isMap ? 'Our Map' : isMystery ? 'Mystery Files' : 'Date Ideas Updated';
     const message = `${senderName} ${ACTION_MESSAGES[action]}`;
     const notificationUrl = isQuiz
       ? 'https://daniel-huaiyao.vercel.app/quiz'
       : isMap
       ? 'https://daniel-huaiyao.vercel.app/map'
+      : isMystery
+      ? 'https://daniel-huaiyao.vercel.app/mystery'
       : 'https://daniel-huaiyao.vercel.app/dates';
-    const urlTitle = isQuiz ? 'Answer Quiz' : isMap ? 'View Map' : 'View Date Ideas';
+    const urlTitle = isQuiz ? 'Answer Quiz' : isMap ? 'View Map' : isMystery ? 'Join Mystery' : 'View Date Ideas';
 
     const formData = new URLSearchParams({
       token: PUSHOVER_APP_TOKEN,

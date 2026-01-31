@@ -88,6 +88,13 @@ const apps: AppCardProps[] = [
     href: '/quiz',
     gradient: 'from-indigo-500 to-purple-600',
   },
+  {
+    title: 'Mystery Files',
+    description: 'Solve mysteries together',
+    icon: '🔍',
+    href: '/mystery',
+    gradient: 'from-purple-900 to-slate-900',
+  },
 ];
 
 const wipApps: AppCardProps[] = [
