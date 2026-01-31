@@ -199,14 +199,17 @@ export default function MysterySessionPage() {
     // Use ref as primary guard (not affected by re-renders)
     if (votingRef.current) {
       console.log('[VOTE DEBUG] Blocked by votingRef');
+      setLastRpcResponse('Blocked by votingRef (another vote in progress)');
       return;
     }
 
     // Check if this player already voted for this choice
     const alreadyVoted = gameState?.votes?.some(v => v.player === currentUser && v.choice_id === choiceId);
+    const currentVotes = gameState?.votes || [];
 
     if (!currentUser || alreadyVoted) {
       console.log('[VOTE DEBUG] Early return - currentUser:', currentUser, 'alreadyVoted:', alreadyVoted);
+      setLastRpcResponse(`Early return: user=${currentUser}, alreadyVoted=${alreadyVoted}, votes=${JSON.stringify(currentVotes)}`);
       return;
     }
 
