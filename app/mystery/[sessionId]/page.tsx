@@ -24,15 +24,19 @@ export default function MysterySessionPage() {
   const [showCelebration, setShowCelebration] = useState(false);
   const [isVoting, setIsVoting] = useState(false);
   const [puzzleSolved, setPuzzleSolved] = useState(false);
+  const [currentSceneId, setCurrentSceneId] = useState<string | null>(null);
+  const [textComplete, setTextComplete] = useState(false);
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
 
   // Check if scene has a blocking puzzle that needs solving
   const hasPuzzle = gameState?.puzzle != null;
   const isBlockingPuzzle = hasPuzzle && gameState?.puzzle?.is_blocking;
-  const shouldShowChoices = showChoices && (!isBlockingPuzzle || puzzleSolved);
+  // Show choices once text is complete OR showChoices is true (keep visible)
+  const choicesReady = showChoices || textComplete;
+  const shouldShowChoices = choicesReady && (!isBlockingPuzzle || puzzleSolved);
 
-  const fetchGameState = useCallback(async () => {
+  const fetchGameState = useCallback(async (forceReset = false) => {
     if (!isSupabaseConfigured || !sessionId) return;
 
     try {
@@ -46,15 +50,23 @@ export default function MysterySessionPage() {
         return;
       }
 
+      // Only reset choices/text when scene actually changes
+      const sceneChanged = currentSceneId !== null && currentSceneId !== data.scene.id;
+
+      if (sceneChanged || forceReset) {
+        setShowChoices(false);
+        setTextComplete(false);
+        setPuzzleSolved(false);
+      }
+
+      setCurrentSceneId(data.scene.id);
       setGameState(data);
-      setShowChoices(false); // Reset for new scene
-      setPuzzleSolved(false); // Reset puzzle state for new scene
     } catch (err) {
       console.error('Error fetching game state:', err);
       setError('Failed to load game');
     }
     setIsLoading(false);
-  }, [sessionId]);
+  }, [sessionId, currentSceneId]);
 
   // Initialize user
   useEffect(() => {
@@ -75,10 +87,11 @@ export default function MysterySessionPage() {
         p_session_id: sessionId,
         p_player: currentUser,
       }).then(() => {
-        fetchGameState();
+        fetchGameState(true); // Force reset on initial load
       });
     }
-  }, [currentUser, sessionId, fetchGameState]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, sessionId]);
 
   // Subscribe to real-time updates
   useEffect(() => {
@@ -95,12 +108,21 @@ export default function MysterySessionPage() {
           table: 'mystery_sessions',
           filter: `id=eq.${sessionId}`,
         },
-        (payload) => {
-          // Scene changed - refetch full state
-          if (gameState && payload.new.current_scene_id !== gameState.session.current_scene_id) {
+        async (payload) => {
+          // Scene changed - show celebration and refetch
+          const newSceneId = (payload.new as { current_scene_id: string }).current_scene_id;
+          if (currentSceneId && newSceneId !== currentSceneId) {
             setShowCelebration(true);
+            setShowChoices(false);
+            setTextComplete(false);
+            setPuzzleSolved(false);
           }
-          fetchGameState();
+          // Fetch latest state
+          const { data } = await supabase.rpc('get_mystery_game_state', { p_session_id: sessionId });
+          if (data) {
+            setCurrentSceneId(data.scene.id);
+            setGameState(data);
+          }
         }
       )
       .subscribe();
@@ -116,8 +138,10 @@ export default function MysterySessionPage() {
           table: 'mystery_votes',
           filter: `session_id=eq.${sessionId}`,
         },
-        () => {
-          fetchGameState();
+        async () => {
+          // Just update votes, don't reset anything
+          const { data } = await supabase.rpc('get_mystery_game_state', { p_session_id: sessionId });
+          if (data) setGameState(data);
         }
       )
       .subscribe();
@@ -133,13 +157,14 @@ export default function MysterySessionPage() {
           table: 'mystery_puzzle_answers',
           filter: `session_id=eq.${sessionId}`,
         },
-        (payload) => {
+        async (payload) => {
           // Check if puzzle was solved
           if (payload.new && (payload.new as { status: string }).status === 'solved') {
             setPuzzleSolved(true);
             setShowCelebration(true);
           }
-          fetchGameState();
+          const { data } = await supabase.rpc('get_mystery_game_state', { p_session_id: sessionId });
+          if (data) setGameState(data);
         }
       )
       .subscribe();
@@ -149,7 +174,7 @@ export default function MysterySessionPage() {
       supabase.removeChannel(votesChannel);
       supabase.removeChannel(puzzleChannel);
     };
-  }, [sessionId, currentUser, gameState, fetchGameState]);
+  }, [sessionId, currentUser, currentSceneId]);
 
   // Heartbeat to update presence
   useEffect(() => {
@@ -203,8 +228,8 @@ export default function MysterySessionPage() {
   };
 
   const handleTypewriterComplete = () => {
-    // Small delay before showing choices
-    setTimeout(() => setShowChoices(true), 500);
+    setTextComplete(true);
+    setShowChoices(true);
   };
 
   // Loading state
@@ -388,12 +413,19 @@ export default function MysterySessionPage() {
               {scene.title}
             </h2>
           )}
-          <TypewriterText
-            text={scene.narrative_text}
-            speed={25}
-            onComplete={handleTypewriterComplete}
-            className="text-purple-100 leading-relaxed text-lg"
-          />
+          {/* If text already completed, show full text instantly. Otherwise use typewriter */}
+          {textComplete ? (
+            <p className="text-purple-100 leading-relaxed text-lg whitespace-pre-wrap">
+              {scene.narrative_text}
+            </p>
+          ) : (
+            <TypewriterText
+              text={scene.narrative_text}
+              speed={25}
+              onComplete={handleTypewriterComplete}
+              className="text-purple-100 leading-relaxed text-lg"
+            />
+          )}
         </motion.div>
 
         {/* Puzzle Section */}
@@ -445,16 +477,13 @@ export default function MysterySessionPage() {
           </motion.div>
         )}
 
-        {/* Choices */}
-        <AnimatePresence mode="wait">
-          {shouldShowChoices && scene.is_decision_point && choices.length > 0 && (
-            <motion.div
-              key={`choices-${scene.id}`}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="space-y-3 pb-8"
-            >
+        {/* Choices - always visible once text complete */}
+        {shouldShowChoices && scene.is_decision_point && choices.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-3 pb-8"
+          >
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-medium text-purple-300">
                   What do you want to do?
@@ -501,35 +530,33 @@ export default function MysterySessionPage() {
             </motion.div>
           )}
 
-          {/* Continue button for non-decision scenes */}
-          {shouldShowChoices && !scene.is_decision_point && choices.length > 0 && (
-            <motion.div
-              key={`continue-${scene.id}`}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="pb-8"
+        {/* Continue button for non-decision scenes */}
+        {shouldShowChoices && !scene.is_decision_point && choices.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="pb-8"
+          >
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => handleVote(choices[0].id)}
+              disabled={isVoting}
+              className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-purple-950 rounded-xl font-semibold transition-colors disabled:opacity-50"
             >
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => handleVote(choices[0].id)}
-                disabled={isVoting}
-                className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-purple-950 rounded-xl font-semibold transition-colors disabled:opacity-50"
+              Continue →
+            </motion.button>
+            {votes.length === 1 && (
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-center text-amber-400 text-sm mt-3"
               >
-                Continue →
-              </motion.button>
-              {votes.length === 1 && (
-                <motion.p
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="text-center text-amber-400 text-sm mt-3"
-                >
-                  Waiting for {votes[0].player === currentUser ? partnerName : 'you'} to continue...
-                </motion.p>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+                Waiting for {votes[0].player === currentUser ? partnerName : 'you'} to continue...
+              </motion.p>
+            )}
+          </motion.div>
+        )}
 
         {/* Footer */}
         <motion.footer
