@@ -28,7 +28,10 @@ export default function ChoiceButton({
     <motion.button
       whileHover={{ scale: disabled ? 1 : 1.02 }}
       whileTap={{ scale: disabled ? 1 : 0.98 }}
-      onClick={() => !disabled && onVote(choiceId)}
+      onClick={() => {
+        console.log('[BUTTON DEBUG] Button clicked', { choiceId, disabled, currentPlayer });
+        if (!disabled) onVote(choiceId);
+      }}
       disabled={disabled}
       className={`
         relative w-full p-4 rounded-xl text-left transition-all

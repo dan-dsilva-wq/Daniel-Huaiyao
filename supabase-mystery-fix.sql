@@ -1,7 +1,7 @@
 -- Fix Mystery Story: Narrative Consistency
--- Run this to fix the branching issues
+-- Safe to run multiple times (uses upserts)
 
--- First, create a new scene for the "quiet" ending
+-- Create or update the "quiet" ending scene
 INSERT INTO mystery_scenes (id, episode_id, scene_order, title, narrative_text, is_decision_point, is_ending, ending_type)
 VALUES (
   'a1000000-0000-0000-0000-000000000013',
@@ -26,13 +26,14 @@ THE END - A Quiet Resolution',
   false,
   true,
   'good'
-);
+)
+ON CONFLICT (id) DO UPDATE SET
+  narrative_text = EXCLUDED.narrative_text,
+  title = EXCLUDED.title;
 
 -- Update scene 8 choices to point to correct endings
--- First, delete the old choices for scene 8
 DELETE FROM mystery_choices WHERE scene_id = 'a1000000-0000-0000-0000-000000000008';
 
--- Re-add with correct destinations
 INSERT INTO mystery_choices (scene_id, choice_order, choice_text, next_scene_id) VALUES
 ('a1000000-0000-0000-0000-000000000008', 1, 'Gather everyone and reveal the truth gently', 'a1000000-0000-0000-0000-000000000009'),
 ('a1000000-0000-0000-0000-000000000008', 2, 'Quietly return the photo and say nothing', 'a1000000-0000-0000-0000-000000000013');

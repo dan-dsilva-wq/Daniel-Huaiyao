@@ -191,15 +191,24 @@ export default function MysterySessionPage() {
   }, [sessionId, currentUser]);
 
   const handleVote = async (choiceId: string) => {
-    if (!currentUser || isVoting) return;
+    console.log('[VOTE DEBUG] handleVote called', { choiceId, currentUser, isVoting });
+
+    if (!currentUser || isVoting) {
+      console.log('[VOTE DEBUG] Early return - currentUser:', currentUser, 'isVoting:', isVoting);
+      return;
+    }
 
     setIsVoting(true);
+    console.log('[VOTE DEBUG] Calling RPC cast_mystery_vote');
+
     try {
       const { data, error: voteError } = await supabase.rpc('cast_mystery_vote', {
         p_session_id: sessionId,
         p_player: currentUser,
         p_choice_id: choiceId,
       });
+
+      console.log('[VOTE DEBUG] RPC response:', { data, voteError });
 
       if (voteError) throw voteError;
 
@@ -217,9 +226,10 @@ export default function MysterySessionPage() {
         });
       }
     } catch (err) {
-      console.error('Error voting:', err);
+      console.error('[VOTE DEBUG] Error voting:', err);
     }
     setIsVoting(false);
+    console.log('[VOTE DEBUG] Vote complete, isVoting set to false');
   };
 
   const handleCelebrationComplete = () => {
