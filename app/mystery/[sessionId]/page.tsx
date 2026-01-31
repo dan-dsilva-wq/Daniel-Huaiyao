@@ -303,12 +303,12 @@ export default function MysterySessionPage() {
 
   // Main game UI
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950">
+    <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 overflow-x-hidden">
       {/* Agreement celebration overlay */}
       <AgreementCelebration show={showCelebration} onComplete={handleCelebrationComplete} />
 
       {/* Background effects */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+      <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
         <motion.div
           className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl"
           animate={{ scale: [1, 1.1, 1], x: [0, 20, 0] }}
@@ -321,7 +321,7 @@ export default function MysterySessionPage() {
         />
       </div>
 
-      <main className="relative z-10 max-w-2xl mx-auto px-4 py-6 pb-safe">
+      <main className="relative z-10 max-w-2xl mx-auto px-4 py-6 pb-32">
         {/* Header */}
         <motion.header
           initial={{ opacity: 0, y: -20 }}
@@ -366,13 +366,14 @@ export default function MysterySessionPage() {
         </motion.div>
 
         {/* Choices */}
-        <AnimatePresence>
+        <AnimatePresence mode="wait">
           {showChoices && scene.is_decision_point && choices.length > 0 && (
             <motion.div
+              key={`choices-${scene.id}`}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="space-y-3"
+              exit={{ opacity: 0 }}
+              className="space-y-3 pb-8"
             >
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-medium text-purple-300">
@@ -423,8 +424,10 @@ export default function MysterySessionPage() {
           {/* Continue button for non-decision scenes */}
           {showChoices && !scene.is_decision_point && choices.length > 0 && (
             <motion.div
+              key={`continue-${scene.id}`}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
+              className="pb-8"
             >
               <motion.button
                 whileHover={{ scale: 1.02 }}
