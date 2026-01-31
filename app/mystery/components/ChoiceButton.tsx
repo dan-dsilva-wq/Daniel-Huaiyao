@@ -1,6 +1,5 @@
 'use client';
 
-import { motion } from 'framer-motion';
 import type { Player, MysteryVote } from '@/lib/supabase';
 
 interface ChoiceButtonProps {
@@ -25,9 +24,7 @@ export default function ChoiceButton({
   const currentPlayerVoted = votes.find(v => v.player === currentPlayer && v.choice_id === choiceId);
 
   return (
-    <motion.button
-      whileHover={{ scale: disabled ? 1 : 1.02 }}
-      whileTap={{ scale: disabled ? 1 : 0.98 }}
+    <button
       onClick={() => {
         console.log('[BUTTON DEBUG] Button clicked', { choiceId, disabled, currentPlayer });
         if (!disabled) onVote(choiceId);
@@ -47,26 +44,16 @@ export default function ChoiceButton({
       {/* Vote indicators */}
       <div className="absolute right-3 top-1/2 -translate-y-1/2 flex gap-2">
         {danielVoted && (
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold text-white shadow-md"
-            title="Daniel voted"
-          >
+          <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold text-white shadow-md">
             D
-          </motion.div>
+          </div>
         )}
         {huaiyaoVoted && (
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            className="w-6 h-6 rounded-full bg-rose-500 flex items-center justify-center text-xs font-bold text-white shadow-md"
-            title="Huaiyao voted"
-          >
+          <div className="w-6 h-6 rounded-full bg-rose-500 flex items-center justify-center text-xs font-bold text-white shadow-md">
             H
-          </motion.div>
+          </div>
         )}
       </div>
-    </motion.button>
+    </button>
   );
 }
