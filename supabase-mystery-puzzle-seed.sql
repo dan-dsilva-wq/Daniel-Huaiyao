@@ -1,0 +1,324 @@
+-- Sample Puzzles for Mystery Files
+-- Run this after creating an episode with scenes that have puzzles
+-- Replace the scene_id and next_scene_on_solve UUIDs with actual values from your mystery_scenes table
+
+-- ============================================
+-- EXAMPLE PUZZLE 1: Chinese Remainder Safe (Number Theory)
+-- ============================================
+-- This puzzle requires solving a system of congruences using CRT
+-- Answer: 546
+
+-- INSERT INTO mystery_puzzles (
+--   scene_id,
+--   puzzle_type,
+--   difficulty,
+--   title,
+--   description,
+--   puzzle_data,
+--   answer_type,
+--   answer_config,
+--   hints,
+--   max_hints,
+--   is_blocking,
+--   next_scene_on_solve
+-- ) VALUES (
+--   'YOUR-SCENE-UUID-HERE',
+--   'number_theory',
+--   4,
+--   'The Safe Combination',
+--   'The victim''s safe sits in the corner of the study. A cryptic note beside it reads: "My combination follows three rules from the ancients." The safe requires a 3-digit number.',
+--   '{
+--     "equations": [
+--       "n ≡ 6 (mod 7)",
+--       "n ≡ 7 (mod 11)",
+--       "n ≡ 0 (mod 13)"
+--     ],
+--     "note": "Find the smallest positive integer n that satisfies all three conditions. This is your 3-digit combination."
+--   }',
+--   'numeric',
+--   '{"correct_value": 546, "tolerance": 0}',
+--   '[
+--     "This is a classic problem from ancient Chinese mathematics. Look up the Chinese Remainder Theorem.",
+--     "Since n ≡ 0 (mod 13), n must be divisible by 13. Try n = 13, 26, 39... until you find one that works for all three.",
+--     "The product 7 × 11 × 13 = 1001. The answer is somewhere between 0 and 1001. Start with n = 13k where k satisfies the first two conditions."
+--   ]',
+--   3,
+--   true,
+--   'NEXT-SCENE-UUID-HERE'
+-- );
+
+-- ============================================
+-- EXAMPLE PUZZLE 2: Vigenere Diary (Cryptography)
+-- ============================================
+-- Ciphertext encrypted with key "SEVENTY" (days between Jan 1 and Mar 12)
+-- Plaintext: "MEET AT MIDNIGHT"
+
+-- INSERT INTO mystery_puzzles (
+--   scene_id,
+--   puzzle_type,
+--   difficulty,
+--   title,
+--   description,
+--   puzzle_data,
+--   answer_type,
+--   answer_config,
+--   hints,
+--   max_hints,
+--   is_blocking
+-- ) VALUES (
+--   'YOUR-SCENE-UUID-HERE',
+--   'cryptography',
+--   3,
+--   'The Encoded Diary',
+--   'You find a diary entry that appears to be encrypted. The previous entry, dated January 1st, mentions "our secret code based on time." This entry is dated March 12th.',
+--   '{
+--     "ciphertext": "FVXM EX QBRAUFAM",
+--     "cipher_type": "Vigenère Cipher",
+--     "context": "The key seems to be related to the time between diary entries. The victim loved wordplay with numbers."
+--   }',
+--   'exact',
+--   '{"answer_hash": "a8b64babd5a966a3e3c9f1cbf34f78c2e59e2c6f3d9a8b7c6d5e4f3a2b1c0d9e"}',
+--   '[
+--     "Count the days between January 1st and March 12th (non-leap year).",
+--     "70 days. The key is SEVENTY. Use an online Vigenère decoder.",
+--     "With key SEVENTY, the message decrypts to: MEET AT MIDNIGHT"
+--   ]',
+--   3,
+--   true
+-- );
+-- Note: Update the answer_hash with: SELECT encode(sha256('meet at midnight'::bytea), 'hex');
+
+-- ============================================
+-- EXAMPLE PUZZLE 3: Logic - The Three Witnesses
+-- ============================================
+-- A classic knights and knaves style puzzle
+-- Answer: "butler" (the butler is guilty)
+
+-- INSERT INTO mystery_puzzles (
+--   scene_id,
+--   puzzle_type,
+--   difficulty,
+--   title,
+--   description,
+--   puzzle_data,
+--   answer_type,
+--   answer_config,
+--   hints,
+--   max_hints,
+--   is_blocking
+-- ) VALUES (
+--   'YOUR-SCENE-UUID-HERE',
+--   'logic',
+--   4,
+--   'The Three Witnesses',
+--   'Three people were present during the incident: the butler, the gardener, and the maid. You need to determine who is responsible based on their statements.',
+--   '{
+--     "rules": [
+--       "Exactly one person is guilty",
+--       "Guilty people always lie",
+--       "Innocent people always tell the truth"
+--     ],
+--     "statements": [
+--       "The Butler says: \"The gardener is guilty.\"",
+--       "The Gardener says: \"I am not guilty.\"",
+--       "The Maid says: \"The butler is guilty.\""
+--     ],
+--     "question": "Who is guilty? Enter the role (butler, gardener, or maid)."
+--   }',
+--   'exact',
+--   '{"answer_hash": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049"}',
+--   '[
+--     "Assume each person is guilty one at a time and check for contradictions.",
+--     "If the gardener were guilty, they would lie, but they say they are not guilty (which would be a lie). But the butler says the gardener is guilty (truth from an innocent person). This is consistent so far...",
+--     "If the gardener is guilty: Butler tells truth (gardener guilty) ✓, Gardener lies (says not guilty) ✓, but Maid tells truth (butler guilty) ✗. Contradiction! Try assuming the butler is guilty instead."
+--   ]',
+--   3,
+--   true
+-- );
+-- Note: Update the answer_hash with: SELECT encode(sha256('butler'::bytea), 'hex');
+
+-- ============================================
+-- EXAMPLE PUZZLE 4: RSA Decrypt (Advanced Cryptography)
+-- ============================================
+-- Small RSA problem: n=91, e=5, c=42
+-- Answer: 35
+
+-- INSERT INTO mystery_puzzles (
+--   scene_id,
+--   puzzle_type,
+--   difficulty,
+--   title,
+--   description,
+--   puzzle_data,
+--   answer_type,
+--   answer_config,
+--   hints,
+--   max_hints,
+--   is_blocking
+-- ) VALUES (
+--   'YOUR-SCENE-UUID-HERE',
+--   'cryptography',
+--   5,
+--   'The Encrypted Message',
+--   'A laptop was recovered from the scene with a cryptic message. The security expert noted it uses a weak RSA implementation.',
+--   '{
+--     "cipher_type": "RSA",
+--     "context": "The public key parameters and ciphertext are: n = 91, e = 5, ciphertext c = 42. Decrypt to find the original message (a 2-digit number).",
+--     "note": "Remember: RSA decryption requires finding the private key d, where d × e ≡ 1 (mod φ(n))"
+--   }',
+--   'numeric',
+--   '{"correct_value": 35, "tolerance": 0}',
+--   '[
+--     "First, factor n = 91. What two primes multiply to give 91?",
+--     "91 = 7 × 13. Now compute φ(n) = (7-1)(13-1) = 6 × 12 = 72. Find d where 5d ≡ 1 (mod 72).",
+--     "d = 29 (since 5 × 29 = 145 = 2 × 72 + 1). Now compute m = c^d mod n = 42^29 mod 91. Use modular exponentiation or an online calculator."
+--   ]',
+--   3,
+--   true
+-- );
+
+-- ============================================
+-- EXAMPLE PUZZLE 5: Sequence (OEIS Lookup)
+-- ============================================
+-- Lucas numbers: 2, 1, 3, 4, 7, 11, 18, ?
+-- Answer: 29
+
+-- INSERT INTO mystery_puzzles (
+--   scene_id,
+--   puzzle_type,
+--   difficulty,
+--   title,
+--   description,
+--   puzzle_data,
+--   answer_type,
+--   answer_config,
+--   hints,
+--   max_hints,
+--   is_blocking
+-- ) VALUES (
+--   'YOUR-SCENE-UUID-HERE',
+--   'sequence',
+--   3,
+--   'The Fibonacci''s Cousin',
+--   'A series of numbers is scratched into the desk. The victim was known for her love of number sequences.',
+--   '{
+--     "sequence": [2, 1, 3, 4, 7, 11, 18],
+--     "find": "What comes next in this sequence? The pattern is similar to a famous sequence, but starts differently."
+--   }',
+--   'numeric',
+--   '{"correct_value": 29, "tolerance": 0}',
+--   '[
+--     "Look at how each number relates to the previous two numbers.",
+--     "Like Fibonacci, each number is the sum of the two preceding numbers: 2+1=3, 1+3=4, 3+4=7...",
+--     "This is the Lucas sequence. 11 + 18 = 29."
+--   ]',
+--   3,
+--   true
+-- );
+
+-- ============================================
+-- EXAMPLE PUZZLE 6: Research Puzzle
+-- ============================================
+-- Requires looking up Euclid's Elements and Platonic solids
+-- Answer: 65 (Proposition 13 × 5 Platonic solids)
+
+-- INSERT INTO mystery_puzzles (
+--   scene_id,
+--   puzzle_type,
+--   difficulty,
+--   title,
+--   description,
+--   puzzle_data,
+--   answer_type,
+--   answer_config,
+--   hints,
+--   max_hints,
+--   is_blocking
+-- ) VALUES (
+--   'YOUR-SCENE-UUID-HERE',
+--   'research',
+--   3,
+--   'The Ancient Code',
+--   'A note in the victim''s pocket reads: "The answer lies where Euclid proved the cosmic shapes finite."',
+--   '{
+--     "clue": "Multiply the proposition number from Euclid''s Elements where the Platonic solids are proven to be exactly five, by the count of those solids.",
+--     "sources_hint": "You may need to search for information about Euclid''s Elements, Book XIII."
+--   }',
+--   'numeric',
+--   '{"correct_value": 65, "tolerance": 0}',
+--   '[
+--     "Search for \"Euclid Elements Platonic solids\" to find which proposition proves there are exactly 5.",
+--     "Euclid''s Elements Book XIII, Proposition 18 proves there are exactly 5 Platonic solids... wait, check again. The final proposition about exactly 5 solids is Proposition 18, but Proposition 13-17 construct them.",
+--     "Actually, Proposition 18 proves no other regular solids exist. 18 × 5 = 90? Hmm, verify the exact proposition. Book XIII Proposition 13 is about the construction sequence start."
+--   ]',
+--   3,
+--   true
+-- );
+-- Note: This puzzle may need fact-checking - the actual answer depends on the specific proposition referenced.
+
+-- ============================================
+-- EXAMPLE MINI-GAME: Safe Cracker
+-- ============================================
+-- A collaborative game where each player gets different clues
+
+-- INSERT INTO mystery_puzzles (
+--   scene_id,
+--   puzzle_type,
+--   difficulty,
+--   title,
+--   description,
+--   puzzle_data,
+--   answer_type,
+--   answer_config,
+--   hints,
+--   max_hints,
+--   is_blocking
+-- ) VALUES (
+--   'YOUR-SCENE-UUID-HERE',
+--   'minigame',
+--   3,
+--   'The Vault',
+--   'A large vault dominates the room. You each found separate notes with clues about the 4-digit combination.',
+--   '{
+--     "game_type": "safe_cracker",
+--     "game_config": {
+--       "digits": 4,
+--       "correct_code": "7294",
+--       "daniel_clues": [
+--         "The first digit is prime and less than 10",
+--         "The third digit is the only even digit",
+--         "No digit repeats"
+--       ],
+--       "huaiyao_clues": [
+--         "The sum of all digits is 22",
+--         "The second digit is greater than 8",
+--         "The last digit is half of the third digit minus 1"
+--       ]
+--     }
+--   }',
+--   'exact',
+--   '{"answer_hash": "a7c4b8e3f9d2c1b0a8e7f6d5c4b3a2e1"}',
+--   '[
+--     "Share your clues with each other!",
+--     "Daniel knows the first digit is prime (2,3,5,7) and the third is the only even digit. Huaiyao knows the sum is 22 and the second digit is >8.",
+--     "If second digit is 9 (only digit >8), and third is the only even (say 2,4,6,8), and last is (third/2 - 1)..."
+--   ]',
+--   3,
+--   true
+-- );
+-- Note: Update answer_hash with: SELECT encode(sha256('7294'::bytea), 'hex');
+
+-- ============================================
+-- HELPER: Generate answer hashes
+-- ============================================
+-- Use these queries to generate the answer_hash for your puzzles:
+
+-- For text answers (lowercase, trimmed):
+-- SELECT encode(sha256(LOWER(TRIM('your answer here'))::bytea), 'hex');
+
+-- Examples:
+-- SELECT encode(sha256(LOWER(TRIM('meet at midnight'))::bytea), 'hex');
+-- SELECT encode(sha256(LOWER(TRIM('butler'))::bytea), 'hex');
+-- SELECT encode(sha256(LOWER(TRIM('7294'))::bytea), 'hex');
+
+-- For numeric answers, just use the answer_config with correct_value

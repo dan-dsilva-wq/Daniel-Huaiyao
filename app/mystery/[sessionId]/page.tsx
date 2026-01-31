@@ -9,6 +9,7 @@ import TypewriterText from '../components/TypewriterText';
 import ChoiceButton from '../components/ChoiceButton';
 import AgreementCelebration from '../components/AgreementCelebration';
 import PartnerStatus from '../components/PartnerStatus';
+import { PuzzleRenderer, MiniGameContainer } from '../components/puzzles';
 
 export default function MysterySessionPage() {
   const params = useParams();
@@ -22,8 +23,14 @@ export default function MysterySessionPage() {
   const [showChoices, setShowChoices] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
   const [isVoting, setIsVoting] = useState(false);
+  const [puzzleSolved, setPuzzleSolved] = useState(false);
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
+
+  // Check if scene has a blocking puzzle that needs solving
+  const hasPuzzle = gameState?.puzzle != null;
+  const isBlockingPuzzle = hasPuzzle && gameState?.puzzle?.is_blocking;
+  const shouldShowChoices = showChoices && (!isBlockingPuzzle || puzzleSolved);
 
   const fetchGameState = useCallback(async () => {
     if (!isSupabaseConfigured || !sessionId) return;
@@ -41,6 +48,7 @@ export default function MysterySessionPage() {
 
       setGameState(data);
       setShowChoices(false); // Reset for new scene
+      setPuzzleSolved(false); // Reset puzzle state for new scene
     } catch (err) {
       console.error('Error fetching game state:', err);
       setError('Failed to load game');
@@ -114,9 +122,32 @@ export default function MysterySessionPage() {
       )
       .subscribe();
 
+    // Subscribe to puzzle answer changes
+    const puzzleChannel = supabase
+      .channel(`mystery-puzzles-${sessionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'mystery_puzzle_answers',
+          filter: `session_id=eq.${sessionId}`,
+        },
+        (payload) => {
+          // Check if puzzle was solved
+          if (payload.new && (payload.new as { status: string }).status === 'solved') {
+            setPuzzleSolved(true);
+            setShowCelebration(true);
+          }
+          fetchGameState();
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(sessionChannel);
       supabase.removeChannel(votesChannel);
+      supabase.removeChannel(puzzleChannel);
     };
   }, [sessionId, currentUser, gameState, fetchGameState]);
 
@@ -365,9 +396,58 @@ export default function MysterySessionPage() {
           />
         </motion.div>
 
+        {/* Puzzle Section */}
+        <AnimatePresence mode="wait">
+          {showChoices && gameState.puzzle && !puzzleSolved && (
+            <motion.div
+              key={`puzzle-${gameState.puzzle.id}`}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="mb-6"
+            >
+              {gameState.puzzle.puzzle_type === 'minigame' ? (
+                <MiniGameContainer
+                  puzzle={gameState.puzzle}
+                  sessionId={sessionId}
+                  currentPlayer={currentUser}
+                  onComplete={(success) => {
+                    if (success) {
+                      setPuzzleSolved(true);
+                      setShowCelebration(true);
+                    }
+                  }}
+                />
+              ) : (
+                <PuzzleRenderer
+                  puzzle={gameState.puzzle}
+                  sessionId={sessionId}
+                  currentPlayer={currentUser}
+                  onSolved={() => {
+                    setPuzzleSolved(true);
+                    setShowCelebration(true);
+                  }}
+                />
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Puzzle solved indicator */}
+        {puzzleSolved && gameState.puzzle && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-green-900/30 border border-green-500/50 rounded-xl p-4 mb-6 text-center"
+          >
+            <span className="text-2xl mr-2">🎉</span>
+            <span className="text-green-300 font-medium">Puzzle Solved! Continue your investigation...</span>
+          </motion.div>
+        )}
+
         {/* Choices */}
         <AnimatePresence mode="wait">
-          {showChoices && scene.is_decision_point && choices.length > 0 && (
+          {shouldShowChoices && scene.is_decision_point && choices.length > 0 && (
             <motion.div
               key={`choices-${scene.id}`}
               initial={{ opacity: 0, y: 20 }}
@@ -422,7 +502,7 @@ export default function MysterySessionPage() {
           )}
 
           {/* Continue button for non-decision scenes */}
-          {showChoices && !scene.is_decision_point && choices.length > 0 && (
+          {shouldShowChoices && !scene.is_decision_point && choices.length > 0 && (
             <motion.div
               key={`continue-${scene.id}`}
               initial={{ opacity: 0, y: 20 }}

@@ -91,4 +91,95 @@ export interface MysteryGameState {
   scene: MysteryScene;
   choices: MysteryChoice[];
   votes: MysteryVote[];
+  puzzle?: MysteryPuzzle | null;
+}
+
+// Puzzle Types
+export type PuzzleType = 'cryptography' | 'number_theory' | 'logic' | 'geometry' | 'sequence' | 'research' | 'minigame';
+export type PuzzleAnswerType = 'exact' | 'numeric' | 'multiple_choice' | 'set';
+export type PuzzleStatus = 'pending' | 'agreed' | 'disagreed' | 'solved' | 'failed';
+
+export interface MysteryPuzzle {
+  id: string;
+  puzzle_type: PuzzleType;
+  difficulty: number;
+  title: string;
+  description: string;
+  puzzle_data: PuzzleData;
+  answer_type: PuzzleAnswerType;
+  max_hints: number;
+  is_blocking: boolean;
+  time_limit_seconds?: number | null;
+}
+
+// Puzzle data structures for different puzzle types
+export interface PuzzleData {
+  // Number theory
+  equations?: string[];
+  note?: string;
+  // Cryptography
+  ciphertext?: string;
+  context?: string;
+  cipher_type?: string;
+  // Logic
+  statements?: string[];
+  rules?: string[];
+  question?: string;
+  // Geometry
+  figure_description?: string;
+  measurements?: Record<string, number>;
+  // Sequence
+  sequence?: number[];
+  find?: string;
+  // Research
+  clue?: string;
+  sources_hint?: string;
+  // Mini-game
+  game_type?: string;
+  game_config?: Record<string, unknown>;
+  // Generic
+  [key: string]: unknown;
+}
+
+export interface PuzzleAnswerState {
+  status: PuzzleStatus;
+  hints_revealed: number;
+  daniel_submitted: boolean;
+  huaiyao_submitted: boolean;
+  my_submitted?: boolean;
+  partner_submitted?: boolean;
+  solved_at?: string | null;
+}
+
+export interface PuzzleWithState extends MysteryPuzzle {
+  answer_state: PuzzleAnswerState;
+  hints: {
+    hints: string[];
+    hints_revealed: number;
+    max_hints: number;
+  };
+}
+
+export interface PuzzleSubmitResult {
+  status: 'solved' | 'wrong' | 'disagreed' | 'waiting' | 'error';
+  is_correct: boolean;
+  agreed: boolean;
+  message: string;
+}
+
+export interface HintResult {
+  success: boolean;
+  hint?: string;
+  hint_number?: number;
+  hints_revealed: number;
+  max_hints: number;
+  message?: string;
+}
+
+export interface MinigameState {
+  game_state: Record<string, unknown>;
+  my_state: Record<string, unknown>;
+  partner_ready?: boolean;
+  last_action_by?: Player;
+  last_action_at?: string;
 }
