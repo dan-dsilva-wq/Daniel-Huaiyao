@@ -6,30 +6,57 @@ import { useRouter } from 'next/navigation';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { Player, MysteryEpisode, MysterySession } from '@/lib/supabase';
 
+interface WaitingGame {
+  session: MysterySession;
+  episode: MysteryEpisode;
+}
+
 export default function MysteryPage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<Player | null>(null);
   const [episodes, setEpisodes] = useState<MysteryEpisode[]>([]);
+  const [waitingGames, setWaitingGames] = useState<WaitingGame[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEpisode, setSelectedEpisode] = useState<MysteryEpisode | null>(null);
   const [waitingSession, setWaitingSession] = useState<MysterySession | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
 
-  const fetchEpisodes = useCallback(async () => {
-    if (!isSupabaseConfigured) {
+  const fetchData = useCallback(async () => {
+    if (!isSupabaseConfigured || !currentUser) {
       setIsLoading(false);
       return;
     }
 
     try {
-      const { data, error } = await supabase.rpc('get_mystery_episodes');
-      if (error) throw error;
-      setEpisodes(data || []);
+      // Fetch episodes
+      const { data: episodesData, error: episodesError } = await supabase.rpc('get_mystery_episodes');
+      if (episodesError) throw episodesError;
+      setEpisodes(episodesData || []);
+
+      // Fetch waiting sessions where partner is waiting for current user
+      const partnerJoinedField = currentUser === 'daniel' ? 'huaiyao_joined' : 'daniel_joined';
+      const currentUserJoinedField = currentUser === 'daniel' ? 'daniel_joined' : 'huaiyao_joined';
+
+      const { data: sessionsData, error: sessionsError } = await supabase
+        .from('mystery_sessions')
+        .select('*, mystery_episodes(*)')
+        .eq('status', 'waiting')
+        .eq(partnerJoinedField, true)
+        .eq(currentUserJoinedField, false);
+
+      if (sessionsError) throw sessionsError;
+
+      const games: WaitingGame[] = (sessionsData || []).map((s: any) => ({
+        session: s,
+        episode: s.mystery_episodes,
+      }));
+      setWaitingGames(games);
     } catch (error) {
-      console.error('Error fetching episodes:', error);
+      console.error('Error fetching data:', error);
     }
     setIsLoading(false);
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('mystery-user') as Player | null;
@@ -38,9 +65,33 @@ export default function MysteryPage() {
 
   useEffect(() => {
     if (currentUser) {
-      fetchEpisodes();
+      fetchData();
     }
-  }, [currentUser, fetchEpisodes]);
+  }, [currentUser, fetchData]);
+
+  // Subscribe to new waiting sessions
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const channel = supabase
+      .channel('mystery-waiting-sessions')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'mystery_sessions',
+        },
+        () => {
+          fetchData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser, fetchData]);
 
   // Subscribe to session changes while waiting
   useEffect(() => {
@@ -126,6 +177,7 @@ export default function MysteryPage() {
   const joinExistingSession = async (sessionId: string) => {
     if (!currentUser) return;
 
+    setIsJoining(true);
     try {
       const { data, error } = await supabase.rpc('join_mystery_session', {
         p_session_id: sessionId,
@@ -134,11 +186,11 @@ export default function MysteryPage() {
 
       if (error) throw error;
 
-      if (data.daniel_joined && data.huaiyao_joined) {
-        router.push(`/mystery/${sessionId}`);
-      }
+      // Navigate to game regardless - the session page handles the rest
+      router.push(`/mystery/${sessionId}`);
     } catch (error) {
       console.error('Error joining session:', error);
+      setIsJoining(false);
     }
   };
 
@@ -335,9 +387,57 @@ export default function MysteryPage() {
           <p className="text-purple-200">Solve mysteries together, one choice at a time</p>
         </motion.div>
 
+        {/* Waiting games from partner */}
+        {waitingGames.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8"
+          >
+            <h2 className="text-lg font-medium text-amber-400 mb-4">
+              {partnerName} is waiting for you!
+            </h2>
+            <div className="space-y-3">
+              {waitingGames.map((game) => (
+                <motion.button
+                  key={game.session.id}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => joinExistingSession(game.session.id)}
+                  disabled={isJoining}
+                  className="w-full text-left bg-amber-500/20 backdrop-blur border-2 border-amber-500/50 hover:border-amber-400 rounded-xl p-6 transition-all disabled:opacity-50"
+                >
+                  <div className="flex items-center gap-4">
+                    <motion.div
+                      animate={{ scale: [1, 1.1, 1] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                      className="text-3xl"
+                    >
+                      🎮
+                    </motion.div>
+                    <div className="flex-1">
+                      <p className="text-amber-300 text-sm mb-1">
+                        Join {partnerName}'s game
+                      </p>
+                      <h3 className="text-xl font-serif font-semibold text-white">
+                        {game.episode.title}
+                      </h3>
+                    </div>
+                    <div className="text-amber-400 font-medium">
+                      Join →
+                    </div>
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
         {/* Episodes */}
         <div className="space-y-4">
-          <h2 className="text-lg font-medium text-purple-300 mb-4">Choose a Mystery</h2>
+          <h2 className="text-lg font-medium text-purple-300 mb-4">
+            {waitingGames.length > 0 ? 'Or start a new mystery' : 'Choose a Mystery'}
+          </h2>
 
           {episodes.length === 0 ? (
             <div className="text-center py-12 text-purple-400">
