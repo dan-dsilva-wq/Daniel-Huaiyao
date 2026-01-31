@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
@@ -26,6 +26,9 @@ export default function MysterySessionPage() {
   const [puzzleSolved, setPuzzleSolved] = useState(false);
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null);
   const [textComplete, setTextComplete] = useState(false);
+  const [voteError, setVoteError] = useState<string | null>(null);
+  const [lastRpcResponse, setLastRpcResponse] = useState<string | null>(null);
+  const votingRef = useRef(false); // Use ref to prevent race conditions
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
 
@@ -191,26 +194,42 @@ export default function MysterySessionPage() {
   }, [sessionId, currentUser]);
 
   const handleVote = async (choiceId: string) => {
-    console.log('[VOTE DEBUG] handleVote called', { choiceId, currentUser, isVoting });
+    console.log('[VOTE DEBUG] handleVote called', { choiceId, currentUser, isVoting, votingRef: votingRef.current });
 
-    if (!currentUser || isVoting) {
-      console.log('[VOTE DEBUG] Early return - currentUser:', currentUser, 'isVoting:', isVoting);
+    // Use ref as primary guard (not affected by re-renders)
+    if (votingRef.current) {
+      console.log('[VOTE DEBUG] Blocked by votingRef');
       return;
     }
 
+    // Check if this player already voted for this choice
+    const alreadyVoted = gameState?.votes?.some(v => v.player === currentUser && v.choice_id === choiceId);
+
+    if (!currentUser || alreadyVoted) {
+      console.log('[VOTE DEBUG] Early return - currentUser:', currentUser, 'alreadyVoted:', alreadyVoted);
+      return;
+    }
+
+    // Set both ref and state
+    votingRef.current = true;
     setIsVoting(true);
+    setVoteError(null);
     console.log('[VOTE DEBUG] Calling RPC cast_mystery_vote');
 
     try {
-      const { data, error: voteError } = await supabase.rpc('cast_mystery_vote', {
+      const { data, error: rpcError } = await supabase.rpc('cast_mystery_vote', {
         p_session_id: sessionId,
         p_player: currentUser,
         p_choice_id: choiceId,
       });
 
-      console.log('[VOTE DEBUG] RPC response:', { data, voteError });
+      console.log('[VOTE DEBUG] RPC response:', { data, rpcError });
+      setLastRpcResponse(JSON.stringify({ data, error: rpcError?.message }, null, 2));
 
-      if (voteError) throw voteError;
+      if (rpcError) {
+        setVoteError(`Vote failed: ${rpcError.message}`);
+        throw rpcError;
+      }
 
       if (data?.agreed) {
         setShowCelebration(true);
@@ -227,9 +246,11 @@ export default function MysterySessionPage() {
       }
     } catch (err) {
       console.error('[VOTE DEBUG] Error voting:', err);
+      setVoteError(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
+    votingRef.current = false;
     setIsVoting(false);
-    console.log('[VOTE DEBUG] Vote complete, isVoting set to false');
+    console.log('[VOTE DEBUG] Vote complete');
   };
 
   const handleCelebrationComplete = () => {
@@ -511,12 +532,14 @@ export default function MysterySessionPage() {
                     onVote={handleVote}
                     disabled={isVoting}
                   />
-                  {/* Debug: show isVoting state */}
-                  <div className="text-xs text-gray-500 mt-1">
-                    Debug: isVoting={String(isVoting)}, player={currentUser}
-                  </div>
                 </div>
               ))}
+              {/* Debug info */}
+              <div className="text-xs text-gray-500 mt-2 p-2 bg-black/20 rounded">
+                <div>Debug: isVoting={String(isVoting)}, player={currentUser}, votes={votes.length}</div>
+                {voteError && <div className="text-red-400 mt-1">ERROR: {voteError}</div>}
+                {lastRpcResponse && <div className="text-blue-300 mt-1 text-xs whitespace-pre">RPC: {lastRpcResponse}</div>}
+              </div>
 
               {/* Vote status hint */}
               {votes.length === 2 && votes[0].choice_id !== votes[1].choice_id && (

@@ -23,12 +23,17 @@ export default function ChoiceButton({
   const huaiyaoVoted = votes.find(v => v.player === 'huaiyao' && v.choice_id === choiceId);
   const currentPlayerVoted = votes.find(v => v.player === currentPlayer && v.choice_id === choiceId);
 
+  const handleClick = (e: React.MouseEvent) => {
+    console.log('[BUTTON DEBUG] Button clicked', { choiceId, disabled, currentPlayer });
+    if (!disabled) {
+      onVote(choiceId);
+    }
+  };
+
   return (
     <button
-      onClick={() => {
-        console.log('[BUTTON DEBUG] Button clicked', { choiceId, disabled, currentPlayer });
-        if (!disabled) onVote(choiceId);
-      }}
+      type="button"
+      onClick={handleClick}
       disabled={disabled}
       className={`
         relative w-full p-4 rounded-xl text-left transition-all
