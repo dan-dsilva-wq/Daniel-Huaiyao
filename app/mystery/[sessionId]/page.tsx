@@ -479,33 +479,20 @@ export default function MysterySessionPage() {
 
         {/* Choices - always visible once text complete */}
         {shouldShowChoices && scene.is_decision_point && choices.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-3 pb-8"
-          >
+          <div className="space-y-3 pb-8">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-medium text-purple-300">
                   What do you want to do?
                 </h3>
                 {votes.length === 1 && (
-                  <motion.p
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-sm text-amber-400"
-                  >
+                  <p className="text-sm text-amber-400">
                     Waiting for {votes[0].player === currentUser ? partnerName : 'you'}...
-                  </motion.p>
+                  </p>
                 )}
               </div>
 
-              {choices.map((choice, index) => (
-                <motion.div
-                  key={choice.id}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                >
+              {choices.map((choice) => (
+                <div key={choice.id}>
                   <ChoiceButton
                     choiceId={choice.id}
                     text={choice.choice_text}
@@ -514,48 +501,34 @@ export default function MysterySessionPage() {
                     onVote={handleVote}
                     disabled={isVoting}
                   />
-                </motion.div>
+                </div>
               ))}
 
               {/* Vote status hint */}
               {votes.length === 2 && votes[0].choice_id !== votes[1].choice_id && (
-                <motion.p
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="text-center text-amber-400 text-sm mt-4"
-                >
+                <p className="text-center text-amber-400 text-sm mt-4">
                   You have different choices! Discuss and try to agree.
-                </motion.p>
+                </p>
               )}
-            </motion.div>
+            </div>
           )}
 
         {/* Continue button for non-decision scenes */}
         {shouldShowChoices && !scene.is_decision_point && choices.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="pb-8"
-          >
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+          <div className="pb-8">
+            <button
               onClick={() => handleVote(choices[0].id)}
               disabled={isVoting}
               className="w-full py-4 bg-amber-500 hover:bg-amber-400 text-purple-950 rounded-xl font-semibold transition-colors disabled:opacity-50"
             >
               Continue →
-            </motion.button>
+            </button>
             {votes.length === 1 && (
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="text-center text-amber-400 text-sm mt-3"
-              >
+              <p className="text-center text-amber-400 text-sm mt-3">
                 Waiting for {votes[0].player === currentUser ? partnerName : 'you'} to continue...
-              </motion.p>
+              </p>
             )}
-          </motion.div>
+          </div>
         )}
 
         {/* Footer */}
