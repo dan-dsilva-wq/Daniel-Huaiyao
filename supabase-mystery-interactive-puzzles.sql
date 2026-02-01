@@ -3,7 +3,7 @@
 -- Run AFTER supabase-mystery-ALL.sql
 
 -- ============================================
--- ADD INTERACTIVE GAMES TO TEST LAB (Episode 99)
+-- STEP 1: CREATE ALL SCENES FIRST
 -- ============================================
 
 -- Scene for Circuit Puzzle
@@ -20,7 +20,63 @@ You''ll need to reconnect the nodes to restore power from the INPUT to the OUTPU
 Click on nodes to select them, then click adjacent nodes to create connections. Work together to find the right path!',
   false,
   false
-) ON CONFLICT (id) DO NOTHING;
+) ON CONFLICT (id) DO UPDATE SET narrative_text = EXCLUDED.narrative_text;
+
+-- Scene for Pattern Sequence
+INSERT INTO mystery_scenes (id, episode_id, scene_order, title, narrative_text, is_decision_point, is_ending)
+VALUES (
+  'c1000000-0000-0000-0000-000000000011',
+  'e9000000-0000-0000-0000-000000000001',
+  11,
+  'The Memory Lock',
+  'The vault has a secondary lock - a color sequence pad.
+
+Watch the pattern carefully when it plays, then repeat it by clicking the colored buttons in the correct order.
+
+Both of you can click - coordinate who enters which part of the sequence!',
+  false,
+  false
+) ON CONFLICT (id) DO UPDATE SET narrative_text = EXCLUDED.narrative_text;
+
+-- Scene for Wire Matching
+INSERT INTO mystery_scenes (id, episode_id, scene_order, title, narrative_text, is_decision_point, is_ending)
+VALUES (
+  'c1000000-0000-0000-0000-000000000012',
+  'e9000000-0000-0000-0000-000000000001',
+  12,
+  'The Wire Panel',
+  'Almost there! The final security measure is a wire panel.
+
+Each colored wire must be connected to the correct numbered terminal. Click a wire on the left, then click a terminal on the right to connect them.
+
+Talk to each other - you each might remember different parts of the code!',
+  false,
+  false
+) ON CONFLICT (id) DO UPDATE SET narrative_text = EXCLUDED.narrative_text;
+
+-- Final success scene
+INSERT INTO mystery_scenes (id, episode_id, scene_order, title, narrative_text, is_decision_point, is_ending, ending_type)
+VALUES (
+  'c1000000-0000-0000-0000-000000000013',
+  'e9000000-0000-0000-0000-000000000001',
+  13,
+  'Vault Opened!',
+  'CLICK! The vault door swings open with a satisfying mechanical sound.
+
+You''ve successfully tested all the interactive puzzle systems:
+✓ Circuit Connection
+✓ Pattern Memory
+✓ Wire Matching
+
+The collaborative puzzle system is fully operational. Great teamwork!',
+  false,
+  true,
+  'good'
+) ON CONFLICT (id) DO UPDATE SET narrative_text = EXCLUDED.narrative_text;
+
+-- ============================================
+-- STEP 2: NOW CREATE THE PUZZLES
+-- ============================================
 
 -- Circuit Puzzle
 INSERT INTO mystery_puzzles (
@@ -43,23 +99,7 @@ INSERT INTO mystery_puzzles (
   3,
   true,
   'c1000000-0000-0000-0000-000000000011'
-) ON CONFLICT (id) DO NOTHING;
-
--- Scene for Pattern Sequence
-INSERT INTO mystery_scenes (id, episode_id, scene_order, title, narrative_text, is_decision_point, is_ending)
-VALUES (
-  'c1000000-0000-0000-0000-000000000011',
-  'e9000000-0000-0000-0000-000000000001',
-  11,
-  'The Memory Lock',
-  'The vault has a secondary lock - a color sequence pad.
-
-Watch the pattern carefully when it plays, then repeat it by clicking the colored buttons in the correct order.
-
-Both of you can click - coordinate who enters which part of the sequence!',
-  false,
-  false
-) ON CONFLICT (id) DO NOTHING;
+) ON CONFLICT (id) DO UPDATE SET next_scene_on_solve = EXCLUDED.next_scene_on_solve;
 
 -- Pattern Sequence Puzzle
 INSERT INTO mystery_puzzles (
@@ -82,23 +122,7 @@ INSERT INTO mystery_puzzles (
   3,
   true,
   'c1000000-0000-0000-0000-000000000012'
-) ON CONFLICT (id) DO NOTHING;
-
--- Scene for Wire Matching
-INSERT INTO mystery_scenes (id, episode_id, scene_order, title, narrative_text, is_decision_point, is_ending)
-VALUES (
-  'c1000000-0000-0000-0000-000000000012',
-  'e9000000-0000-0000-0000-000000000001',
-  12,
-  'The Wire Panel',
-  'Almost there! The final security measure is a wire panel.
-
-Each colored wire must be connected to the correct numbered terminal. Click a wire on the left, then click a terminal on the right to connect them.
-
-Talk to each other - you each might remember different parts of the code!',
-  false,
-  false
-) ON CONFLICT (id) DO NOTHING;
+) ON CONFLICT (id) DO UPDATE SET next_scene_on_solve = EXCLUDED.next_scene_on_solve;
 
 -- Wire Matching Puzzle
 INSERT INTO mystery_puzzles (
@@ -121,35 +145,21 @@ INSERT INTO mystery_puzzles (
   3,
   true,
   'c1000000-0000-0000-0000-000000000013'
-) ON CONFLICT (id) DO NOTHING;
+) ON CONFLICT (id) DO UPDATE SET next_scene_on_solve = EXCLUDED.next_scene_on_solve;
 
--- Final success scene
-INSERT INTO mystery_scenes (id, episode_id, scene_order, title, narrative_text, is_decision_point, is_ending, ending_type)
-VALUES (
-  'c1000000-0000-0000-0000-000000000013',
-  'e9000000-0000-0000-0000-000000000001',
-  13,
-  'Vault Opened!',
-  'CLICK! The vault door swings open with a satisfying mechanical sound.
+-- ============================================
+-- STEP 3: UPDATE ANSWER HASHES
+-- ============================================
 
-You''ve successfully tested all the interactive puzzle systems:
-✓ Circuit Connection
-✓ Pattern Memory
-✓ Wire Matching
-
-The collaborative puzzle system is fully operational. Great teamwork!',
-  false,
-  true,
-  'good'
-) ON CONFLICT (id) DO NOTHING;
-
--- Update answer hashes
 UPDATE mystery_puzzles SET answer_config = '{"answer_hash": "' || encode(sha256('COMPLETE'::bytea), 'hex') || '"}'::jsonb WHERE id = 'dd000000-0000-0000-0000-000000000010';
 UPDATE mystery_puzzles SET answer_config = '{"answer_hash": "' || encode(sha256('CORRECT'::bytea), 'hex') || '"}'::jsonb WHERE id = 'dd000000-0000-0000-0000-000000000011';
 UPDATE mystery_puzzles SET answer_config = '{"answer_hash": "' || encode(sha256('CORRECT'::bytea), 'hex') || '"}'::jsonb WHERE id = 'dd000000-0000-0000-0000-000000000012';
 
--- Add transition from the last regular puzzle (scene 6) to circuit puzzle
--- First, update scene 6's ending to go to the new interactive puzzles
+-- ============================================
+-- STEP 4: LINK FROM LAST TEXT PUZZLE TO CIRCUIT
+-- ============================================
+
+-- Update the sequence puzzle (puzzle 4) to go to circuit puzzle after solving
 UPDATE mystery_puzzles
 SET next_scene_on_solve = 'c1000000-0000-0000-0000-000000000010'
 WHERE id = 'dd000000-0000-0000-0000-000000000004';
