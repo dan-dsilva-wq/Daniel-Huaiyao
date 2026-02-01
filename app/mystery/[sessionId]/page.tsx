@@ -292,13 +292,19 @@ export default function MysterySessionPage() {
 
   // Loading state (still determining episode type)
   if (isLoading || !currentUser || isAIEpisode === null) {
+    console.log('[SESSION DEBUG] Loading state:', { isLoading, currentUser, isAIEpisode });
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-          className="w-8 h-8 border-4 border-purple-200 border-t-purple-500 rounded-full"
-        />
+        <div className="text-center">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+            className="w-8 h-8 border-4 border-purple-200 border-t-purple-500 rounded-full mx-auto mb-4"
+          />
+          <p className="text-purple-500 text-xs">
+            Debug: loading={isLoading?.toString()}, user={currentUser || 'none'}, isAI={isAIEpisode?.toString() || 'null'}
+          </p>
+        </div>
       </div>
     );
   }

@@ -294,6 +294,16 @@ export async function POST(request: Request) {
       p_scene_order: sceneOrder,
     });
 
+    // If this is an ending, update the session status
+    if (aiResponse.scene.is_ending) {
+      await supabase.rpc('advance_ai_scene', {
+        p_session_id: sessionId,
+        p_new_scene_order: sceneOrder,
+        p_is_ending: true,
+        p_ending_type: aiResponse.scene.ending_type || null,
+      });
+    }
+
     // Return the generated content
     return NextResponse.json({
       success: true,

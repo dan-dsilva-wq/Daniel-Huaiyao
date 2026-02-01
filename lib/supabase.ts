@@ -75,6 +75,7 @@ export interface MysterySession {
   huaiyao_last_seen: string | null;
   created_at: string;
   completed_at: string | null;
+  ending_type: 'good' | 'neutral' | 'bad' | null;
 }
 
 export interface MysteryVote {

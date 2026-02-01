@@ -87,47 +87,76 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
   // Fetch AI game state
   const fetchGameState = useCallback(async () => {
+    console.log('[AI DEBUG] fetchGameState called');
     try {
       const { data, error } = await supabase.rpc('get_ai_game_state', {
         p_session_id: sessionId,
       });
 
-      if (error) throw error;
+      console.log('[AI DEBUG] get_ai_game_state result:', { data, error });
+
+      if (error) {
+        console.error('[AI DEBUG] RPC error:', error);
+        throw error;
+      }
       setGameState(data);
+
+      console.log('[AI DEBUG] Checking generation conditions:', {
+        needs_generation: data?.needs_generation,
+        session_status: data?.session?.status,
+        current_scene_order: data?.session?.current_ai_scene_order,
+        isGenerating,
+      });
 
       // If we need to generate and both players are in, auto-generate
       if (data?.needs_generation && data?.session?.status === 'active') {
+        console.log('[AI DEBUG] Triggering scene generation...');
         generateNextScene(data.session.current_ai_scene_order || 1);
       }
     } catch (err) {
-      console.error('Error fetching AI game state:', err);
+      console.error('[AI DEBUG] Error fetching AI game state:', err);
     }
     setIsLoading(false);
   }, [sessionId]);
 
   // Generate next scene
   const generateNextScene = async (sceneOrder: number, responses?: { daniel?: string; huaiyao?: string }) => {
-    if (isGenerating) return;
+    console.log('[AI DEBUG] generateNextScene called:', { sceneOrder, responses, isGenerating });
+    if (isGenerating) {
+      console.log('[AI DEBUG] Already generating, skipping');
+      return;
+    }
 
     setIsGenerating(true);
+    console.log('[AI DEBUG] Starting API call to /api/mystery-ai');
     try {
+      const requestBody = {
+        sessionId,
+        sceneOrder,
+        episodeNumber: gameState?.episode?.episode_number,
+        previousResponses: responses,
+      };
+      console.log('[AI DEBUG] Request body:', requestBody);
+
       const response = await fetch('/api/mystery-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId,
-          sceneOrder,
-          episodeNumber: gameState?.episode?.episode_number,
-          previousResponses: responses,
-        }),
+        body: JSON.stringify(requestBody),
       });
+
+      console.log('[AI DEBUG] API response status:', response.status);
 
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('[AI DEBUG] API error:', errorData);
         throw new Error(errorData.error || 'Failed to generate story');
       }
 
+      const result = await response.json();
+      console.log('[AI DEBUG] API success:', result);
+
       // Refresh game state after generation
+      console.log('[AI DEBUG] Refreshing game state...');
       await fetchGameState();
       setTextComplete(false);
       setSelectedChoice(null);
@@ -135,10 +164,11 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
       setPuzzleSolved(false);
       setHintsRevealed(0);
     } catch (err) {
-      console.error('Error generating scene:', err);
+      console.error('[AI DEBUG] Error generating scene:', err);
       setGenerateError(err instanceof Error ? err.message : 'Failed to generate story');
     }
     setIsGenerating(false);
+    console.log('[AI DEBUG] generateNextScene complete');
   };
 
   // Submit player response
@@ -286,20 +316,37 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
     e.preventDefault();
   };
 
+  // DEBUG: Show state info
+  const debugInfo = gameState ? {
+    status: gameState.session?.status,
+    daniel: gameState.session?.daniel_joined,
+    huaiyao: gameState.session?.huaiyao_joined,
+    scene: gameState.scene?.scene_order || 'none',
+    needs_gen: gameState.needs_generation,
+    generating: isGenerating,
+    error: generateError,
+  } : null;
+
   // Loading state
   if (isLoading) {
+    console.log('[AI DEBUG] Rendering: Loading state');
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-          className="w-8 h-8 border-4 border-purple-200 border-t-purple-500 rounded-full"
-        />
+        <div className="text-center">
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+            className="w-8 h-8 border-4 border-purple-200 border-t-purple-500 rounded-full mx-auto mb-4"
+          />
+          <p className="text-purple-300 text-sm">Loading game state...</p>
+          <p className="text-purple-500 text-xs mt-2">Session: {sessionId.slice(0, 8)}...</p>
+        </div>
       </div>
     );
   }
 
   if (!gameState) {
+    console.log('[AI DEBUG] Rendering: No game state');
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center">
         <div className="text-center">
@@ -313,9 +360,11 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   }
 
   const { session, episode, scene, choices, puzzle } = gameState;
+  console.log('[AI DEBUG] Rendering main view:', { session_status: session.status, has_scene: !!scene, isGenerating });
 
   // Waiting for partner
   if (session.status === 'waiting') {
+    console.log('[AI DEBUG] Rendering: Waiting for partner', { daniel_joined: session.daniel_joined, huaiyao_joined: session.huaiyao_joined });
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center p-4">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center">
@@ -332,6 +381,10 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
           <p className="text-purple-200 mb-4">
             Once both detectives are here, the AI will generate your unique mystery!
           </p>
+          {/* Debug info */}
+          <p className="text-purple-500 text-xs mb-4">
+            Debug: Daniel={session.daniel_joined?.toString()}, Huaiyao={session.huaiyao_joined?.toString()}, Status={session.status}
+          </p>
           <button onClick={onBack} className="text-purple-300 hover:text-white text-sm">
             ← Cancel and go back
           </button>
@@ -340,8 +393,9 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
     );
   }
 
-  // Generating state
-  if (isGenerating || gameState.needs_generation) {
+  // Generating state (only show if actually generating, or if needs_generation AND status is active)
+  if (isGenerating || (gameState.needs_generation && session.status === 'active')) {
+    console.log('[AI DEBUG] Rendering: Generating state', { isGenerating, needs_generation: gameState.needs_generation, status: session.status });
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center p-4">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center max-w-md">
@@ -358,17 +412,37 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
           <p className="text-purple-200">
             Generating a unique story based on your choices
           </p>
-          <motion.div
-            className="mt-6 h-1 bg-purple-900 rounded-full overflow-hidden"
-            initial={{ width: 200 }}
-          >
+          {generateError && (
+            <div className="mt-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg">
+              <p className="text-red-300 text-sm">Error: {generateError}</p>
+              <button
+                onClick={() => {
+                  setGenerateError(null);
+                  generateNextScene(session.current_ai_scene_order || 1);
+                }}
+                className="mt-2 px-4 py-1 bg-red-500/30 hover:bg-red-500/50 rounded text-white text-sm"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {!generateError && (
             <motion.div
-              className="h-full bg-purple-500"
-              animate={{ x: [-200, 200] }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-              style={{ width: '50%' }}
-            />
-          </motion.div>
+              className="mt-6 h-1 bg-purple-900 rounded-full overflow-hidden"
+              initial={{ width: 200 }}
+            >
+              <motion.div
+                className="h-full bg-purple-500"
+                animate={{ x: [-200, 200] }}
+                transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                style={{ width: '50%' }}
+              />
+            </motion.div>
+          )}
+          {/* Debug info */}
+          <p className="text-purple-500 text-xs mt-4">
+            Debug: generating={isGenerating.toString()}, needs_gen={gameState.needs_generation?.toString()}, scene_order={session.current_ai_scene_order}
+          </p>
         </motion.div>
       </div>
     );

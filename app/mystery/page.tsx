@@ -16,12 +16,19 @@ interface ActiveGame {
   episode: MysteryEpisode;
 }
 
+interface CompletedEpisode {
+  episode_id: string;
+  ending_type: 'good' | 'neutral' | 'bad' | null;
+  completed_at: string;
+}
+
 export default function MysteryPage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<Player | null>(null);
   const [episodes, setEpisodes] = useState<MysteryEpisode[]>([]);
   const [waitingGames, setWaitingGames] = useState<WaitingGame[]>([]);
   const [activeGames, setActiveGames] = useState<ActiveGame[]>([]);
+  const [completedEpisodes, setCompletedEpisodes] = useState<Map<string, CompletedEpisode>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEpisode, setSelectedEpisode] = useState<MysteryEpisode | null>(null);
   const [waitingSession, setWaitingSession] = useState<MysterySession | null>(null);
@@ -72,6 +79,27 @@ export default function MysteryPage() {
         episode: s.mystery_episodes,
       }));
       setActiveGames(active);
+
+      // Fetch completed sessions for current user
+      const { data: completedData } = await supabase
+        .from('mystery_sessions')
+        .select('episode_id, ending_type, completed_at')
+        .eq('status', 'completed')
+        .eq(currentUserJoinedFieldActive, true)
+        .order('completed_at', { ascending: false });
+
+      // Build map of completed episodes (keep most recent completion per episode)
+      const completedMap = new Map<string, CompletedEpisode>();
+      for (const session of (completedData || [])) {
+        if (!completedMap.has(session.episode_id)) {
+          completedMap.set(session.episode_id, {
+            episode_id: session.episode_id,
+            ending_type: session.ending_type,
+            completed_at: session.completed_at,
+          });
+        }
+      }
+      setCompletedEpisodes(completedMap);
     } catch (error) {
       console.error('Error fetching data:', error);
     }
@@ -190,6 +218,7 @@ export default function MysteryPage() {
       });
     } catch (error) {
       console.error('Error starting session:', error);
+      alert('Error starting game: ' + (error as Error).message);
     }
     setIsCreatingSession(false);
   };
@@ -524,7 +553,11 @@ export default function MysteryPage() {
                     whileTap={{ scale: 0.98 }}
                     onClick={() => startGame(episode)}
                     disabled={isCreatingSession}
-                    className="w-full text-left bg-white/5 backdrop-blur border border-white/10 hover:border-amber-500/50 rounded-xl p-6 transition-all disabled:opacity-50"
+                    className={`w-full text-left backdrop-blur border rounded-xl p-6 transition-all disabled:opacity-50 ${
+                      completedEpisodes.has(episode.id)
+                        ? 'bg-green-500/10 border-green-500/30 hover:border-green-400/50'
+                        : 'bg-white/5 border-white/10 hover:border-amber-500/50'
+                    }`}
                   >
                     <div className="flex items-start gap-4">
                       <div className="text-3xl">{episode.is_ai_driven ? '🤖' : '📖'}</div>
@@ -538,6 +571,17 @@ export default function MysteryPage() {
                               AI-Driven
                             </span>
                           )}
+                          {completedEpisodes.has(episode.id) && (
+                            <span className="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded-full font-medium flex items-center gap-1">
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                              Completed
+                              {completedEpisodes.get(episode.id)?.ending_type === 'good' && ' 🎉'}
+                              {completedEpisodes.get(episode.id)?.ending_type === 'neutral' && ' 🤔'}
+                              {completedEpisodes.get(episode.id)?.ending_type === 'bad' && ' 😱'}
+                            </span>
+                          )}
                         </div>
                         <h3 className="text-xl font-serif font-semibold text-white mb-2">
                           {episode.title}
@@ -545,6 +589,11 @@ export default function MysteryPage() {
                         {episode.description && (
                           <p className="text-purple-200 text-sm">
                             {episode.description}
+                          </p>
+                        )}
+                        {completedEpisodes.has(episode.id) && (
+                          <p className="text-green-400/70 text-xs mt-2">
+                            Completed {new Date(completedEpisodes.get(episode.id)!.completed_at).toLocaleDateString()}
                           </p>
                         )}
                       </div>
