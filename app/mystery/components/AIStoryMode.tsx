@@ -106,12 +106,20 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
         session_status: data?.session?.status,
         current_scene_order: data?.session?.current_ai_scene_order,
         isGenerating,
+        currentPlayer,
       });
 
-      // If we need to generate and both players are in, auto-generate
+      // If we need to generate and both players are in, only DANIEL generates
+      // Huaiyao polls and waits for the scene to appear
       if (data?.needs_generation && data?.session?.status === 'active') {
-        console.log('[AI DEBUG] Triggering scene generation...');
-        generateNextScene(data.session.current_ai_scene_order || 1);
+        if (currentPlayer === 'daniel') {
+          console.log('[AI DEBUG] Daniel triggering scene generation...');
+          generateNextScene(data.session.current_ai_scene_order || 1);
+        } else {
+          console.log('[AI DEBUG] Huaiyao waiting for Daniel to generate...');
+          // Poll again in 2 seconds to check if scene is ready
+          setTimeout(() => fetchGameState(), 2000);
+        }
       }
     } catch (err) {
       console.error('[AI DEBUG] Error fetching AI game state:', err);
@@ -360,7 +368,15 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   }
 
   const { session, episode, scene, choices, puzzle } = gameState;
-  console.log('[AI DEBUG] Rendering main view:', { session_status: session.status, has_scene: !!scene, isGenerating });
+  console.log('[AI DEBUG] Rendering main view:', {
+    session_status: session.status,
+    has_scene: !!scene,
+    choices_count: choices?.length,
+    textComplete,
+    puzzle: !!puzzle,
+    puzzleSolved,
+    isGenerating
+  });
 
   // Waiting for partner
   if (session.status === 'waiting') {
@@ -396,6 +412,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   // Generating state (only show if actually generating, or if needs_generation AND status is active)
   if (isGenerating || (gameState.needs_generation && session.status === 'active')) {
     console.log('[AI DEBUG] Rendering: Generating state', { isGenerating, needs_generation: gameState.needs_generation, status: session.status });
+    const isWaiting = currentPlayer === 'huaiyao' && !isGenerating;
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center p-4">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center max-w-md">
@@ -404,13 +421,13 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
             transition={{ duration: 2, repeat: Infinity }}
             className="text-6xl mb-6"
           >
-            🧠
+            {isWaiting ? '⏳' : '🧠'}
           </motion.div>
           <h1 className="text-2xl font-serif font-bold text-white mb-2">
-            AI is crafting your mystery...
+            {isWaiting ? 'Waiting for story...' : 'AI is crafting your mystery...'}
           </h1>
           <p className="text-purple-200">
-            Generating a unique story based on your choices
+            {isWaiting ? 'Daniel is generating the scene' : 'Generating a unique story based on your choices'}
           </p>
           {generateError && (
             <div className="mt-4 p-3 bg-red-500/20 border border-red-500/50 rounded-lg">
@@ -439,10 +456,6 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
               />
             </motion.div>
           )}
-          {/* Debug info */}
-          <p className="text-purple-500 text-xs mt-4">
-            Debug: generating={isGenerating.toString()}, needs_gen={gameState.needs_generation?.toString()}, scene_order={session.current_ai_scene_order}
-          </p>
         </motion.div>
       </div>
     );
@@ -732,8 +745,13 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
               </div>
             )}
 
+            {/* Debug: show choices count */}
+            <p className="text-purple-500 text-xs mb-2">
+              Debug: {choices?.length || 0} choices loaded, textComplete={textComplete.toString()}
+            </p>
+
             {/* Choice buttons */}
-            {!myResponse && choices.length > 0 && (
+            {!myResponse && choices && choices.length > 0 && (
               <>
                 <h3 className="text-sm font-medium text-purple-300">What do you want to do?</h3>
                 <div className="space-y-2">
@@ -798,6 +816,35 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                   {isSubmitting ? 'Submitting...' : 'Confirm Decision'}
                 </button>
               </>
+            )}
+
+            {/* Fallback if no choices */}
+            {!myResponse && (!choices || choices.length === 0) && (
+              <div className="bg-yellow-900/20 border border-yellow-500/30 rounded-xl p-4">
+                <p className="text-yellow-300 text-sm mb-2">No choices loaded. Type your own action:</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={customInput}
+                    onChange={(e) => setCustomInput(e.target.value)}
+                    placeholder="What do you want to do?"
+                    className="flex-1 px-4 py-3 bg-purple-900/50 border border-purple-500/30 rounded-xl text-white placeholder-purple-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    disabled={isSubmitting}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && customInput.trim()) {
+                        submitResponse(customInput.trim());
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => customInput.trim() && submitResponse(customInput.trim())}
+                    disabled={isSubmitting || !customInput.trim()}
+                    className="px-6 py-3 bg-amber-500 hover:bg-amber-400 disabled:bg-gray-600 text-purple-950 rounded-xl font-semibold"
+                  >
+                    Go
+                  </button>
+                </div>
+              </div>
             )}
 
             {/* Both responded - trigger next scene */}
