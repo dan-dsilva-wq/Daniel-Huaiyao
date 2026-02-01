@@ -26,8 +26,6 @@ export default function MysterySessionPage() {
   const [puzzleSolved, setPuzzleSolved] = useState(false);
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null);
   const [textComplete, setTextComplete] = useState(false);
-  const [voteError, setVoteError] = useState<string | null>(null);
-  const [lastRpcResponse, setLastRpcResponse] = useState<string | null>(null);
   const votingRef = useRef(false); // Use ref to prevent race conditions
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
@@ -161,13 +159,21 @@ export default function MysterySessionPage() {
           filter: `session_id=eq.${sessionId}`,
         },
         async (payload) => {
-          // Check if puzzle was solved
-          if (payload.new && (payload.new as { status: string }).status === 'solved') {
-            setPuzzleSolved(true);
-            setShowCelebration(true);
-          }
+          // Fetch latest state first
           const { data } = await supabase.rpc('get_mystery_game_state', { p_session_id: sessionId });
-          if (data) setGameState(data);
+          if (data) {
+            // Check if puzzle was solved - but only for the CURRENT puzzle
+            const payloadPuzzleId = (payload.new as { puzzle_id: string })?.puzzle_id;
+            const currentPuzzleId = data.puzzle?.id;
+
+            if (payload.new &&
+                (payload.new as { status: string }).status === 'solved' &&
+                payloadPuzzleId === currentPuzzleId) {
+              setPuzzleSolved(true);
+              setShowCelebration(true);
+            }
+            setGameState(data);
+          }
         }
       )
       .subscribe();
@@ -194,30 +200,16 @@ export default function MysterySessionPage() {
   }, [sessionId, currentUser]);
 
   const handleVote = async (choiceId: string) => {
-    console.log('[VOTE DEBUG] handleVote called', { choiceId, currentUser, isVoting, votingRef: votingRef.current });
-
     // Use ref as primary guard (not affected by re-renders)
-    if (votingRef.current) {
-      console.log('[VOTE DEBUG] Blocked by votingRef');
-      setLastRpcResponse('Blocked by votingRef (another vote in progress)');
-      return;
-    }
+    if (votingRef.current) return;
 
     // Check if this player already voted for this choice
     const alreadyVoted = gameState?.votes?.some(v => v.player === currentUser && v.choice_id === choiceId);
-    const currentVotes = gameState?.votes || [];
-
-    if (!currentUser || alreadyVoted) {
-      console.log('[VOTE DEBUG] Early return - currentUser:', currentUser, 'alreadyVoted:', alreadyVoted);
-      setLastRpcResponse(`Early return: user=${currentUser}, alreadyVoted=${alreadyVoted}, votes=${JSON.stringify(currentVotes)}`);
-      return;
-    }
+    if (!currentUser || alreadyVoted) return;
 
     // Set both ref and state
     votingRef.current = true;
     setIsVoting(true);
-    setVoteError(null);
-    console.log('[VOTE DEBUG] Calling RPC cast_mystery_vote');
 
     try {
       const { data, error: rpcError } = await supabase.rpc('cast_mystery_vote', {
@@ -226,13 +218,7 @@ export default function MysterySessionPage() {
         p_choice_id: choiceId,
       });
 
-      console.log('[VOTE DEBUG] RPC response:', { data, rpcError });
-      setLastRpcResponse(JSON.stringify({ data, error: rpcError?.message }, null, 2));
-
-      if (rpcError) {
-        setVoteError(`Vote failed: ${rpcError.message}`);
-        throw rpcError;
-      }
+      if (rpcError) throw rpcError;
 
       if (data?.agreed) {
         setShowCelebration(true);
@@ -248,12 +234,10 @@ export default function MysterySessionPage() {
         });
       }
     } catch (err) {
-      console.error('[VOTE DEBUG] Error voting:', err);
-      setVoteError(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error('Error voting:', err);
     }
     votingRef.current = false;
     setIsVoting(false);
-    console.log('[VOTE DEBUG] Vote complete');
   };
 
   const handleCelebrationComplete = () => {
@@ -537,12 +521,6 @@ export default function MysterySessionPage() {
                   />
                 </div>
               ))}
-              {/* Debug info */}
-              <div className="text-xs text-gray-500 mt-2 p-2 bg-black/20 rounded">
-                <div>Debug: isVoting={String(isVoting)}, player={currentUser}, votes={votes.length}</div>
-                {voteError && <div className="text-red-400 mt-1">ERROR: {voteError}</div>}
-                {lastRpcResponse && <div className="text-blue-300 mt-1 text-xs whitespace-pre">RPC: {lastRpcResponse}</div>}
-              </div>
 
               {/* Vote status hint */}
               {votes.length === 2 && votes[0].choice_id !== votes[1].choice_id && (
