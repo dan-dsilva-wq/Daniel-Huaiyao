@@ -619,17 +619,11 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                 {scene.title}
               </h2>
             )}
-            {textComplete ? (
-              <ParagraphReader text={scene.narrative_text} autoStart={true} />
-            ) : (
-              <TypewriterText
-                text={scene.narrative_text}
-                speed={20}
-                onComplete={() => setTextComplete(true)}
-                className="text-purple-100 leading-relaxed text-lg"
-                autoSpeak={false}
-              />
-            )}
+            <ParagraphReader
+              text={scene.narrative_text}
+              autoStart={true}
+              onComplete={() => setTextComplete(true)}
+            />
           </motion.div>
         )}
 

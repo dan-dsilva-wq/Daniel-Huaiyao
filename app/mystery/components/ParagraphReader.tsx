@@ -7,9 +7,10 @@ interface ParagraphReaderProps {
   text: string;
   className?: string;
   autoStart?: boolean;
+  onComplete?: () => void;
 }
 
-export default function ParagraphReader({ text, className = '', autoStart = false }: ParagraphReaderProps) {
+export default function ParagraphReader({ text, className = '', autoStart = false, onComplete }: ParagraphReaderProps) {
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
   const [autoPlaying, setAutoPlaying] = useState(false);
@@ -109,6 +110,7 @@ export default function ParagraphReader({ text, className = '', autoStart = fals
 
     setAutoPlaying(false);
     autoPlayingRef.current = false;
+    onComplete?.();
   };
 
   const stopAll = () => {
@@ -124,6 +126,9 @@ export default function ParagraphReader({ text, className = '', autoStart = fals
 
   // Auto-start reading when component mounts (if enabled)
   useEffect(() => {
+    // Text is visible immediately, so notify parent
+    onComplete?.();
+
     if (autoStart && !hasAutoStartedRef.current && paragraphs.length > 0) {
       hasAutoStartedRef.current = true;
       // Small delay to let UI render first
