@@ -83,7 +83,9 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   const partnerName = currentPlayer === 'daniel' ? 'Huaiyao' : 'Daniel';
   const myResponse = gameState?.responses?.find(r => r.player === currentPlayer);
   const partnerResponse = gameState?.responses?.find(r => r.player !== currentPlayer);
-  const bothResponded = myResponse && partnerResponse;
+  const bothResponded = !!(myResponse && partnerResponse);
+  const generationTriggeredRef = useRef(false);
+  const currentSceneOrderRef = useRef<number>(0);
 
   // Fetch AI game state
   const fetchGameState = useCallback(async () => {
@@ -200,7 +202,8 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
       // If both responded, only DANIEL triggers generation (to avoid duplicates)
       if (data?.both_responded && currentPlayer === 'daniel') {
-        console.log('[AI DEBUG] Both responded, Daniel generating next scene...');
+        console.log('[AI DEBUG] Both responded immediately, Daniel generating next scene...');
+        generationTriggeredRef.current = true; // Mark as triggered to avoid useEffect double-trigger
         const nextOrder = (gameState?.session?.current_ai_scene_order || 1) + 1;
         await supabase.rpc('advance_ai_scene', { p_session_id: sessionId });
         await generateNextScene(nextOrder, {
@@ -298,6 +301,48 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
     return () => clearInterval(heartbeat);
   }, [sessionId, currentPlayer]);
+
+  // Reset generation trigger when scene changes
+  useEffect(() => {
+    const currentOrder = gameState?.session?.current_ai_scene_order || 0;
+    if (currentOrder !== currentSceneOrderRef.current) {
+      console.log('[AI DEBUG] Scene order changed, resetting generation trigger', {
+        old: currentSceneOrderRef.current,
+        new: currentOrder,
+      });
+      currentSceneOrderRef.current = currentOrder;
+      generationTriggeredRef.current = false;
+    }
+  }, [gameState?.session?.current_ai_scene_order]);
+
+  // Trigger generation when both responded (Daniel only)
+  // This handles the case where Daniel submitted first and Huaiyao submits second
+  useEffect(() => {
+    console.log('[AI DEBUG] Generation trigger check:', {
+      bothResponded,
+      currentPlayer,
+      isGenerating,
+      alreadyTriggered: generationTriggeredRef.current,
+      myResponse: myResponse?.response_text,
+      partnerResponse: partnerResponse?.response_text,
+    });
+
+    if (bothResponded && currentPlayer === 'daniel' && !isGenerating && !generationTriggeredRef.current) {
+      console.log('[AI DEBUG] Both responded detected via state update, Daniel triggering generation...');
+      generationTriggeredRef.current = true;
+
+      const nextOrder = (gameState?.session?.current_ai_scene_order || 1) + 1;
+
+      // Advance scene and generate
+      (async () => {
+        await supabase.rpc('advance_ai_scene', { p_session_id: sessionId });
+        await generateNextScene(nextOrder, {
+          daniel: myResponse?.response_text,
+          huaiyao: partnerResponse?.response_text,
+        });
+      })();
+    }
+  }, [bothResponded, currentPlayer, isGenerating, myResponse, partnerResponse, gameState?.session?.current_ai_scene_order, sessionId]);
 
   const router = useRouter();
 
