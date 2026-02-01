@@ -147,7 +147,7 @@ export default function MysterySessionPage() {
       )
       .subscribe();
 
-    // Subscribe to puzzle answer changes
+    // Subscribe to puzzle answer changes (just refresh state, don't set puzzleSolved here)
     const puzzleChannel = supabase
       .channel(`mystery-puzzles-${sessionId}`)
       .on(
@@ -158,22 +158,10 @@ export default function MysterySessionPage() {
           table: 'mystery_puzzle_answers',
           filter: `session_id=eq.${sessionId}`,
         },
-        async (payload) => {
-          // Fetch latest state first
+        async () => {
+          // Just refresh game state - puzzleSolved is handled by PuzzleRenderer's onSolved callback
           const { data } = await supabase.rpc('get_mystery_game_state', { p_session_id: sessionId });
-          if (data) {
-            // Check if puzzle was solved - but only for the CURRENT puzzle
-            const payloadPuzzleId = (payload.new as { puzzle_id: string })?.puzzle_id;
-            const currentPuzzleId = data.puzzle?.id;
-
-            if (payload.new &&
-                (payload.new as { status: string }).status === 'solved' &&
-                payloadPuzzleId === currentPuzzleId) {
-              setPuzzleSolved(true);
-              setShowCelebration(true);
-            }
-            setGameState(data);
-          }
+          if (data) setGameState(data);
         }
       )
       .subscribe();
@@ -546,6 +534,27 @@ export default function MysterySessionPage() {
                 Waiting for {votes[0].player === currentUser ? partnerName : 'you'} to continue...
               </p>
             )}
+          </div>
+        )}
+
+        {/* Debug Panel - only shows in Test Lab (episode 99) */}
+        {episode.episode_number === 99 && (
+          <div className="mt-8 p-4 bg-black/40 border border-yellow-500/50 rounded-xl text-xs font-mono">
+            <div className="text-yellow-400 font-bold mb-2">🔧 DEBUG (Test Lab Only)</div>
+            <div className="grid grid-cols-2 gap-2 text-gray-300">
+              <div>sceneId: <span className="text-cyan-400">{scene.id?.slice(-8)}</span></div>
+              <div>sceneOrder: <span className="text-cyan-400">{scene.scene_order}</span></div>
+              <div>puzzleSolved: <span className={puzzleSolved ? 'text-red-400' : 'text-green-400'}>{String(puzzleSolved)}</span></div>
+              <div>showChoices: <span className="text-cyan-400">{String(showChoices)}</span></div>
+              <div>textComplete: <span className="text-cyan-400">{String(textComplete)}</span></div>
+              <div>hasPuzzle: <span className="text-cyan-400">{String(hasPuzzle)}</span></div>
+              <div>isBlocking: <span className="text-cyan-400">{String(isBlockingPuzzle)}</span></div>
+              <div>shouldShowChoices: <span className="text-cyan-400">{String(shouldShowChoices)}</span></div>
+              <div>puzzleId: <span className="text-cyan-400">{gameState.puzzle?.id?.slice(-8) || 'none'}</span></div>
+              <div>puzzleType: <span className="text-cyan-400">{gameState.puzzle?.puzzle_type || 'none'}</span></div>
+              <div>votes: <span className="text-cyan-400">{votes.length}</span></div>
+              <div>choices: <span className="text-cyan-400">{choices.length}</span></div>
+            </div>
           </div>
         )}
 
