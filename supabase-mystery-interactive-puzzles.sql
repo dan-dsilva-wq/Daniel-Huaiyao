@@ -151,9 +151,9 @@ INSERT INTO mystery_puzzles (
 -- STEP 3: UPDATE ANSWER HASHES
 -- ============================================
 
-UPDATE mystery_puzzles SET answer_config = '{"answer_hash": "' || encode(sha256('COMPLETE'::bytea), 'hex') || '"}'::jsonb WHERE id = 'dd000000-0000-0000-0000-000000000010';
-UPDATE mystery_puzzles SET answer_config = '{"answer_hash": "' || encode(sha256('CORRECT'::bytea), 'hex') || '"}'::jsonb WHERE id = 'dd000000-0000-0000-0000-000000000011';
-UPDATE mystery_puzzles SET answer_config = '{"answer_hash": "' || encode(sha256('CORRECT'::bytea), 'hex') || '"}'::jsonb WHERE id = 'dd000000-0000-0000-0000-000000000012';
+UPDATE mystery_puzzles SET answer_config = ('{"answer_hash": "' || encode(sha256('COMPLETE'::bytea), 'hex') || '"}')::jsonb WHERE id = 'dd000000-0000-0000-0000-000000000010';
+UPDATE mystery_puzzles SET answer_config = ('{"answer_hash": "' || encode(sha256('CORRECT'::bytea), 'hex') || '"}')::jsonb WHERE id = 'dd000000-0000-0000-0000-000000000011';
+UPDATE mystery_puzzles SET answer_config = ('{"answer_hash": "' || encode(sha256('CORRECT'::bytea), 'hex') || '"}')::jsonb WHERE id = 'dd000000-0000-0000-0000-000000000012';
 
 -- ============================================
 -- STEP 4: LINK FROM LAST TEXT PUZZLE TO CIRCUIT
