@@ -150,6 +150,11 @@ function CircuitPuzzleGame({
 
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
+  // Node and grid dimensions
+  const nodeSize = 48; // w-12 = 48px
+  const gap = 16; // gap-4 = 16px
+  const gridWidth = gridSize * nodeSize + (gridSize - 1) * gap; // 4*48 + 3*16 = 240px
+
   const getNodeColor = (row: number, col: number) => {
     const nodeId = `${row}-${col}`;
     if (nodeId === startNode) return 'bg-green-500';
@@ -169,11 +174,12 @@ function CircuitPuzzleGame({
     } else {
       // Try to connect
       if (selectedNode !== nodeId) {
-        // Check if adjacent (including diagonal)
+        // Check if adjacent (orthogonal only - no diagonal)
         const [r1, c1] = selectedNode.split('-').map(Number);
-        const isAdjacent = Math.abs(r1 - row) <= 1 && Math.abs(c1 - col) <= 1;
+        const isOrthogonalAdjacent = (Math.abs(r1 - row) === 1 && c1 === col) ||
+                                      (Math.abs(c1 - col) === 1 && r1 === row);
 
-        if (isAdjacent) {
+        if (isOrthogonalAdjacent) {
           // Create connection key (sorted so A_B === B_A)
           const connKey = [selectedNode, nodeId].sort().join('_');
           const newConnections = { ...connections };
@@ -194,7 +200,12 @@ function CircuitPuzzleGame({
 
   const checkCircuit = () => {
     // Check if all target connections are made
-    const allConnected = targetConnections.every(conn => connections[conn]);
+    const allConnected = targetConnections.every(conn => {
+      // Check both orderings since connections might be stored differently
+      const [n1, n2] = conn.split('_');
+      const reverseKey = `${n2}_${n1}`;
+      return connections[conn] || connections[reverseKey];
+    });
     const code = allConnected ? 'COMPLETE' : 'INCOMPLETE';
     onSubmitCode(code);
   };
@@ -202,8 +213,6 @@ function CircuitPuzzleGame({
   // Draw connections as SVG lines
   const renderConnections = () => {
     const lines: React.ReactNode[] = [];
-    const nodeSize = 48;
-    const gap = 16;
 
     Object.keys(connections).forEach(key => {
       if (!connections[key]) return;
@@ -212,6 +221,7 @@ function CircuitPuzzleGame({
       const [r1, c1] = n1.split('-').map(Number);
       const [r2, c2] = n2.split('-').map(Number);
 
+      // Calculate center positions of nodes
       const x1 = c1 * (nodeSize + gap) + nodeSize / 2;
       const y1 = r1 * (nodeSize + gap) + nodeSize / 2;
       const x2 = c2 * (nodeSize + gap) + nodeSize / 2;
@@ -225,7 +235,7 @@ function CircuitPuzzleGame({
           x2={x2}
           y2={y2}
           stroke="#fbbf24"
-          strokeWidth="4"
+          strokeWidth="6"
           strokeLinecap="round"
         />
       );
@@ -242,35 +252,39 @@ function CircuitPuzzleGame({
           <span className="text-red-400">red end</span> by clicking nodes to create connections.
         </p>
 
-        <div className="relative flex justify-center">
-          <svg
-            className="absolute inset-0 pointer-events-none"
-            width="100%"
-            height="100%"
-            style={{ width: 4 * 64, height: 4 * 64 }}
-          >
-            {renderConnections()}
-          </svg>
+        <div className="flex justify-center">
+          <div className="relative" style={{ width: gridWidth, height: gridWidth }}>
+            {/* SVG for connections - positioned exactly over the grid */}
+            <svg
+              className="absolute inset-0 pointer-events-none"
+              width={gridWidth}
+              height={gridWidth}
+              style={{ zIndex: 0 }}
+            >
+              {renderConnections()}
+            </svg>
 
-          <div className="grid grid-cols-4 gap-4 relative z-10">
-            {Array.from({ length: gridSize }).map((_, row) =>
-              Array.from({ length: gridSize }).map((_, col) => (
-                <motion.button
-                  key={`${row}-${col}`}
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => handleNodeClick(row, col)}
-                  className={`
-                    w-12 h-12 rounded-full transition-all shadow-lg
-                    ${getNodeColor(row, col)}
-                    ${selectedNode === `${row}-${col}` ? 'ring-4 ring-white' : ''}
-                  `}
-                >
-                  {`${row}-${col}` === startNode && <span className="text-white text-xs">IN</span>}
-                  {`${row}-${col}` === endNode && <span className="text-white text-xs">OUT</span>}
-                </motion.button>
-              ))
-            )}
+            {/* Grid of nodes */}
+            <div className="grid grid-cols-4 gap-4 relative" style={{ zIndex: 1 }}>
+              {Array.from({ length: gridSize }).map((_, row) =>
+                Array.from({ length: gridSize }).map((_, col) => (
+                  <motion.button
+                    key={`${row}-${col}`}
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => handleNodeClick(row, col)}
+                    className={`
+                      w-12 h-12 rounded-full transition-all shadow-lg
+                      ${getNodeColor(row, col)}
+                      ${selectedNode === `${row}-${col}` ? 'ring-4 ring-white' : ''}
+                    `}
+                  >
+                    {`${row}-${col}` === startNode && <span className="text-white text-xs font-bold">IN</span>}
+                    {`${row}-${col}` === endNode && <span className="text-white text-xs font-bold">OUT</span>}
+                  </motion.button>
+                ))
+              )}
+            </div>
           </div>
         </div>
       </div>
