@@ -462,12 +462,17 @@ export default function MysteryPage() {
                     className="w-full text-left bg-white/5 backdrop-blur border border-white/10 hover:border-amber-500/50 rounded-xl p-6 transition-all disabled:opacity-50"
                   >
                     <div className="flex items-start gap-4">
-                      <div className="text-3xl">📖</div>
+                      <div className="text-3xl">{episode.is_ai_driven ? '🤖' : '📖'}</div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs text-amber-400 font-medium">
                             Episode {episode.episode_number}
                           </span>
+                          {episode.is_ai_driven && (
+                            <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs rounded-full font-medium">
+                              AI-Driven
+                            </span>
+                          )}
                         </div>
                         <h3 className="text-xl font-serif font-semibold text-white mb-2">
                           {episode.title}

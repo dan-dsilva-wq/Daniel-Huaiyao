@@ -42,6 +42,7 @@ export interface MysteryEpisode {
   title: string;
   description: string | null;
   is_available: boolean;
+  is_ai_driven?: boolean;
 }
 
 export interface MysteryScene {

@@ -10,6 +10,7 @@ import ChoiceButton from '../components/ChoiceButton';
 import AgreementCelebration from '../components/AgreementCelebration';
 import PartnerStatus from '../components/PartnerStatus';
 import { PuzzleRenderer, MiniGameContainer } from '../components/puzzles';
+import AIStoryMode from '../components/AIStoryMode';
 
 export default function MysterySessionPage() {
   const params = useParams();
@@ -26,6 +27,7 @@ export default function MysterySessionPage() {
   const [puzzleSolved, setPuzzleSolved] = useState(false);
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null);
   const [textComplete, setTextComplete] = useState(false);
+  const [isAIEpisode, setIsAIEpisode] = useState<boolean | null>(null);
   const votingRef = useRef(false); // Use ref to prevent race conditions
   const currentPuzzleIdRef = useRef<string | null>(null); // Track current puzzle to prevent stale callbacks
 
@@ -94,13 +96,23 @@ export default function MysterySessionPage() {
   // Fetch initial game state and join session
   useEffect(() => {
     if (currentUser && sessionId) {
-      // Join the session
-      supabase.rpc('join_mystery_session', {
-        p_session_id: sessionId,
-        p_player: currentUser,
-      }).then(() => {
-        fetchGameState(true); // Force reset on initial load
-      });
+      // Check if this is an AI episode first
+      const checkEpisodeType = async () => {
+        const { data } = await supabase.rpc('is_ai_episode', { p_session_id: sessionId });
+        setIsAIEpisode(data === true);
+
+        // Join the session
+        await supabase.rpc('join_mystery_session', {
+          p_session_id: sessionId,
+          p_player: currentUser,
+        });
+
+        // If not AI episode, fetch regular game state
+        if (data !== true) {
+          fetchGameState(true); // Force reset on initial load
+        }
+      };
+      checkEpisodeType();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, sessionId]);
@@ -249,8 +261,8 @@ export default function MysterySessionPage() {
     setShowChoices(true);
   };
 
-  // Loading state
-  if (isLoading || !currentUser) {
+  // Loading state (still determining episode type)
+  if (isLoading || !currentUser || isAIEpisode === null) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center">
         <motion.div
@@ -259,6 +271,17 @@ export default function MysterySessionPage() {
           className="w-8 h-8 border-4 border-purple-200 border-t-purple-500 rounded-full"
         />
       </div>
+    );
+  }
+
+  // AI Episode - use dedicated AI story mode
+  if (isAIEpisode) {
+    return (
+      <AIStoryMode
+        sessionId={sessionId}
+        currentPlayer={currentUser}
+        onBack={() => router.push('/mystery')}
+      />
     );
   }
 
