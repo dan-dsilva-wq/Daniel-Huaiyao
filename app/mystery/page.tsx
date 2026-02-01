@@ -11,11 +11,17 @@ interface WaitingGame {
   episode: MysteryEpisode;
 }
 
+interface ActiveGame {
+  session: MysterySession;
+  episode: MysteryEpisode;
+}
+
 export default function MysteryPage() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<Player | null>(null);
   const [episodes, setEpisodes] = useState<MysteryEpisode[]>([]);
   const [waitingGames, setWaitingGames] = useState<WaitingGame[]>([]);
+  const [activeGames, setActiveGames] = useState<ActiveGame[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEpisode, setSelectedEpisode] = useState<MysteryEpisode | null>(null);
   const [waitingSession, setWaitingSession] = useState<MysterySession | null>(null);
@@ -52,6 +58,20 @@ export default function MysteryPage() {
         episode: s.mystery_episodes,
       }));
       setWaitingGames(games);
+
+      // Fetch active sessions where current user has joined (to allow rejoin)
+      const currentUserJoinedFieldActive = currentUser === 'daniel' ? 'daniel_joined' : 'huaiyao_joined';
+      const { data: activeData } = await supabase
+        .from('mystery_sessions')
+        .select('*, mystery_episodes(*)')
+        .eq('status', 'active')
+        .eq(currentUserJoinedFieldActive, true);
+
+      const active: ActiveGame[] = (activeData || []).map((s: any) => ({
+        session: s,
+        episode: s.mystery_episodes,
+      }));
+      setActiveGames(active);
     } catch (error) {
       console.error('Error fetching data:', error);
     }
@@ -386,6 +406,51 @@ export default function MysteryPage() {
           </h1>
           <p className="text-purple-200">Solve mysteries together, one choice at a time</p>
         </motion.div>
+
+        {/* Active games you can rejoin */}
+        {activeGames.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8"
+          >
+            <h2 className="text-lg font-medium text-green-400 mb-4">
+              Continue your game
+            </h2>
+            <div className="space-y-3">
+              {activeGames.map((game) => (
+                <motion.button
+                  key={game.session.id}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => router.push(`/mystery/${game.session.id}`)}
+                  className="w-full text-left bg-green-500/20 backdrop-blur border-2 border-green-500/50 hover:border-green-400 rounded-xl p-6 transition-all"
+                >
+                  <div className="flex items-center gap-4">
+                    <motion.div
+                      animate={{ scale: [1, 1.1, 1] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                      className="text-3xl"
+                    >
+                      🔍
+                    </motion.div>
+                    <div className="flex-1">
+                      <p className="text-green-300 text-sm mb-1">
+                        Game in progress
+                      </p>
+                      <h3 className="text-xl font-serif font-semibold text-white">
+                        {game.episode.title}
+                      </h3>
+                    </div>
+                    <div className="text-green-400 font-medium">
+                      Rejoin →
+                    </div>
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {/* Waiting games from partner */}
         {waitingGames.length > 0 && (

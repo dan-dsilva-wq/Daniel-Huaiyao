@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import type { Player } from '@/lib/supabase';
 import TypewriterText from './TypewriterText';
@@ -253,6 +254,37 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
     return () => clearInterval(heartbeat);
   }, [sessionId, currentPlayer]);
 
+  const router = useRouter();
+
+  // Warn before leaving page
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (gameState?.session?.status === 'active') {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [gameState?.session?.status]);
+
+  // Confirmation for navigation links
+  const handleNavigation = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (gameState?.session?.status === 'active') {
+      const confirmed = window.confirm(
+        'Are you sure you want to leave? Your partner will be waiting for you. You can rejoin from the Episodes page.'
+      );
+      if (!confirmed) {
+        e.preventDefault();
+        return;
+      }
+    }
+    router.push(href);
+    e.preventDefault();
+  };
+
   // Loading state
   if (isLoading) {
     return (
@@ -421,6 +453,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
         >
           <a
             href="/"
+            onClick={(e) => handleNavigation(e, '/')}
             className="flex items-center gap-1 text-purple-300 hover:text-white transition-colors text-sm"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -430,6 +463,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
           </a>
           <a
             href="/mystery"
+            onClick={(e) => handleNavigation(e, '/mystery')}
             className="flex items-center gap-1 text-purple-300 hover:text-white transition-colors text-sm"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
