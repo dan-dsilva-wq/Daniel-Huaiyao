@@ -620,7 +620,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
               </h2>
             )}
             {textComplete ? (
-              <ParagraphReader text={scene.narrative_text} />
+              <ParagraphReader text={scene.narrative_text} autoStart={true} />
             ) : (
               <TypewriterText
                 text={scene.narrative_text}

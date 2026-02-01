@@ -1,19 +1,21 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion } from 'framer-motion';
 
 interface ParagraphReaderProps {
   text: string;
   className?: string;
+  autoStart?: boolean;
 }
 
-export default function ParagraphReader({ text, className = '' }: ParagraphReaderProps) {
+export default function ParagraphReader({ text, className = '', autoStart = false }: ParagraphReaderProps) {
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
   const [autoPlaying, setAutoPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoPlayingRef = useRef(false);
+  const hasAutoStartedRef = useRef(false);
 
   // Split text into paragraphs (by double newline or single newline)
   const paragraphs = text
@@ -119,6 +121,28 @@ export default function ParagraphReader({ text, className = '' }: ParagraphReade
     setPlayingIndex(null);
     setLoadingIndex(null);
   };
+
+  // Auto-start reading when component mounts (if enabled)
+  useEffect(() => {
+    if (autoStart && !hasAutoStartedRef.current && paragraphs.length > 0) {
+      hasAutoStartedRef.current = true;
+      // Small delay to let UI render first
+      const timeout = setTimeout(() => {
+        autoReadAll();
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [autoStart, paragraphs.length]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className={className}>
