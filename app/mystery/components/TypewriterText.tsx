@@ -16,7 +16,7 @@ export default function TypewriterText({
   speed = 30,
   onComplete,
   className = '',
-  autoSpeak = false, // Disabled by default - user can click "Read aloud" button
+  autoSpeak = true, // Auto-speak with ElevenLabs
 }: TypewriterTextProps) {
   const [displayedText, setDisplayedText] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);

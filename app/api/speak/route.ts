@@ -10,7 +10,10 @@ const VOICE_ID = 'EXAVITQu4vr4xnSDxMaL'; // Rachel - good for storytelling
 
 export async function POST(request: Request) {
   try {
+    console.log('[SPEAK] API called, key configured:', !!ELEVENLABS_API_KEY);
+
     if (!ELEVENLABS_API_KEY) {
+      console.error('[SPEAK] No ELEVENLABS_API_KEY set');
       return NextResponse.json(
         { error: 'ElevenLabs API key not configured' },
         { status: 500 }
@@ -50,12 +53,14 @@ export async function POST(request: Request) {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('ElevenLabs error:', errorText);
+      console.error('[SPEAK] ElevenLabs error:', response.status, errorText);
       return NextResponse.json(
-        { error: 'Failed to generate speech' },
+        { error: `ElevenLabs error: ${response.status}` },
         { status: 500 }
       );
     }
+
+    console.log('[SPEAK] ElevenLabs success, returning audio');
 
     // Return the audio stream
     const audioBuffer = await response.arrayBuffer();
