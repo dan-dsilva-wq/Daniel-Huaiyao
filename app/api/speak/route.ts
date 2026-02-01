@@ -29,8 +29,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // Limit text length to avoid huge API costs
-    const trimmedText = text.slice(0, 5000);
+    // Limit text length - ElevenLabs free tier has ~2500 char limit per request
+    // Also helps avoid Vercel serverless timeout
+    const trimmedText = text.slice(0, 2500);
+    console.log('[SPEAK] Text length:', text.length, 'trimmed to:', trimmedText.length);
 
     const response = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
