@@ -79,6 +79,8 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [hintsRevealed, setHintsRevealed] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isTypingRef = useRef(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const partnerName = currentPlayer === 'daniel' ? 'Huaiyao' : 'Daniel';
   const myResponse = gameState?.responses?.find(r => r.player === currentPlayer);
@@ -269,7 +271,10 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
     if (!shouldPoll) return;
 
-    const pollInterval = setInterval(() => fetchGameState(), 3000);
+    const pollInterval = setInterval(() => {
+      // Skip poll if user is actively typing (prevents lag on mobile)
+      if (!isTypingRef.current) fetchGameState();
+    }, 3000);
     return () => clearInterval(pollInterval);
   }, [myResponse, partnerResponse, isGenerating, bothResponded, fetchGameState]);
 
@@ -280,7 +285,9 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
     if (!shouldPoll) return;
 
-    const pollInterval = setInterval(() => fetchGameState(), 2000);
+    const pollInterval = setInterval(() => {
+      if (!isTypingRef.current) fetchGameState();
+    }, 2000);
     return () => clearInterval(pollInterval);
   }, [bothResponded, currentPlayer, isGenerating, fetchGameState]);
 
@@ -671,13 +678,24 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                   onChange={(e) => {
                     setPuzzleAnswer(e.target.value);
                     setPuzzleError(null);
+                    isTypingRef.current = true;
+                    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                    typingTimeoutRef.current = setTimeout(() => { isTypingRef.current = false; }, 1000);
                   }}
                   placeholder="Enter your answer..."
                   className="flex-1 px-4 py-2 bg-purple-900/50 border border-cyan-500/30 rounded-lg text-white placeholder-purple-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                  onKeyDown={(e) => e.key === 'Enter' && checkPuzzleAnswer()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      isTypingRef.current = false;
+                      checkPuzzleAnswer();
+                    }
+                  }}
                 />
                 <button
-                  onClick={checkPuzzleAnswer}
+                  onClick={() => {
+                    isTypingRef.current = false;
+                    checkPuzzleAnswer();
+                  }}
                   className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-medium transition-colors"
                 >
                   Check
@@ -789,12 +807,17 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                       onChange={(e) => {
                         setCustomInput(e.target.value);
                         setSelectedChoice(null);
+                        // Pause polling while typing
+                        isTypingRef.current = true;
+                        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                        typingTimeoutRef.current = setTimeout(() => { isTypingRef.current = false; }, 1000);
                       }}
                       placeholder="What do you want to do?"
                       className="flex-1 px-4 py-3 bg-purple-900/50 border border-purple-500/30 rounded-xl text-white placeholder-purple-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
                       disabled={isSubmitting}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && customInput.trim()) {
+                          isTypingRef.current = false;
                           submitResponse(customInput.trim());
                         }
                       }}
@@ -830,18 +853,27 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                   <input
                     type="text"
                     value={customInput}
-                    onChange={(e) => setCustomInput(e.target.value)}
+                    onChange={(e) => {
+                      setCustomInput(e.target.value);
+                      isTypingRef.current = true;
+                      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                      typingTimeoutRef.current = setTimeout(() => { isTypingRef.current = false; }, 1000);
+                    }}
                     placeholder="What do you want to do?"
                     className="flex-1 px-4 py-3 bg-purple-900/50 border border-purple-500/30 rounded-xl text-white placeholder-purple-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
                     disabled={isSubmitting}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && customInput.trim()) {
+                        isTypingRef.current = false;
                         submitResponse(customInput.trim());
                       }
                     }}
                   />
                   <button
-                    onClick={() => customInput.trim() && submitResponse(customInput.trim())}
+                    onClick={() => {
+                      isTypingRef.current = false;
+                      customInput.trim() && submitResponse(customInput.trim());
+                    }}
                     disabled={isSubmitting || !customInput.trim()}
                     className="px-6 py-3 bg-amber-500 hover:bg-amber-400 disabled:bg-gray-600 text-purple-950 rounded-xl font-semibold"
                   >
