@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
 
 interface ParagraphReaderProps {
@@ -11,7 +11,9 @@ interface ParagraphReaderProps {
 export default function ParagraphReader({ text, className = '' }: ParagraphReaderProps) {
   const [playingIndex, setPlayingIndex] = useState<number | null>(null);
   const [loadingIndex, setLoadingIndex] = useState<number | null>(null);
+  const [autoPlaying, setAutoPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoPlayingRef = useRef(false);
 
   // Split text into paragraphs (by double newline or single newline)
   const paragraphs = text
@@ -19,17 +21,11 @@ export default function ParagraphReader({ text, className = '' }: ParagraphReade
     .map(p => p.trim())
     .filter(p => p.length > 0);
 
-  const speakParagraph = async (index: number, paragraphText: string) => {
+  const speakParagraph = useCallback(async (index: number, paragraphText: string, continueAuto = false): Promise<boolean> => {
     // Stop any existing audio
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
-    }
-
-    if (playingIndex === index) {
-      // Clicking same paragraph stops it
-      setPlayingIndex(null);
-      return;
     }
 
     setLoadingIndex(index);
@@ -47,43 +43,118 @@ export default function ParagraphReader({ text, className = '' }: ParagraphReade
       const audioBlob = await response.blob();
       const audioUrl = URL.createObjectURL(audioBlob);
 
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
+      return new Promise((resolve) => {
+        const audio = new Audio(audioUrl);
+        audioRef.current = audio;
 
-      audio.onplay = () => {
-        setLoadingIndex(null);
-        setPlayingIndex(index);
-      };
+        audio.onplay = () => {
+          setLoadingIndex(null);
+          setPlayingIndex(index);
+        };
 
-      audio.onended = () => {
-        setPlayingIndex(null);
-        URL.revokeObjectURL(audioUrl);
-      };
+        audio.onended = () => {
+          setPlayingIndex(null);
+          URL.revokeObjectURL(audioUrl);
+          resolve(true);
+        };
 
-      audio.onerror = () => {
-        setLoadingIndex(null);
-        setPlayingIndex(null);
-        URL.revokeObjectURL(audioUrl);
-      };
+        audio.onerror = () => {
+          setLoadingIndex(null);
+          setPlayingIndex(null);
+          URL.revokeObjectURL(audioUrl);
+          resolve(false);
+        };
 
-      await audio.play();
+        audio.play().catch(() => resolve(false));
+      });
     } catch (error) {
       console.error('Speech error:', error);
       setLoadingIndex(null);
       setPlayingIndex(null);
+      return false;
     }
+  }, []);
+
+  const handleParagraphClick = (index: number, paragraphText: string) => {
+    // Stop auto-play if running
+    if (autoPlaying) {
+      stopAll();
+      return;
+    }
+
+    if (playingIndex === index) {
+      // Clicking same paragraph stops it
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      setPlayingIndex(null);
+      return;
+    }
+
+    speakParagraph(index, paragraphText);
+  };
+
+  const autoReadAll = async () => {
+    setAutoPlaying(true);
+    autoPlayingRef.current = true;
+
+    for (let i = 0; i < paragraphs.length; i++) {
+      if (!autoPlayingRef.current) break;
+      const success = await speakParagraph(i, paragraphs[i], true);
+      if (!success || !autoPlayingRef.current) break;
+    }
+
+    setAutoPlaying(false);
+    autoPlayingRef.current = false;
+  };
+
+  const stopAll = () => {
+    autoPlayingRef.current = false;
+    setAutoPlaying(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setPlayingIndex(null);
+    setLoadingIndex(null);
   };
 
   return (
     <div className={className}>
+      {/* Auto-read all button */}
+      <div className="flex justify-end mb-3">
+        <button
+          onClick={autoPlaying ? stopAll : autoReadAll}
+          disabled={loadingIndex !== null && !autoPlaying}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-all ${
+            autoPlaying
+              ? 'bg-amber-500/30 text-amber-400'
+              : 'bg-white/10 text-purple-300 hover:bg-white/20 hover:text-white'
+          }`}
+        >
+          {autoPlaying ? (
+            <>
+              <span className="animate-pulse">⏹</span> Stop
+            </>
+          ) : (
+            <>
+              🔊 Read all
+            </>
+          )}
+        </button>
+      </div>
+
       {paragraphs.map((paragraph, index) => (
         <div key={index} className="group relative mb-4 last:mb-0">
-          <p className="text-purple-100 leading-relaxed text-lg pr-12">
+          <p className={`text-purple-100 leading-relaxed text-lg pr-12 transition-colors ${
+            playingIndex === index ? 'text-white' : ''
+          }`}>
             {paragraph}
           </p>
           <button
-            onClick={() => speakParagraph(index, paragraph)}
-            disabled={loadingIndex !== null && loadingIndex !== index}
+            onClick={() => handleParagraphClick(index, paragraph)}
+            disabled={loadingIndex !== null && loadingIndex !== index && !autoPlaying}
             className={`absolute top-0 right-0 p-2 rounded-lg transition-all ${
               playingIndex === index
                 ? 'bg-amber-500/30 text-amber-400'
