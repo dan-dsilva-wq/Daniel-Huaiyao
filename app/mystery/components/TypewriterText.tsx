@@ -16,7 +16,7 @@ export default function TypewriterText({
   speed = 30,
   onComplete,
   className = '',
-  autoSpeak = true,
+  autoSpeak = false, // Disabled by default - user can click "Read aloud" button
 }: TypewriterTextProps) {
   const [displayedText, setDisplayedText] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -84,7 +84,7 @@ export default function TypewriterText({
     };
   }, []);
 
-  const speakText = async (textToSpeak: string) => {
+  const speakText = async (textToSpeak: string, isManual = false) => {
     // Stop any existing audio
     if (audioRef.current) {
       audioRef.current.pause();
@@ -131,16 +131,20 @@ export default function TypewriterText({
         setIsLoading(false);
         setIsSpeaking(false);
         URL.revokeObjectURL(audioUrl);
-        // Fallback to Web Speech API
-        fallbackSpeak(textToSpeak);
+        // Only use fallback if manually triggered, not auto-speak
+        if (isManual) {
+          fallbackSpeak(textToSpeak);
+        }
       };
 
       await audio.play();
     } catch (error) {
       console.error('ElevenLabs error:', error);
       setIsLoading(false);
-      // Fallback to Web Speech API
-      fallbackSpeak(textToSpeak);
+      // Only use fallback if manually triggered, not auto-speak
+      if (isManual) {
+        fallbackSpeak(textToSpeak);
+      }
     }
   };
 
@@ -170,7 +174,7 @@ export default function TypewriterText({
       audioRef.current = null;
       setIsSpeaking(false);
     } else {
-      speakText(text);
+      speakText(text, true); // Manual trigger - use fallback if needed
     }
   };
 
