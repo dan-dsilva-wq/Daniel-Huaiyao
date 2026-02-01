@@ -132,11 +132,9 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   // Generate next scene
   const generateNextScene = async (sceneOrder: number, responses?: { daniel?: string; huaiyao?: string }) => {
     console.log('[AI DEBUG] generateNextScene called:', { sceneOrder, responses, isGenerating });
-    if (isGenerating) {
-      console.log('[AI DEBUG] Already generating, skipping');
-      return;
-    }
 
+    // Note: isGenerating state is set by caller to stop polling immediately
+    // We don't check it here since the ref guards against duplicate calls
     setIsGenerating(true);
     console.log('[AI DEBUG] Starting API call to /api/mystery-ai');
     try {
@@ -204,15 +202,16 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
       if (data?.both_responded && currentPlayer === 'daniel') {
         console.log('[AI DEBUG] Both responded immediately, Daniel generating next scene...');
         generationTriggeredRef.current = true; // Mark as triggered to avoid useEffect double-trigger
+        setIsGenerating(true); // Set immediately to stop polling
         const nextOrder = (gameState?.session?.current_ai_scene_order || 1) + 1;
-        await supabase.rpc('advance_ai_scene', { p_session_id: sessionId });
+        // Note: store_ai_scene will set current_ai_scene_order, so we don't advance here
         await generateNextScene(nextOrder, {
           daniel: data.daniel_response,
           huaiyao: data.huaiyao_response,
         });
       } else if (data?.both_responded && currentPlayer === 'huaiyao') {
         console.log('[AI DEBUG] Both responded, Huaiyao waiting for Daniel to generate...');
-        // Huaiyao will see the new scene via real-time subscription
+        // Huaiyao will see the new scene via polling/subscription
       }
     } catch (err) {
       console.error('Error submitting response:', err);
@@ -368,16 +367,25 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
     if (bothResponded && currentPlayer === 'daniel' && !isGenerating && !generationTriggeredRef.current) {
       console.log('[AI DEBUG] Both responded detected via state update, Daniel triggering generation...');
       generationTriggeredRef.current = true;
+      // Set isGenerating IMMEDIATELY to prevent race conditions with polling
+      setIsGenerating(true);
 
       const nextOrder = (gameState?.session?.current_ai_scene_order || 1) + 1;
+      const danielResponse = myResponse?.response_text;
+      const huaiyaoResponse = partnerResponse?.response_text;
 
-      // Advance scene and generate
+      // Generate next scene (store_ai_scene will update current_ai_scene_order)
       (async () => {
-        await supabase.rpc('advance_ai_scene', { p_session_id: sessionId });
-        await generateNextScene(nextOrder, {
-          daniel: myResponse?.response_text,
-          huaiyao: partnerResponse?.response_text,
-        });
+        try {
+          await generateNextScene(nextOrder, {
+            daniel: danielResponse,
+            huaiyao: huaiyaoResponse,
+          });
+        } catch (err) {
+          console.error('[AI DEBUG] Generation failed:', err);
+          setIsGenerating(false);
+          generationTriggeredRef.current = false;
+        }
       })();
     }
   }, [bothResponded, currentPlayer, isGenerating, myResponse, partnerResponse, gameState?.session?.current_ai_scene_order, sessionId]);
