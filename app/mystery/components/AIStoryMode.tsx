@@ -8,6 +8,7 @@ import type { Player } from '@/lib/supabase';
 import TypewriterText from './TypewriterText';
 import PartnerStatus from './PartnerStatus';
 import ParagraphReader from './ParagraphReader';
+import VoiceReader from './VoiceReader';
 
 interface AIScene {
   id: string;
@@ -70,7 +71,6 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   const [gameState, setGameState] = useState<AIGameState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [customInput, setCustomInput] = useState('');
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [textComplete, setTextComplete] = useState(false);
@@ -81,7 +81,6 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   const [hintsRevealed, setHintsRevealed] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const isTypingRef = useRef(false);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const partnerName = currentPlayer === 'daniel' ? 'Huaiyao' : 'Daniel';
   const myResponse = gameState?.responses?.find(r => r.player === currentPlayer);
@@ -139,7 +138,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
       await fetchGameState();
       setTextComplete(false);
       setSelectedChoice(null);
-      setCustomInput('');
+      if (inputRef.current) inputRef.current.value = '';
       setPuzzleSolved(false);
       setHintsRevealed(0);
     } catch (err) {
@@ -300,7 +299,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
       generationTriggeredRef.current = false;
       setTextComplete(false);
       setSelectedChoice(null);
-      setCustomInput('');
+      if (inputRef.current) inputRef.current.value = '';
       setPuzzleSolved(false);
       setPuzzleAnswer('');
       setHintsRevealed(0);
@@ -619,11 +618,21 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                 {scene.title}
               </h2>
             )}
-            <ParagraphReader
-              text={scene.narrative_text}
-              autoStart={true}
-              onComplete={() => setTextComplete(true)}
-            />
+            {textComplete ? (
+              <ParagraphReader text={scene.narrative_text} />
+            ) : (
+              <>
+                <TypewriterText
+                  text={scene.narrative_text}
+                  speed={20}
+                  onComplete={() => setTextComplete(true)}
+                  className="text-purple-100 leading-relaxed text-lg"
+                  autoSpeak={false}
+                />
+                {/* Start voice reading immediately in background */}
+                <VoiceReader text={scene.narrative_text} />
+              </>
+            )}
           </motion.div>
         )}
 
@@ -672,10 +681,9 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                   onChange={(e) => {
                     setPuzzleAnswer(e.target.value);
                     setPuzzleError(null);
-                    isTypingRef.current = true;
-                    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                    typingTimeoutRef.current = setTimeout(() => { isTypingRef.current = false; }, 1000);
                   }}
+                  onFocus={() => { isTypingRef.current = true; }}
+                  onBlur={() => { isTypingRef.current = false; }}
                   placeholder="Enter your answer..."
                   className="flex-1 px-4 py-2 bg-purple-900/50 border border-cyan-500/30 rounded-lg text-white placeholder-purple-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                   onKeyDown={(e) => {
@@ -776,7 +784,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                       key={choice.id}
                       onClick={() => {
                         setSelectedChoice(choice.id);
-                        setCustomInput('');
+                        if (inputRef.current) inputRef.current.value = '';
                       }}
                       disabled={isSubmitting}
                       className={`w-full p-4 rounded-xl text-left transition-all ${
@@ -797,22 +805,17 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                     <input
                       ref={inputRef}
                       type="text"
-                      value={customInput}
-                      onChange={(e) => {
-                        setCustomInput(e.target.value);
-                        setSelectedChoice(null);
-                        // Pause polling while typing
-                        isTypingRef.current = true;
-                        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                        typingTimeoutRef.current = setTimeout(() => { isTypingRef.current = false; }, 1000);
-                      }}
+                      defaultValue=""
+                      onChange={() => setSelectedChoice(null)}
+                      onFocus={() => { isTypingRef.current = true; }}
+                      onBlur={() => { isTypingRef.current = false; }}
                       placeholder="What do you want to do?"
                       className="flex-1 px-4 py-3 bg-purple-900/50 border border-purple-500/30 rounded-xl text-white placeholder-purple-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
                       disabled={isSubmitting}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && customInput.trim()) {
+                        if (e.key === 'Enter' && inputRef.current?.value.trim()) {
                           isTypingRef.current = false;
-                          submitResponse(customInput.trim());
+                          submitResponse(inputRef.current.value.trim());
                         }
                       }}
                     />
@@ -822,8 +825,10 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                 {/* Submit button */}
                 <button
                   onClick={() => {
-                    if (customInput.trim()) {
-                      submitResponse(customInput.trim());
+                    const inputValue = inputRef.current?.value.trim();
+                    if (inputValue) {
+                      isTypingRef.current = false;
+                      submitResponse(inputValue);
                     } else if (selectedChoice) {
                       const choice = choices.find(c => c.id === selectedChoice);
                       if (choice) {
@@ -831,7 +836,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                       }
                     }
                   }}
-                  disabled={isSubmitting || (!selectedChoice && !customInput.trim())}
+                  disabled={isSubmitting}
                   className="w-full py-4 bg-amber-500 hover:bg-amber-400 disabled:bg-gray-600 text-purple-950 disabled:text-gray-400 rounded-xl font-semibold transition-colors"
                 >
                   {isSubmitting ? 'Submitting...' : 'Confirm Decision'}
@@ -845,30 +850,28 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
                 <p className="text-yellow-300 text-sm mb-2">No choices loaded. Type your own action:</p>
                 <div className="flex gap-2">
                   <input
+                    ref={inputRef}
                     type="text"
-                    value={customInput}
-                    onChange={(e) => {
-                      setCustomInput(e.target.value);
-                      isTypingRef.current = true;
-                      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-                      typingTimeoutRef.current = setTimeout(() => { isTypingRef.current = false; }, 1000);
-                    }}
+                    defaultValue=""
+                    onFocus={() => { isTypingRef.current = true; }}
+                    onBlur={() => { isTypingRef.current = false; }}
                     placeholder="What do you want to do?"
                     className="flex-1 px-4 py-3 bg-purple-900/50 border border-purple-500/30 rounded-xl text-white placeholder-purple-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
                     disabled={isSubmitting}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && customInput.trim()) {
+                      if (e.key === 'Enter' && inputRef.current?.value.trim()) {
                         isTypingRef.current = false;
-                        submitResponse(customInput.trim());
+                        submitResponse(inputRef.current.value.trim());
                       }
                     }}
                   />
                   <button
                     onClick={() => {
                       isTypingRef.current = false;
-                      customInput.trim() && submitResponse(customInput.trim());
+                      const val = inputRef.current?.value.trim();
+                      if (val) submitResponse(val);
                     }}
-                    disabled={isSubmitting || !customInput.trim()}
+                    disabled={isSubmitting}
                     className="px-6 py-3 bg-amber-500 hover:bg-amber-400 disabled:bg-gray-600 text-purple-950 rounded-xl font-semibold"
                   >
                     Go
