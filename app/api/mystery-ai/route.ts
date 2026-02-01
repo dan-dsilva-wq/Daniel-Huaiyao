@@ -7,14 +7,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const SYSTEM_PROMPT = `You are a master mystery storyteller creating an interactive detective story for two players (Daniel and Huaiyao). They are solving "The Quantum Heist" - a priceless quantum computer has been stolen.
-
-STORY CONTEXT:
-- Setting: Modern day, high-tech research facility
-- The quantum computer "QBIT-7" was stolen from NeuroTech Labs
-- Multiple suspects with motives: disgruntled employee, corporate spy, inside job
-- Each scene should reveal new clues and deepen the mystery
-
+const JSON_FORMAT_RULES = `
 YOUR RESPONSES MUST BE VALID JSON with this exact structure:
 {
   "scene": {
@@ -49,16 +42,54 @@ RULES:
 1. Respond ONLY with valid JSON - no markdown, no explanation
 2. Narrative should be immersive and atmospheric
 3. Choices should feel meaningful and affect the story
-4. Include a puzzle every 3-4 scenes (math, logic, codes - challenging!)
-5. Always include option 4 as custom input for creative player actions
-6. React to player choices/custom inputs naturally
-7. Build tension and mystery throughout
-8. After ~15-20 scenes, begin wrapping up toward an ending
-9. For endings, set is_ending: true and add ending_type: "good"|"neutral"|"bad"`;
+4. Always include option 4 as custom input for creative player actions
+5. React to player choices/custom inputs naturally
+6. For endings, set is_ending: true and add ending_type: "good"|"neutral"|"bad"`;
+
+// Episode 3: The Quantum Heist - Full mystery
+const EPISODE_3_PROMPT = `You are a master mystery storyteller creating an interactive detective story for two players (Daniel and Huaiyao). They are solving "The Quantum Heist" - a priceless quantum computer has been stolen.
+
+STORY CONTEXT:
+- Setting: Modern day, high-tech research facility
+- The quantum computer "QBIT-7" was stolen from NeuroTech Labs
+- Multiple suspects with motives: disgruntled employee, corporate spy, inside job
+- Each scene should reveal new clues and deepen the mystery
+
+${JSON_FORMAT_RULES}
+
+ADDITIONAL RULES FOR EPISODE 3:
+- Include a puzzle every 3-4 scenes (math, logic, codes - challenging!)
+- Build tension and mystery throughout
+- After ~15-20 scenes, begin wrapping up toward an ending`;
+
+// Episode 98: AI Test Lab - Short test mystery
+const EPISODE_98_PROMPT = `You are a fun mystery storyteller creating a SHORT, SILLY test mystery for two players (Daniel and Huaiyao). They are solving "The Case of the Missing Pizza" - someone ate the last slice!
+
+STORY CONTEXT:
+- Setting: A cozy apartment
+- The last slice of pizza has vanished from the fridge
+- Suspects: The cat, a hungry roommate, or perhaps... aliens?
+- Keep it light, fun, and SHORT (this is just a test!)
+
+${JSON_FORMAT_RULES}
+
+ADDITIONAL RULES FOR TEST EPISODE:
+- Keep it SHORT - wrap up after 4-5 scenes maximum
+- Include ONE simple puzzle around scene 2 or 3 (easy math or simple riddle)
+- Be silly and fun - this is for testing the system
+- End quickly with a funny resolution`;
+
+function getSystemPrompt(episodeNumber: number): string {
+  if (episodeNumber === 98) {
+    return EPISODE_98_PROMPT;
+  }
+  return EPISODE_3_PROMPT;
+}
 
 interface GenerateRequest {
   sessionId: string;
   sceneOrder: number;
+  episodeNumber?: number;
   previousResponses?: {
     daniel?: string;
     huaiyao?: string;
@@ -105,15 +136,18 @@ export async function POST(request: Request) {
     }
 
     const body: GenerateRequest = await request.json();
-    const { sessionId, sceneOrder, previousResponses, history } = body;
+    const { sessionId, sceneOrder, episodeNumber, previousResponses, history } = body;
 
     if (!sessionId) {
       return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
     }
 
+    // Get the right prompt based on episode
+    const systemPrompt = getSystemPrompt(episodeNumber || 3);
+
     // Build messages for OpenAI
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
     ];
 
     // Add history if provided

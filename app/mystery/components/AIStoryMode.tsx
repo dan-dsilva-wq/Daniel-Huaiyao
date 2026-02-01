@@ -117,6 +117,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
         body: JSON.stringify({
           sessionId,
           sceneOrder,
+          episodeNumber: gameState?.episode?.episode_number,
           previousResponses: responses,
         }),
       });
