@@ -233,6 +233,21 @@ export default function QuizPage() {
   // Error state
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Answer result popup state
+  const [answerResultPopup, setAnswerResultPopup] = useState<{
+    question: QuizQuestion;
+    selectedIndex: number | null;
+    selectedIndices: number[];
+    isCorrect: boolean;
+    score: number;
+  } | null>(null);
+
+  // Scoreboard state - both players' scores
+  const [scores, setScores] = useState<{
+    daniel: { correct: number; total: number };
+    huaiyao: { correct: number; total: number };
+  } | null>(null);
+
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
 
   const fetchData = useCallback(async () => {
@@ -298,6 +313,61 @@ export default function QuizPage() {
     setIsLoading(false);
   }, [currentUser]);
 
+  // Fetch both players' scores for the scoreboard
+  const fetchScores = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+
+    try {
+      // Get all answers with their question info
+      const { data: answers, error: aError } = await supabase
+        .from('quiz_answers')
+        .select('player, is_correct, selected_indices, question_id');
+
+      if (aError) throw aError;
+
+      // Get all questions for multiple choice scoring
+      const { data: questions, error: qError } = await supabase
+        .from('quiz_questions')
+        .select('id, is_multiple_choice, correct_answer_indices');
+
+      if (qError) throw qError;
+
+      const questionMap = new Map(questions?.map(q => [q.id, q]) || []);
+
+      // Calculate scores for each player
+      const danielAnswers = (answers || []).filter(a => a.player === 'daniel');
+      const huaiyaoAnswers = (answers || []).filter(a => a.player === 'huaiyao');
+
+      const calculatePlayerScore = (playerAnswers: typeof answers) => {
+        let totalScore = 0;
+        for (const answer of playerAnswers || []) {
+          const question = questionMap.get(answer.question_id);
+          if (question?.is_multiple_choice && question.correct_answer_indices && answer.selected_indices) {
+            const correctSet = new Set(question.correct_answer_indices as number[]);
+            const selectedSet = new Set(answer.selected_indices as number[]);
+            let correctSelected = 0;
+            let wrongSelected = 0;
+            for (const idx of selectedSet) {
+              if (correctSet.has(idx)) correctSelected++;
+              else wrongSelected++;
+            }
+            totalScore += Math.max(0, (correctSelected - wrongSelected) / correctSet.size);
+          } else {
+            totalScore += answer.is_correct ? 1 : 0;
+          }
+        }
+        return totalScore;
+      };
+
+      setScores({
+        daniel: { correct: calculatePlayerScore(danielAnswers), total: danielAnswers.length },
+        huaiyao: { correct: calculatePlayerScore(huaiyaoAnswers), total: huaiyaoAnswers.length },
+      });
+    } catch (error) {
+      console.error('Error fetching scores:', error);
+    }
+  }, []);
+
   useEffect(() => {
     const savedUser = localStorage.getItem('quiz-user') as 'daniel' | 'huaiyao' | null;
     setCurrentUser(savedUser);
@@ -306,8 +376,9 @@ export default function QuizPage() {
   useEffect(() => {
     if (currentUser) {
       fetchData();
+      fetchScores();
     }
-  }, [currentUser, fetchData]);
+  }, [currentUser, fetchData, fetchScores]);
 
   const sendNotification = async (action: 'question_added' | 'question_answered', detail: string) => {
     if (!currentUser) return;
@@ -374,6 +445,28 @@ export default function QuizPage() {
 
       if (error) throw error;
 
+      // Calculate score for popup
+      let answerScore = isCorrectAnswer ? 1 : 0;
+      if (isMultiple && question.correct_answer_indices) {
+        const correctSet = new Set(question.correct_answer_indices);
+        let correctSelected = 0;
+        let wrongSelected = 0;
+        for (const idx of selectedAnswers) {
+          if (correctSet.has(idx)) correctSelected++;
+          else wrongSelected++;
+        }
+        answerScore = Math.max(0, (correctSelected - wrongSelected) / correctSet.size);
+      }
+
+      // Show the answer result popup
+      setAnswerResultPopup({
+        question,
+        selectedIndex: isMultiple ? null : selectedAnswer,
+        selectedIndices: isMultiple ? selectedAnswers : [],
+        isCorrect: isCorrectAnswer,
+        score: answerScore,
+      });
+
       setLastAnswerResult({
         questionId: question.id,
         isCorrect: isCorrectAnswer,
@@ -386,6 +479,7 @@ export default function QuizPage() {
       );
 
       fetchData();
+      fetchScores();
     } catch (error) {
       console.error('Error submitting answer:', error);
     }
@@ -654,20 +748,233 @@ export default function QuizPage() {
           </h1>
           <p className="text-gray-500">How well do you know each other?</p>
 
-          {/* Score display */}
-          {totalAnswered > 0 && (
+        </motion.div>
+
+        {/* Competitive Scoreboard */}
+        {scores && (scores.daniel.total > 0 || scores.huaiyao.total > 0) && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-4 shadow-lg text-white"
+          >
+            <div className="text-center mb-3">
+              <span className="text-lg font-medium">🏆 Scoreboard 🏆</span>
+            </div>
+            <div className="flex justify-around items-center">
+              {/* Daniel's Score */}
+              <div className="text-center">
+                <div className="text-sm opacity-80 mb-1">Daniel</div>
+                <div className="text-2xl font-bold">
+                  {scores.daniel.correct.toFixed(scores.daniel.correct % 1 === 0 ? 0 : 1)}/{scores.daniel.total}
+                </div>
+                <div className="text-sm opacity-80">
+                  ({scores.daniel.total > 0 ? Math.round((scores.daniel.correct / scores.daniel.total) * 100) : 0}%)
+                </div>
+              </div>
+
+              {/* VS Divider */}
+              <div className="text-2xl font-bold opacity-50">vs</div>
+
+              {/* Huaiyao's Score */}
+              <div className="text-center">
+                <div className="text-sm opacity-80 mb-1">Huaiyao</div>
+                <div className="text-2xl font-bold">
+                  {scores.huaiyao.correct.toFixed(scores.huaiyao.correct % 1 === 0 ? 0 : 1)}/{scores.huaiyao.total}
+                </div>
+                <div className="text-sm opacity-80">
+                  ({scores.huaiyao.total > 0 ? Math.round((scores.huaiyao.correct / scores.huaiyao.total) * 100) : 0}%)
+                </div>
+              </div>
+            </div>
+
+            {/* Winner Message */}
+            <div className="text-center mt-3 text-sm font-medium">
+              {(() => {
+                const danielPct = scores.daniel.total > 0 ? scores.daniel.correct / scores.daniel.total : 0;
+                const huaiyaoPct = scores.huaiyao.total > 0 ? scores.huaiyao.correct / scores.huaiyao.total : 0;
+                if (scores.daniel.total === 0 && scores.huaiyao.total === 0) {
+                  return "Start answering questions!";
+                } else if (scores.daniel.total === 0) {
+                  return "Daniel hasn't answered any yet!";
+                } else if (scores.huaiyao.total === 0) {
+                  return "Huaiyao hasn't answered any yet!";
+                } else if (Math.abs(danielPct - huaiyaoPct) < 0.01) {
+                  return "🤝 It's a tie!";
+                } else if (danielPct > huaiyaoPct) {
+                  return "👑 Daniel is winning!";
+                } else {
+                  return "👑 Huaiyao is winning!";
+                }
+              })()}
+            </div>
+          </motion.div>
+        )}
+
+        {/* Answer Result Popup Modal */}
+        <AnimatePresence>
+          {answerResultPopup && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="mt-4 inline-block px-4 py-2 bg-white/70 backdrop-blur rounded-full shadow-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+              onClick={() => setAnswerResultPopup(null)}
             >
-              <span className="text-lg font-medium text-gray-800">
-                {totalScore.toFixed(1)}/{totalAnswered} points
-              </span>
-              <span className="ml-2 text-indigo-500 font-semibold">({percentage}%)</span>
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.8, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                className={`bg-white rounded-2xl p-6 max-w-sm w-full shadow-xl text-center ${
+                  answerResultPopup.isCorrect ? '' : ''
+                }`}
+              >
+                {/* Result Icon */}
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: [0, 1.3, 1] }}
+                  transition={{ duration: 0.5, times: [0, 0.6, 1] }}
+                  className="text-6xl mb-4"
+                >
+                  {answerResultPopup.isCorrect ? (
+                    <span className="inline-block">✅</span>
+                  ) : answerResultPopup.score > 0 ? (
+                    <span className="inline-block">🤏</span>
+                  ) : (
+                    <span className="inline-block">❌</span>
+                  )}
+                </motion.div>
+
+                {/* Result Text */}
+                <motion.h2
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className={`text-2xl font-bold mb-4 ${
+                    answerResultPopup.isCorrect
+                      ? 'text-green-600'
+                      : answerResultPopup.score > 0
+                      ? 'text-yellow-600'
+                      : 'text-red-500'
+                  }`}
+                >
+                  {answerResultPopup.isCorrect
+                    ? 'Correct!'
+                    : answerResultPopup.score > 0
+                    ? `Partially Correct (${Math.round(answerResultPopup.score * 100)}%)`
+                    : 'Wrong!'}
+                </motion.h2>
+
+                {/* Question */}
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-gray-600 mb-4"
+                >
+                  {answerResultPopup.question.question_text}
+                </motion.p>
+
+                {/* Your Answer */}
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.4 }}
+                  className={`p-3 rounded-lg mb-3 ${
+                    answerResultPopup.isCorrect
+                      ? 'bg-green-100 text-green-800'
+                      : answerResultPopup.score > 0
+                      ? 'bg-yellow-100 text-yellow-800'
+                      : 'bg-red-100 text-red-800'
+                  }`}
+                >
+                  <div className="text-sm opacity-70 mb-1">Your answer:</div>
+                  <div className="font-medium">
+                    {answerResultPopup.question.is_multiple_choice ? (
+                      answerResultPopup.selectedIndices.length > 0 ? (
+                        answerResultPopup.selectedIndices
+                          .map((idx) => answerResultPopup.question.options?.[idx])
+                          .join(', ')
+                      ) : 'None selected'
+                    ) : (
+                      answerResultPopup.question.options?.[answerResultPopup.selectedIndex ?? 0]
+                    )}{' '}
+                    {answerResultPopup.isCorrect ? '✓' : answerResultPopup.score > 0 ? '~' : '✗'}
+                  </div>
+                </motion.div>
+
+                {/* Correct Answer (if wrong) */}
+                {!answerResultPopup.isCorrect && (
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.5 }}
+                    className="p-3 rounded-lg bg-green-100 text-green-800"
+                  >
+                    <div className="text-sm opacity-70 mb-1">Correct answer:</div>
+                    <div className="font-medium">
+                      {answerResultPopup.question.is_multiple_choice && answerResultPopup.question.correct_answer_indices ? (
+                        answerResultPopup.question.correct_answer_indices
+                          .map((idx) => answerResultPopup.question.options?.[idx])
+                          .join(', ')
+                      ) : (
+                        answerResultPopup.question.options?.[answerResultPopup.question.correct_answer_index ?? 0]
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Confetti effect for correct answers */}
+                {answerResultPopup.isCorrect && (
+                  <motion.div
+                    initial={{ opacity: 1 }}
+                    animate={{ opacity: 0 }}
+                    transition={{ delay: 1.5, duration: 0.5 }}
+                    className="absolute inset-0 pointer-events-none overflow-hidden rounded-2xl"
+                  >
+                    {[...Array(20)].map((_, i) => (
+                      <motion.div
+                        key={i}
+                        initial={{
+                          x: '50%',
+                          y: '50%',
+                          scale: 0,
+                        }}
+                        animate={{
+                          x: `${Math.random() * 100}%`,
+                          y: `${Math.random() * 100}%`,
+                          scale: [0, 1, 0.5],
+                          rotate: Math.random() * 360,
+                        }}
+                        transition={{
+                          duration: 1,
+                          delay: i * 0.05,
+                          ease: 'easeOut',
+                        }}
+                        className="absolute w-3 h-3"
+                        style={{
+                          background: ['#10B981', '#6366F1', '#F59E0B', '#EC4899', '#8B5CF6'][i % 5],
+                          borderRadius: Math.random() > 0.5 ? '50%' : '0%',
+                        }}
+                      />
+                    ))}
+                  </motion.div>
+                )}
+
+                {/* Continue Button */}
+                <motion.button
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.6 }}
+                  onClick={() => setAnswerResultPopup(null)}
+                  className="mt-6 w-full py-3 bg-indigo-500 text-white rounded-xl font-medium hover:bg-indigo-600 transition-colors"
+                >
+                  Continue
+                </motion.button>
+              </motion.div>
             </motion.div>
           )}
-        </motion.div>
+        </AnimatePresence>
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6">
