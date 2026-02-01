@@ -89,82 +89,50 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
   // Fetch AI game state
   const fetchGameState = useCallback(async () => {
-    console.log('[AI DEBUG] fetchGameState called');
     try {
       const { data, error } = await supabase.rpc('get_ai_game_state', {
         p_session_id: sessionId,
       });
 
-      console.log('[AI DEBUG] get_ai_game_state result:', { data, error });
-
-      if (error) {
-        console.error('[AI DEBUG] RPC error:', error);
-        throw error;
-      }
+      if (error) throw error;
       setGameState(data);
 
-      console.log('[AI DEBUG] Checking generation conditions:', {
-        needs_generation: data?.needs_generation,
-        session_status: data?.session?.status,
-        current_scene_order: data?.session?.current_ai_scene_order,
-        isGenerating,
-        currentPlayer,
-      });
-
       // If we need to generate and both players are in, only DANIEL generates
-      // Huaiyao polls and waits for the scene to appear
       if (data?.needs_generation && data?.session?.status === 'active') {
         if (currentPlayer === 'daniel') {
-          console.log('[AI DEBUG] Daniel triggering scene generation...');
           generateNextScene(data.session.current_ai_scene_order || 1);
         } else {
-          console.log('[AI DEBUG] Huaiyao waiting for Daniel to generate...');
-          // Poll again in 2 seconds to check if scene is ready
+          // Huaiyao polls - wait for scene to appear
           setTimeout(() => fetchGameState(), 2000);
         }
       }
     } catch (err) {
-      console.error('[AI DEBUG] Error fetching AI game state:', err);
+      console.error('Error fetching game state:', err);
     }
     setIsLoading(false);
   }, [sessionId]);
 
   // Generate next scene
   const generateNextScene = async (sceneOrder: number, responses?: { daniel?: string; huaiyao?: string }) => {
-    console.log('[AI DEBUG] generateNextScene called:', { sceneOrder, responses, isGenerating });
-
-    // Note: isGenerating state is set by caller to stop polling immediately
-    // We don't check it here since the ref guards against duplicate calls
     setIsGenerating(true);
-    console.log('[AI DEBUG] Starting API call to /api/mystery-ai');
     try {
-      const requestBody = {
-        sessionId,
-        sceneOrder,
-        episodeNumber: gameState?.episode?.episode_number,
-        previousResponses: responses,
-      };
-      console.log('[AI DEBUG] Request body:', requestBody);
-
       const response = await fetch('/api/mystery-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          sessionId,
+          sceneOrder,
+          episodeNumber: gameState?.episode?.episode_number,
+          previousResponses: responses,
+        }),
       });
-
-      console.log('[AI DEBUG] API response status:', response.status);
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error('[AI DEBUG] API error:', errorData);
         throw new Error(errorData.error || 'Failed to generate story');
       }
 
-      const result = await response.json();
-      console.log('[AI DEBUG] API success:', result);
-
       // Refresh game state after generation
-      console.log('[AI DEBUG] Refreshing game state...');
       await fetchGameState();
       setTextComplete(false);
       setSelectedChoice(null);
@@ -172,11 +140,10 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
       setPuzzleSolved(false);
       setHintsRevealed(0);
     } catch (err) {
-      console.error('[AI DEBUG] Error generating scene:', err);
+      console.error('Error generating scene:', err);
       setGenerateError(err instanceof Error ? err.message : 'Failed to generate story');
     }
     setIsGenerating(false);
-    console.log('[AI DEBUG] generateNextScene complete');
   };
 
   // Submit player response
@@ -193,26 +160,20 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
       if (error) throw error;
 
-      console.log('[AI DEBUG] submit_ai_response result:', data);
-
       // Refresh state to show responses
       await fetchGameState();
 
       // If both responded, only DANIEL triggers generation (to avoid duplicates)
       if (data?.both_responded && currentPlayer === 'daniel') {
-        console.log('[AI DEBUG] Both responded immediately, Daniel generating next scene...');
-        generationTriggeredRef.current = true; // Mark as triggered to avoid useEffect double-trigger
-        setIsGenerating(true); // Set immediately to stop polling
+        generationTriggeredRef.current = true;
+        setIsGenerating(true);
         const nextOrder = (gameState?.session?.current_ai_scene_order || 1) + 1;
-        // Note: store_ai_scene will set current_ai_scene_order, so we don't advance here
         await generateNextScene(nextOrder, {
           daniel: data.daniel_response,
           huaiyao: data.huaiyao_response,
         });
-      } else if (data?.both_responded && currentPlayer === 'huaiyao') {
-        console.log('[AI DEBUG] Both responded, Huaiyao waiting for Daniel to generate...');
-        // Huaiyao will see the new scene via polling/subscription
       }
+      // Huaiyao will see the new scene via polling/subscription
     } catch (err) {
       console.error('Error submitting response:', err);
     }
@@ -308,16 +269,8 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
     if (!shouldPoll) return;
 
-    console.log('[AI DEBUG] Starting poll for partner response...');
-    const pollInterval = setInterval(() => {
-      console.log('[AI DEBUG] Polling for partner response...');
-      fetchGameState();
-    }, 3000);
-
-    return () => {
-      console.log('[AI DEBUG] Stopping poll for partner response');
-      clearInterval(pollInterval);
-    };
+    const pollInterval = setInterval(() => fetchGameState(), 3000);
+    return () => clearInterval(pollInterval);
   }, [myResponse, partnerResponse, isGenerating, bothResponded, fetchGameState]);
 
   // Poll for next scene when both responded (Huaiyao waiting for Daniel to generate)
@@ -327,29 +280,16 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
     if (!shouldPoll) return;
 
-    console.log('[AI DEBUG] Huaiyao polling for new scene...');
-    const pollInterval = setInterval(() => {
-      console.log('[AI DEBUG] Huaiyao checking for new scene...');
-      fetchGameState();
-    }, 2000);
-
-    return () => {
-      console.log('[AI DEBUG] Huaiyao stopping poll');
-      clearInterval(pollInterval);
-    };
+    const pollInterval = setInterval(() => fetchGameState(), 2000);
+    return () => clearInterval(pollInterval);
   }, [bothResponded, currentPlayer, isGenerating, fetchGameState]);
 
   // Reset UI state when scene changes (for BOTH players)
   useEffect(() => {
     const currentOrder = gameState?.session?.current_ai_scene_order || 0;
     if (currentOrder !== currentSceneOrderRef.current && currentSceneOrderRef.current !== 0) {
-      console.log('[AI DEBUG] Scene order changed, resetting UI state', {
-        old: currentSceneOrderRef.current,
-        new: currentOrder,
-      });
-      // Reset generation trigger
+      // Reset for new scene
       generationTriggeredRef.current = false;
-      // Reset UI state for new scene (important for non-generating player)
       setTextComplete(false);
       setSelectedChoice(null);
       setCustomInput('');
@@ -363,17 +303,8 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   // Trigger generation when both responded (Daniel only)
   // This handles the case where Daniel submitted first and Huaiyao submits second
   useEffect(() => {
-    console.log('[AI DEBUG] Generation trigger check:', {
-      bothResponded,
-      currentPlayer,
-      isGenerating,
-      alreadyTriggered: generationTriggeredRef.current,
-      myResponse: myResponse?.response_text,
-      partnerResponse: partnerResponse?.response_text,
-    });
-
     if (bothResponded && currentPlayer === 'daniel' && !isGenerating && !generationTriggeredRef.current) {
-      console.log('[AI DEBUG] Both responded detected via state update, Daniel triggering generation...');
+      console.log('[AI] Both responded, triggering generation...');
       generationTriggeredRef.current = true;
       // Set isGenerating IMMEDIATELY to prevent race conditions with polling
       setIsGenerating(true);
@@ -382,7 +313,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
       const danielResponse = myResponse?.response_text;
       const huaiyaoResponse = partnerResponse?.response_text;
 
-      // Generate next scene (store_ai_scene will update current_ai_scene_order)
+      // Generate next scene
       (async () => {
         try {
           await generateNextScene(nextOrder, {
@@ -390,7 +321,7 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
             huaiyao: huaiyaoResponse,
           });
         } catch (err) {
-          console.error('[AI DEBUG] Generation failed:', err);
+          console.error('Generation failed:', err);
           setIsGenerating(false);
           generationTriggeredRef.current = false;
         }
@@ -429,20 +360,8 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
     e.preventDefault();
   };
 
-  // DEBUG: Show state info
-  const debugInfo = gameState ? {
-    status: gameState.session?.status,
-    daniel: gameState.session?.daniel_joined,
-    huaiyao: gameState.session?.huaiyao_joined,
-    scene: gameState.scene?.scene_order || 'none',
-    needs_gen: gameState.needs_generation,
-    generating: isGenerating,
-    error: generateError,
-  } : null;
-
   // Loading state
   if (isLoading) {
-    console.log('[AI DEBUG] Rendering: Loading state');
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center">
         <div className="text-center">
@@ -459,7 +378,6 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   }
 
   if (!gameState) {
-    console.log('[AI DEBUG] Rendering: No game state');
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center">
         <div className="text-center">
@@ -473,19 +391,9 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
   }
 
   const { session, episode, scene, choices, puzzle } = gameState;
-  console.log('[AI DEBUG] Rendering main view:', {
-    session_status: session.status,
-    has_scene: !!scene,
-    choices_count: choices?.length,
-    textComplete,
-    puzzle: !!puzzle,
-    puzzleSolved,
-    isGenerating
-  });
 
   // Waiting for partner
   if (session.status === 'waiting') {
-    console.log('[AI DEBUG] Rendering: Waiting for partner', { daniel_joined: session.daniel_joined, huaiyao_joined: session.huaiyao_joined });
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center p-4">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center">
@@ -502,10 +410,6 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
           <p className="text-purple-200 mb-4">
             Once both detectives are here, the AI will generate your unique mystery!
           </p>
-          {/* Debug info */}
-          <p className="text-purple-500 text-xs mb-4">
-            Debug: Daniel={session.daniel_joined?.toString()}, Huaiyao={session.huaiyao_joined?.toString()}, Status={session.status}
-          </p>
           <button onClick={onBack} className="text-purple-300 hover:text-white text-sm">
             ← Cancel and go back
           </button>
@@ -516,7 +420,6 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
   // Generating state (only show if actually generating, or if needs_generation AND status is active)
   if (isGenerating || (gameState.needs_generation && session.status === 'active')) {
-    console.log('[AI DEBUG] Rendering: Generating state', { isGenerating, needs_generation: gameState.needs_generation, status: session.status });
     const isWaiting = currentPlayer === 'huaiyao' && !isGenerating;
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-950 via-slate-900 to-purple-950 flex items-center justify-center p-4">
@@ -850,10 +753,6 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
               </div>
             )}
 
-            {/* Debug: show choices count */}
-            <p className="text-purple-500 text-xs mb-2">
-              Debug: {choices?.length || 0} choices loaded, textComplete={textComplete.toString()}
-            </p>
 
             {/* Choice buttons */}
             {!myResponse && choices && choices.length > 0 && (
