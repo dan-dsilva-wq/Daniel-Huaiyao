@@ -302,6 +302,44 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
     return () => clearInterval(heartbeat);
   }, [sessionId, currentPlayer]);
 
+  // Poll for partner response when waiting (fallback for real-time)
+  useEffect(() => {
+    // Only poll if: I've submitted, partner hasn't, and not generating
+    const shouldPoll = myResponse && !partnerResponse && !isGenerating && !bothResponded;
+
+    if (!shouldPoll) return;
+
+    console.log('[AI DEBUG] Starting poll for partner response...');
+    const pollInterval = setInterval(() => {
+      console.log('[AI DEBUG] Polling for partner response...');
+      fetchGameState();
+    }, 3000);
+
+    return () => {
+      console.log('[AI DEBUG] Stopping poll for partner response');
+      clearInterval(pollInterval);
+    };
+  }, [myResponse, partnerResponse, isGenerating, bothResponded, fetchGameState]);
+
+  // Poll for next scene when both responded (Huaiyao waiting for Daniel to generate)
+  useEffect(() => {
+    // Only poll if: both responded, I'm Huaiyao, and Daniel should be generating
+    const shouldPoll = bothResponded && currentPlayer === 'huaiyao' && !isGenerating;
+
+    if (!shouldPoll) return;
+
+    console.log('[AI DEBUG] Huaiyao polling for new scene...');
+    const pollInterval = setInterval(() => {
+      console.log('[AI DEBUG] Huaiyao checking for new scene...');
+      fetchGameState();
+    }, 2000);
+
+    return () => {
+      console.log('[AI DEBUG] Huaiyao stopping poll');
+      clearInterval(pollInterval);
+    };
+  }, [bothResponded, currentPlayer, isGenerating, fetchGameState]);
+
   // Reset generation trigger when scene changes
   useEffect(() => {
     const currentOrder = gameState?.session?.current_ai_scene_order || 0;
