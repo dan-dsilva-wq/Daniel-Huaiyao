@@ -27,12 +27,23 @@ export default function MysterySessionPage() {
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null);
   const [textComplete, setTextComplete] = useState(false);
   const votingRef = useRef(false); // Use ref to prevent race conditions
+  const currentPuzzleIdRef = useRef<string | null>(null); // Track current puzzle to prevent stale callbacks
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
 
   // Check if scene has a blocking puzzle that needs solving
   const hasPuzzle = gameState?.puzzle != null;
   const isBlockingPuzzle = hasPuzzle && gameState?.puzzle?.is_blocking;
+
+  // Reset puzzleSolved when puzzle changes
+  useEffect(() => {
+    const newPuzzleId = gameState?.puzzle?.id || null;
+    if (currentPuzzleIdRef.current !== null && newPuzzleId !== currentPuzzleIdRef.current) {
+      // Puzzle changed - reset solved state
+      setPuzzleSolved(false);
+    }
+    currentPuzzleIdRef.current = newPuzzleId;
+  }, [gameState?.puzzle?.id]);
   // Show choices once text is complete OR showChoices is true (keep visible)
   const choicesReady = showChoices || textComplete;
   const shouldShowChoices = choicesReady && (!isBlockingPuzzle || puzzleSolved);
@@ -450,7 +461,8 @@ export default function MysterySessionPage() {
                   sessionId={sessionId}
                   currentPlayer={currentUser}
                   onComplete={(success) => {
-                    if (success) {
+                    // Only set solved if this puzzle is still the current one
+                    if (success && currentPuzzleIdRef.current === gameState.puzzle?.id) {
                       setPuzzleSolved(true);
                       setShowCelebration(true);
                     }
@@ -462,8 +474,11 @@ export default function MysterySessionPage() {
                   sessionId={sessionId}
                   currentPlayer={currentUser}
                   onSolved={() => {
-                    setPuzzleSolved(true);
-                    setShowCelebration(true);
+                    // Only set solved if this puzzle is still the current one
+                    if (currentPuzzleIdRef.current === gameState.puzzle?.id) {
+                      setPuzzleSolved(true);
+                      setShowCelebration(true);
+                    }
                   }}
                 />
               )}
