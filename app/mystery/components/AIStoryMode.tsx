@@ -193,17 +193,23 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
 
       if (error) throw error;
 
-      // If both responded, generate next scene
-      if (data?.both_responded) {
+      console.log('[AI DEBUG] submit_ai_response result:', data);
+
+      // Refresh state to show responses
+      await fetchGameState();
+
+      // If both responded, only DANIEL triggers generation (to avoid duplicates)
+      if (data?.both_responded && currentPlayer === 'daniel') {
+        console.log('[AI DEBUG] Both responded, Daniel generating next scene...');
         const nextOrder = (gameState?.session?.current_ai_scene_order || 1) + 1;
         await supabase.rpc('advance_ai_scene', { p_session_id: sessionId });
         await generateNextScene(nextOrder, {
           daniel: data.daniel_response,
           huaiyao: data.huaiyao_response,
         });
-      } else {
-        // Just refresh to show our response
-        await fetchGameState();
+      } else if (data?.both_responded && currentPlayer === 'huaiyao') {
+        console.log('[AI DEBUG] Both responded, Huaiyao waiting for Daniel to generate...');
+        // Huaiyao will see the new scene via real-time subscription
       }
     } catch (err) {
       console.error('Error submitting response:', err);

@@ -47,7 +47,7 @@ RULES:
 6. For endings, set is_ending: true and add ending_type: "good"|"neutral"|"bad"`;
 
 // Episode 3: The Quantum Heist - Full mystery
-const EPISODE_3_PROMPT = `You are a master mystery storyteller creating an interactive detective story for two players (Daniel and Huaiyao). They are solving "The Quantum Heist" - a priceless quantum computer has been stolen.
+const EPISODE_3_PROMPT = `You are a master mystery storyteller. Daniel and Huaiyao are BOTH CHARACTERS in your story - they are a detective duo investigating "The Quantum Heist" together.
 
 STORY CONTEXT:
 - Setting: Modern day, high-tech research facility
@@ -55,15 +55,23 @@ STORY CONTEXT:
 - Multiple suspects with motives: disgruntled employee, corporate spy, inside job
 - Each scene should reveal new clues and deepen the mystery
 
+CRITICAL RULES FOR CHARACTER ACTIONS:
+- Daniel and Huaiyao are BOTH protagonists - address them by name
+- When they make different choices, SHOW BOTH actions happening in the narrative
+- Their different approaches create interesting dynamics (one cautious, one bold, etc.)
+- Never ignore either character's choice - weave them together naturally
+- You (the AI) decide the OUTCOMES based on story logic and their choices
+- Actions can succeed, partially succeed, or fail based on the narrative
+
 ${JSON_FORMAT_RULES}
 
 ADDITIONAL RULES FOR EPISODE 3:
-- Include a puzzle every 3-4 scenes (math, logic, codes - challenging!)
+- Include a puzzle every 3-4 scenes (math, logic, codes - challenging for math graduates!)
 - Build tension and mystery throughout
 - After ~15-20 scenes, begin wrapping up toward an ending`;
 
 // Episode 98: AI Test Lab - Short test mystery
-const EPISODE_98_PROMPT = `You are a fun mystery storyteller creating a SHORT, SILLY test mystery for two players (Daniel and Huaiyao). They are solving "The Case of the Missing Pizza" - someone ate the last slice!
+const EPISODE_98_PROMPT = `You are a fun mystery storyteller creating a SHORT, SILLY test mystery. Daniel and Huaiyao are BOTH CHARACTERS in your story - they are a detective duo investigating together.
 
 STORY CONTEXT:
 - Setting: A cozy apartment
@@ -71,13 +79,22 @@ STORY CONTEXT:
 - Suspects: The cat, a hungry roommate, or perhaps... aliens?
 - Keep it light, fun, and SHORT (this is just a test!)
 
+CRITICAL RULES FOR CHARACTER ACTIONS:
+- Daniel and Huaiyao are BOTH protagonists in the story
+- When they make different choices, SHOW BOTH actions happening in the narrative
+- Example: If Daniel wants to search the fridge and Huaiyao wants to interrogate the cat, describe BOTH happening
+- Their different approaches should create fun dynamics and both lead somewhere
+- Never ignore either player's choice - weave them together naturally
+- The AI (you) decides the OUTCOMES of their actions based on the story logic
+
 ${JSON_FORMAT_RULES}
 
 ADDITIONAL RULES FOR TEST EPISODE:
 - Keep it SHORT - wrap up after 4-5 scenes maximum
 - Include ONE simple puzzle around scene 2 or 3 (easy math or simple riddle)
 - Be silly and fun - this is for testing the system
-- End quickly with a funny resolution`;
+- End quickly with a funny resolution
+- Address both Daniel and Huaiyao by name in the narrative`;
 
 function getSystemPrompt(episodeNumber: number): string {
   if (episodeNumber === 98) {
@@ -174,9 +191,9 @@ export async function POST(request: Request) {
       const huaiyaoChoice = previousResponses.huaiyao || 'continued';
 
       if (danielChoice === huaiyaoChoice) {
-        userPrompt = `Both detectives decided to: "${danielChoice}"\n\nContinue the story based on this shared decision. Scene ${sceneOrder}.`;
+        userPrompt = `Both Daniel and Huaiyao decided to: "${danielChoice}"\n\nShow them working together on this shared decision. Continue the story. Scene ${sceneOrder}.`;
       } else {
-        userPrompt = `Daniel chose: "${danielChoice}"\nHuaiyao chose: "${huaiyaoChoice}"\n\nThe detectives have different ideas! Weave both approaches into the narrative, showing how their combined perspectives lead to new discoveries. Scene ${sceneOrder}.`;
+        userPrompt = `Daniel's action: "${danielChoice}"\nHuaiyao's action: "${huaiyaoChoice}"\n\nIMPORTANT: Show BOTH characters performing their chosen actions in the narrative. Describe what Daniel does, what Huaiyao does, and how their different approaches play out. Both actions should have consequences and move the story forward. You decide the outcomes based on story logic. Scene ${sceneOrder}.`;
       }
 
       // Add puzzle request periodically
