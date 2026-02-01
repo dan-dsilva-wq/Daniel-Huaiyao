@@ -167,7 +167,26 @@ export async function POST(request: Request) {
       { role: 'system', content: systemPrompt },
     ];
 
-    // Add history if provided
+    // Fetch conversation history from database for narrative continuity
+    const { data: historyData } = await supabase
+      .from('mystery_ai_history')
+      .select('role, content, scene_order')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: true });
+
+    // Add history to messages (this gives AI memory of the full story)
+    if (historyData && historyData.length > 0) {
+      for (const entry of historyData) {
+        if (entry.role === 'user' || entry.role === 'assistant') {
+          messages.push({
+            role: entry.role as 'user' | 'assistant',
+            content: entry.content,
+          });
+        }
+      }
+    }
+
+    // Also use any history passed directly (fallback)
     if (history && history.length > 0) {
       for (const entry of history) {
         if (entry.role === 'user' || entry.role === 'assistant') {
@@ -281,6 +300,15 @@ export async function POST(request: Request) {
       };
     }
 
+    // Store the USER prompt in history first (player choices)
+    // This ensures AI remembers what players decided
+    await supabase.rpc('add_ai_history', {
+      p_session_id: sessionId,
+      p_role: 'user',
+      p_content: userPrompt,
+      p_scene_order: sceneOrder,
+    });
+
     // Store the scene in database
     const { data: sceneId, error: storeError } = await supabase.rpc('store_ai_scene', {
       p_session_id: sessionId,
@@ -303,7 +331,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Store in history for context
+    // Store the ASSISTANT response in history (the generated scene)
     await supabase.rpc('add_ai_history', {
       p_session_id: sessionId,
       p_role: 'assistant',
