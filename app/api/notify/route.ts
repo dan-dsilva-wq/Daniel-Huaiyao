@@ -49,6 +49,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    // Temporarily disable mystery notifications
+    const isMystery = action === 'mystery_started' || action === 'mystery_waiting' || action === 'mystery_agreed';
+    if (isMystery) {
+      return NextResponse.json({ success: true, skipped: true, reason: 'Mystery notifications temporarily disabled' });
+    }
+
     // Check if within allowed hours (9 AM - 11 PM Eastern)
     if (!isWithinAllowedHours()) {
       return NextResponse.json({
