@@ -110,6 +110,9 @@ export default function MysterySessionPage() {
         // If not AI episode, fetch regular game state
         if (data !== true) {
           fetchGameState(true); // Force reset on initial load
+        } else {
+          // AI episode - stop loading, AIStoryMode handles its own state
+          setIsLoading(false);
         }
       };
       checkEpisodeType();
