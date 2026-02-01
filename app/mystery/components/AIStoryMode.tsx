@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import type { Player } from '@/lib/supabase';
 import TypewriterText from './TypewriterText';
 import PartnerStatus from './PartnerStatus';
+import ParagraphReader from './ParagraphReader';
 
 interface AIScene {
   id: string;
@@ -619,15 +620,14 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
               </h2>
             )}
             {textComplete ? (
-              <p className="text-purple-100 leading-relaxed text-lg whitespace-pre-wrap">
-                {scene.narrative_text}
-              </p>
+              <ParagraphReader text={scene.narrative_text} />
             ) : (
               <TypewriterText
                 text={scene.narrative_text}
                 speed={20}
                 onComplete={() => setTextComplete(true)}
                 className="text-purple-100 leading-relaxed text-lg"
+                autoSpeak={false}
               />
             )}
           </motion.div>
