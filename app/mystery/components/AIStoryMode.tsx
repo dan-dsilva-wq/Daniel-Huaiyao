@@ -339,17 +339,25 @@ export default function AIStoryMode({ sessionId, currentPlayer, onBack }: AIStor
     };
   }, [bothResponded, currentPlayer, isGenerating, fetchGameState]);
 
-  // Reset generation trigger when scene changes
+  // Reset UI state when scene changes (for BOTH players)
   useEffect(() => {
     const currentOrder = gameState?.session?.current_ai_scene_order || 0;
-    if (currentOrder !== currentSceneOrderRef.current) {
-      console.log('[AI DEBUG] Scene order changed, resetting generation trigger', {
+    if (currentOrder !== currentSceneOrderRef.current && currentSceneOrderRef.current !== 0) {
+      console.log('[AI DEBUG] Scene order changed, resetting UI state', {
         old: currentSceneOrderRef.current,
         new: currentOrder,
       });
-      currentSceneOrderRef.current = currentOrder;
+      // Reset generation trigger
       generationTriggeredRef.current = false;
+      // Reset UI state for new scene (important for non-generating player)
+      setTextComplete(false);
+      setSelectedChoice(null);
+      setCustomInput('');
+      setPuzzleSolved(false);
+      setPuzzleAnswer('');
+      setHintsRevealed(0);
     }
+    currentSceneOrderRef.current = currentOrder;
   }, [gameState?.session?.current_ai_scene_order]);
 
   // Trigger generation when both responded (Daniel only)
