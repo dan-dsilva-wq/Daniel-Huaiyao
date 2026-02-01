@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import type { Player, MysteryPuzzle, MinigameState } from '@/lib/supabase';
@@ -121,6 +121,428 @@ function SafeCrackerGame({
         className="w-full py-3 bg-green-600 hover:bg-green-500 disabled:bg-gray-600 text-white rounded-xl font-semibold transition-colors disabled:cursor-not-allowed"
       >
         {attempts >= maxAttempts ? 'No Attempts Left' : 'Try Code'}
+      </button>
+    </div>
+  );
+}
+
+// Circuit Puzzle Mini-Game - Connect nodes to complete the circuit
+function CircuitPuzzleGame({
+  gameState,
+  currentPlayer,
+  onUpdateState,
+  onSubmitCode,
+}: {
+  gameState: Record<string, unknown>;
+  myState: Record<string, unknown>;
+  currentPlayer: Player;
+  onUpdateState: (shared: Record<string, unknown>, private_: Record<string, unknown>) => void;
+  onSubmitCode: (code: string) => void;
+}) {
+  const partnerName = currentPlayer === 'daniel' ? 'Huaiyao' : 'Daniel';
+
+  // 4x4 grid of nodes
+  const gridSize = 4;
+  const connections = (gameState.connections as Record<string, boolean>) || {};
+  const targetConnections = (gameState.target as string[]) || ['0-0_0-1', '0-1_1-1', '1-1_1-2', '1-2_2-2', '2-2_3-2', '3-2_3-3'];
+  const startNode = '0-0';
+  const endNode = '3-3';
+
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+
+  const getNodeColor = (row: number, col: number) => {
+    const nodeId = `${row}-${col}`;
+    if (nodeId === startNode) return 'bg-green-500';
+    if (nodeId === endNode) return 'bg-red-500';
+    // Check if connected
+    const isConnected = Object.keys(connections).some(key =>
+      connections[key] && (key.startsWith(nodeId + '_') || key.endsWith('_' + nodeId))
+    );
+    return isConnected ? 'bg-amber-400' : 'bg-slate-600';
+  };
+
+  const handleNodeClick = (row: number, col: number) => {
+    const nodeId = `${row}-${col}`;
+
+    if (!selectedNode) {
+      setSelectedNode(nodeId);
+    } else {
+      // Try to connect
+      if (selectedNode !== nodeId) {
+        // Check if adjacent (including diagonal)
+        const [r1, c1] = selectedNode.split('-').map(Number);
+        const isAdjacent = Math.abs(r1 - row) <= 1 && Math.abs(c1 - col) <= 1;
+
+        if (isAdjacent) {
+          // Create connection key (sorted so A_B === B_A)
+          const connKey = [selectedNode, nodeId].sort().join('_');
+          const newConnections = { ...connections };
+
+          // Toggle connection
+          if (connections[connKey]) {
+            delete newConnections[connKey];
+          } else {
+            newConnections[connKey] = true;
+          }
+
+          onUpdateState({ connections: newConnections }, {});
+        }
+      }
+      setSelectedNode(null);
+    }
+  };
+
+  const checkCircuit = () => {
+    // Check if all target connections are made
+    const allConnected = targetConnections.every(conn => connections[conn]);
+    const code = allConnected ? 'COMPLETE' : 'INCOMPLETE';
+    onSubmitCode(code);
+  };
+
+  // Draw connections as SVG lines
+  const renderConnections = () => {
+    const lines: React.ReactNode[] = [];
+    const nodeSize = 48;
+    const gap = 16;
+
+    Object.keys(connections).forEach(key => {
+      if (!connections[key]) return;
+
+      const [n1, n2] = key.split('_');
+      const [r1, c1] = n1.split('-').map(Number);
+      const [r2, c2] = n2.split('-').map(Number);
+
+      const x1 = c1 * (nodeSize + gap) + nodeSize / 2;
+      const y1 = r1 * (nodeSize + gap) + nodeSize / 2;
+      const x2 = c2 * (nodeSize + gap) + nodeSize / 2;
+      const y2 = r2 * (nodeSize + gap) + nodeSize / 2;
+
+      lines.push(
+        <line
+          key={key}
+          x1={x1}
+          y1={y1}
+          x2={x2}
+          y2={y2}
+          stroke="#fbbf24"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+      );
+    });
+
+    return lines;
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-slate-800/50 rounded-xl p-4">
+        <p className="text-purple-200 text-sm text-center mb-4">
+          Connect the <span className="text-green-400">green start</span> to the{' '}
+          <span className="text-red-400">red end</span> by clicking nodes to create connections.
+        </p>
+
+        <div className="relative flex justify-center">
+          <svg
+            className="absolute inset-0 pointer-events-none"
+            width="100%"
+            height="100%"
+            style={{ width: 4 * 64, height: 4 * 64 }}
+          >
+            {renderConnections()}
+          </svg>
+
+          <div className="grid grid-cols-4 gap-4 relative z-10">
+            {Array.from({ length: gridSize }).map((_, row) =>
+              Array.from({ length: gridSize }).map((_, col) => (
+                <motion.button
+                  key={`${row}-${col}`}
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => handleNodeClick(row, col)}
+                  className={`
+                    w-12 h-12 rounded-full transition-all shadow-lg
+                    ${getNodeColor(row, col)}
+                    ${selectedNode === `${row}-${col}` ? 'ring-4 ring-white' : ''}
+                  `}
+                >
+                  {`${row}-${col}` === startNode && <span className="text-white text-xs">IN</span>}
+                  {`${row}-${col}` === endNode && <span className="text-white text-xs">OUT</span>}
+                </motion.button>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      <p className="text-center text-purple-300/60 text-sm">
+        {partnerName} can also connect nodes - work together!
+      </p>
+
+      <button
+        onClick={checkCircuit}
+        className="w-full py-3 bg-green-600 hover:bg-green-500 text-white rounded-xl font-semibold transition-colors"
+      >
+        Test Circuit
+      </button>
+    </div>
+  );
+}
+
+// Pattern Sequence Mini-Game - Simon Says style
+function PatternSequenceGame({
+  gameState,
+  currentPlayer,
+  onUpdateState,
+  onSubmitCode,
+}: {
+  gameState: Record<string, unknown>;
+  myState: Record<string, unknown>;
+  currentPlayer: Player;
+  onUpdateState: (shared: Record<string, unknown>, private_: Record<string, unknown>) => void;
+  onSubmitCode: (code: string) => void;
+}) {
+  const partnerName = currentPlayer === 'daniel' ? 'Huaiyao' : 'Daniel';
+  const colors = ['red', 'blue', 'green', 'yellow'];
+  const targetSequence = (gameState.target_sequence as number[]) || [0, 2, 1, 3, 0, 1];
+  const playerSequence = (gameState.player_sequence as number[]) || [];
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [activeColor, setActiveColor] = useState<number | null>(null);
+  const [showingPattern, setShowingPattern] = useState(false);
+
+  const colorClasses: Record<string, string> = {
+    red: 'bg-red-500 hover:bg-red-400',
+    blue: 'bg-blue-500 hover:bg-blue-400',
+    green: 'bg-green-500 hover:bg-green-400',
+    yellow: 'bg-yellow-500 hover:bg-yellow-400',
+  };
+
+  const activeClasses: Record<string, string> = {
+    red: 'bg-red-300 shadow-lg shadow-red-500/50',
+    blue: 'bg-blue-300 shadow-lg shadow-blue-500/50',
+    green: 'bg-green-300 shadow-lg shadow-green-500/50',
+    yellow: 'bg-yellow-300 shadow-lg shadow-yellow-500/50',
+  };
+
+  const playPattern = async () => {
+    setShowingPattern(true);
+    for (let i = 0; i < targetSequence.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setActiveColor(targetSequence[i]);
+      await new Promise(resolve => setTimeout(resolve, 400));
+      setActiveColor(null);
+    }
+    setShowingPattern(false);
+    setIsPlaying(true);
+  };
+
+  const handleColorClick = (colorIndex: number) => {
+    if (showingPattern || !isPlaying) return;
+
+    const newSequence = [...playerSequence, colorIndex];
+    onUpdateState({ player_sequence: newSequence }, {});
+
+    // Check if complete
+    if (newSequence.length === targetSequence.length) {
+      const isCorrect = newSequence.every((v, i) => v === targetSequence[i]);
+      onSubmitCode(isCorrect ? 'CORRECT' : 'WRONG');
+      setIsPlaying(false);
+    }
+  };
+
+  const resetGame = () => {
+    onUpdateState({ player_sequence: [] }, {});
+    setIsPlaying(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-slate-800/50 rounded-xl p-6">
+        <p className="text-purple-200 text-sm text-center mb-6">
+          Watch the pattern, then repeat it together!
+        </p>
+
+        <div className="grid grid-cols-2 gap-4 max-w-xs mx-auto">
+          {colors.map((color, index) => (
+            <motion.button
+              key={color}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => handleColorClick(index)}
+              disabled={showingPattern}
+              className={`
+                w-full aspect-square rounded-2xl transition-all
+                ${activeColor === index ? activeClasses[color] : colorClasses[color]}
+                ${showingPattern ? 'cursor-not-allowed' : 'cursor-pointer'}
+              `}
+            />
+          ))}
+        </div>
+
+        <div className="mt-6 text-center">
+          <p className="text-purple-300 text-sm mb-2">
+            Progress: {playerSequence.length} / {targetSequence.length}
+          </p>
+          <div className="flex justify-center gap-1">
+            {targetSequence.map((_, i) => (
+              <div
+                key={i}
+                className={`w-3 h-3 rounded-full ${
+                  i < playerSequence.length
+                    ? playerSequence[i] === targetSequence[i]
+                      ? 'bg-green-500'
+                      : 'bg-red-500'
+                    : 'bg-slate-600'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <p className="text-center text-purple-300/60 text-sm">
+        Both players can input - coordinate with {partnerName}!
+      </p>
+
+      <div className="flex gap-3">
+        <button
+          onClick={playPattern}
+          disabled={showingPattern}
+          className="flex-1 py-3 bg-purple-600 hover:bg-purple-500 disabled:bg-gray-600 text-white rounded-xl font-semibold transition-colors"
+        >
+          {showingPattern ? 'Watch...' : 'Show Pattern'}
+        </button>
+        <button
+          onClick={resetGame}
+          className="px-6 py-3 bg-slate-600 hover:bg-slate-500 text-white rounded-xl font-semibold transition-colors"
+        >
+          Reset
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Wire Matching Mini-Game
+function WireMatchingGame({
+  gameState,
+  currentPlayer,
+  onUpdateState,
+  onSubmitCode,
+}: {
+  gameState: Record<string, unknown>;
+  myState: Record<string, unknown>;
+  currentPlayer: Player;
+  onUpdateState: (shared: Record<string, unknown>, private_: Record<string, unknown>) => void;
+  onSubmitCode: (code: string) => void;
+}) {
+  const partnerName = currentPlayer === 'daniel' ? 'Huaiyao' : 'Daniel';
+  const wireColors = ['red', 'blue', 'green', 'yellow', 'purple'];
+  const targetMatches = (gameState.target as Record<string, number>) || { red: 2, blue: 0, green: 3, yellow: 1, purple: 4 };
+  const currentMatches = (gameState.matches as Record<string, number>) || {};
+
+  const [selectedWire, setSelectedWire] = useState<string | null>(null);
+
+  const colorStyles: Record<string, string> = {
+    red: 'bg-red-500',
+    blue: 'bg-blue-500',
+    green: 'bg-green-500',
+    yellow: 'bg-yellow-500',
+    purple: 'bg-purple-500',
+  };
+
+  const handleWireClick = (color: string) => {
+    setSelectedWire(color);
+  };
+
+  const handleTerminalClick = (terminalIndex: number) => {
+    if (!selectedWire) return;
+
+    const newMatches = { ...currentMatches, [selectedWire]: terminalIndex };
+    onUpdateState({ matches: newMatches }, {});
+    setSelectedWire(null);
+  };
+
+  const checkConnections = () => {
+    const isCorrect = wireColors.every(color => currentMatches[color] === targetMatches[color]);
+    onSubmitCode(isCorrect ? 'CORRECT' : 'WRONG');
+  };
+
+  // Draw wire connections
+  const renderWires = () => {
+    return wireColors.map((color, i) => {
+      if (currentMatches[color] === undefined) return null;
+
+      const startY = 32 + i * 48;
+      const endY = 32 + currentMatches[color] * 48;
+
+      return (
+        <path
+          key={color}
+          d={`M 50 ${startY} C 120 ${startY}, 180 ${endY}, 250 ${endY}`}
+          stroke={color === 'yellow' ? '#eab308' : color}
+          strokeWidth="4"
+          fill="none"
+          strokeLinecap="round"
+        />
+      );
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-slate-800/50 rounded-xl p-6">
+        <p className="text-purple-200 text-sm text-center mb-6">
+          Connect each colored wire to the correct terminal!
+        </p>
+
+        <div className="relative flex justify-between items-center" style={{ height: 240 }}>
+          <svg className="absolute inset-0 pointer-events-none" width="100%" height="100%">
+            {renderWires()}
+          </svg>
+
+          {/* Left side - Wires */}
+          <div className="flex flex-col gap-3 z-10">
+            {wireColors.map(color => (
+              <motion.button
+                key={color}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => handleWireClick(color)}
+                className={`
+                  w-12 h-8 rounded-l-full ${colorStyles[color]}
+                  ${selectedWire === color ? 'ring-4 ring-white' : ''}
+                  transition-all
+                `}
+              />
+            ))}
+          </div>
+
+          {/* Right side - Terminals */}
+          <div className="flex flex-col gap-3 z-10">
+            {[0, 1, 2, 3, 4].map(i => (
+              <motion.button
+                key={i}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => handleTerminalClick(i)}
+                className="w-12 h-8 rounded-r-full bg-slate-500 hover:bg-slate-400 flex items-center justify-center text-white font-mono text-sm transition-all"
+              >
+                {i + 1}
+              </motion.button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <p className="text-center text-purple-300/60 text-sm">
+        {partnerName} can also connect wires - work together!
+      </p>
+
+      <button
+        onClick={checkConnections}
+        className="w-full py-3 bg-green-600 hover:bg-green-500 text-white rounded-xl font-semibold transition-colors"
+      >
+        Check Connections
       </button>
     </div>
   );
@@ -341,6 +763,36 @@ export default function MiniGameContainer({
           myState={myState}
           currentPlayer={currentPlayer}
           onUpdateState={handleUpdateState}
+        />
+      )}
+
+      {gameType === 'circuit' && (
+        <CircuitPuzzleGame
+          gameState={sharedState}
+          myState={myState}
+          currentPlayer={currentPlayer}
+          onUpdateState={handleUpdateState}
+          onSubmitCode={handleSubmitCode}
+        />
+      )}
+
+      {gameType === 'pattern_sequence' && (
+        <PatternSequenceGame
+          gameState={sharedState}
+          myState={myState}
+          currentPlayer={currentPlayer}
+          onUpdateState={handleUpdateState}
+          onSubmitCode={handleSubmitCode}
+        />
+      )}
+
+      {gameType === 'wire_matching' && (
+        <WireMatchingGame
+          gameState={sharedState}
+          myState={myState}
+          currentPlayer={currentPlayer}
+          onUpdateState={handleUpdateState}
+          onSubmitCode={handleSubmitCode}
         />
       )}
 
