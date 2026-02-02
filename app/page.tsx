@@ -43,11 +43,16 @@ function AppCard({ title, icon, href, gradient, newCount, onVisit }: AppCardProp
         active:scale-95 touch-manipulation
       `}
     >
-      {/* New content badge */}
+      {/* New content indicator */}
       {newCount && newCount > 0 && (
-        <div className="absolute top-2 right-2 min-w-5 h-5 px-1.5 bg-red-500 rounded-full flex items-center justify-center">
-          <span className="text-xs font-bold text-white">
-            {newCount > 9 ? '9+' : newCount}
+        <div className="absolute top-1.5 right-1.5">
+          <span className="relative flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 items-center justify-center">
+              {newCount > 1 && (
+                <span className="text-[8px] font-bold text-white">{newCount > 9 ? '9' : newCount}</span>
+              )}
+            </span>
           </span>
         </div>
       )}
