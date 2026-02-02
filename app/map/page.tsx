@@ -156,6 +156,8 @@ export default function MapPage() {
   const [showStats, setShowStats] = useState(false);
   const [showTripPlanner, setShowTripPlanner] = useState(false);
   const [photoGalleryPlace, setPhotoGalleryPlace] = useState<{ id: string; name: string } | null>(null);
+  const [memoryLocations, setMemoryLocations] = useState<MemoryLocation[]>([]);
+  const [showMemories, setShowMemories] = useState(true);
 
   // Get all places as a map for quick lookup
   const placesByLocation = useMemo(() => {
@@ -180,9 +182,21 @@ export default function MapPage() {
     }
 
     try {
+      // Fetch map data
       const { data, error } = await supabase.rpc('get_map_data');
       if (error) throw error;
       if (data) setRegions(data as Region[]);
+
+      // Fetch memories with locations
+      const { data: memories, error: memoriesError } = await supabase
+        .from('memories')
+        .select('id, title, location_name, location_lat, location_lng, memory_date')
+        .not('location_name', 'is', null)
+        .order('memory_date', { ascending: false });
+
+      if (!memoriesError && memories) {
+        setMemoryLocations(memories.filter(m => m.location_name) as MemoryLocation[]);
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
     }
@@ -462,19 +476,31 @@ export default function MapPage() {
               <span className="text-gray-500 dark:text-gray-400">Huaiyao</span>
             </div>
           </div>
-          <div className="flex justify-center gap-3 mt-3">
+          <div className="flex flex-wrap justify-center gap-2 mt-3">
             <button
               onClick={() => setShowStats(true)}
-              className="px-4 py-2 bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded-lg text-sm font-medium hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors"
+              className="px-3 py-2 bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded-lg text-sm font-medium hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors"
             >
-              📊 View Stats
+              📊 Stats
             </button>
             <button
               onClick={() => setShowTripPlanner(true)}
-              className="px-4 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-lg text-sm font-medium hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+              className="px-3 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-lg text-sm font-medium hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
             >
               ✈️ Plan Trip
             </button>
+            {memoryLocations.length > 0 && (
+              <button
+                onClick={() => setShowMemories(!showMemories)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  showMemories
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 hover:bg-purple-200 dark:hover:bg-purple-900/50'
+                }`}
+              >
+                📍 Memories ({memoryLocations.length})
+              </button>
+            )}
           </div>
         </motion.div>
 
@@ -909,6 +935,44 @@ export default function MapPage() {
               currentUser={currentUser}
               onClose={() => setShowTripPlanner(false)}
             />
+          )}
+        </AnimatePresence>
+
+        {/* Memory Locations Section */}
+        <AnimatePresence>
+          {showMemories && memoryLocations.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-2xl shadow-lg p-4 mb-6"
+            >
+              <h3 className="text-lg font-semibold text-gray-800 dark:text-white mb-3 flex items-center gap-2">
+                <span>📍</span> Memory Locations
+              </h3>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {memoryLocations.map((memory) => (
+                  <a
+                    key={memory.id}
+                    href={`/memories`}
+                    className="block p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h4 className="font-medium text-gray-800 dark:text-white truncate">{memory.title}</h4>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{memory.location_name}</p>
+                      </div>
+                      <span className="text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">
+                        {new Date(memory.memory_date).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-3 text-center">
+                Add locations to memories to see them here
+              </p>
+            </motion.div>
           )}
         </AnimatePresence>
 
