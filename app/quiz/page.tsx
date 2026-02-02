@@ -249,6 +249,12 @@ export default function QuizPage() {
     huaiyao: { correct: number; total: number };
   } | null>(null);
 
+  // Streak tracking state
+  const [streaks, setStreaks] = useState<{
+    daniel: { current: number; longest: number };
+    huaiyao: { current: number; longest: number };
+  } | null>(null);
+
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
 
   const fetchData = useCallback(async () => {
@@ -369,6 +375,29 @@ export default function QuizPage() {
     }
   }, []);
 
+  // Fetch streak data for both players
+  const fetchStreaks = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('quiz_player_stats')
+        .select('player, current_streak, longest_streak');
+
+      if (error) throw error;
+
+      const danielStats = data?.find(d => d.player === 'daniel');
+      const huaiyaoStats = data?.find(d => d.player === 'huaiyao');
+
+      setStreaks({
+        daniel: { current: danielStats?.current_streak || 0, longest: danielStats?.longest_streak || 0 },
+        huaiyao: { current: huaiyaoStats?.current_streak || 0, longest: huaiyaoStats?.longest_streak || 0 },
+      });
+    } catch (error) {
+      console.error('Error fetching streaks:', error);
+    }
+  }, []);
+
   useEffect(() => {
     const savedUser = localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
     setCurrentUser(savedUser);
@@ -378,8 +407,9 @@ export default function QuizPage() {
     if (currentUser) {
       fetchData();
       fetchScores();
+      fetchStreaks();
     }
-  }, [currentUser, fetchData, fetchScores]);
+  }, [currentUser, fetchData, fetchScores, fetchStreaks]);
 
   const sendNotification = async (action: 'question_added' | 'question_answered', detail: string) => {
     if (!currentUser) return;
@@ -479,8 +509,19 @@ export default function QuizPage() {
         `answered your question ${isCorrectAnswer ? 'correctly' : 'incorrectly'}`
       );
 
+      // Update streak
+      try {
+        await supabase.rpc('update_quiz_streak', {
+          p_player: currentUser,
+          p_is_correct: isCorrectAnswer,
+        });
+      } catch (streakError) {
+        console.error('Error updating streak:', streakError);
+      }
+
       fetchData();
       fetchScores();
+      fetchStreaks();
     } catch (error) {
       console.error('Error submitting answer:', error);
     }
@@ -790,6 +831,23 @@ export default function QuizPage() {
                 </div>
               </div>
             </div>
+
+            {/* Streak Display */}
+            {streaks && (streaks.daniel.current > 0 || streaks.huaiyao.current > 0 || streaks.daniel.longest > 0 || streaks.huaiyao.longest > 0) && (
+              <div className="flex justify-around items-center mt-3 pt-3 border-t border-white/20">
+                <div className="text-center">
+                  <div className="text-xs opacity-70">🔥 Streak</div>
+                  <div className="font-bold">{streaks.daniel.current}</div>
+                  <div className="text-xs opacity-60">Best: {streaks.daniel.longest}</div>
+                </div>
+                <div className="text-xs opacity-50">days</div>
+                <div className="text-center">
+                  <div className="text-xs opacity-70">🔥 Streak</div>
+                  <div className="font-bold">{streaks.huaiyao.current}</div>
+                  <div className="text-xs opacity-60">Best: {streaks.huaiyao.longest}</div>
+                </div>
+              </div>
+            )}
 
             {/* Winner Message */}
             <div className="text-center mt-3 text-sm font-medium">
