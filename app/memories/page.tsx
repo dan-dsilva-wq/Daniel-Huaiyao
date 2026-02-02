@@ -151,6 +151,10 @@ export default function MemoriesPage() {
   const handleAddMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !formTitle.trim()) return;
+    if (!formLocationLat || !formLocationLng) {
+      alert('Please select a valid location from the search results');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -721,7 +725,7 @@ export default function MemoriesPage() {
                   {/* Location */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Location (optional)
+                      Location <span className="text-red-500">*</span>
                     </label>
                     <LocationSearch
                       value={formLocation}
@@ -738,6 +742,16 @@ export default function MemoriesPage() {
                       }}
                       placeholder="Search for a location..."
                     />
+                    {formLocation && !formLocationLat && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                        Please select a location from the dropdown
+                      </p>
+                    )}
+                    {formLocationLat && (
+                      <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                        ✓ Location selected
+                      </p>
+                    )}
                   </div>
 
                   {/* Tags */}
