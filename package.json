@@ -23,6 +23,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/react-simple-maps": "^3.0.6",
+    "@types/web-push": "^3.6.4",
     "canvas": "^3.2.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
