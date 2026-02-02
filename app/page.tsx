@@ -16,7 +16,7 @@ interface AppCardProps {
   onVisit?: () => void;
 }
 
-function AppCard({ title, description, icon, href, gradient, badge, visitCount, onVisit }: AppCardProps) {
+function AppCard({ title, icon, href, gradient, onVisit }: AppCardProps) {
   const isExternal = href.startsWith('http');
 
   const handleClick = () => {
@@ -29,43 +29,29 @@ function AppCard({ title, description, icon, href, gradient, badge, visitCount, 
       target={isExternal ? '_blank' : undefined}
       rel={isExternal ? 'noopener noreferrer' : undefined}
       onClick={handleClick}
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ scale: 1.02, y: -4 }}
-      whileTap={{ scale: 0.98 }}
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.95 }}
       className={`
-        relative overflow-hidden rounded-2xl p-5 sm:p-8
+        relative overflow-hidden rounded-2xl
         bg-gradient-to-br ${gradient}
         shadow-lg hover:shadow-xl transition-shadow
-        flex flex-col gap-3 sm:gap-4 min-h-[160px] sm:min-h-[200px]
-        active:scale-[0.98] touch-manipulation
+        flex flex-col items-center justify-center
+        aspect-square
+        active:scale-95 touch-manipulation
       `}
     >
-      {badge && (
-        <div className="absolute top-3 right-3 px-2 py-1 bg-white/20 backdrop-blur-sm rounded-full text-xs font-medium text-white">
-          {badge}
-        </div>
-      )}
       <motion.div
-        className="text-5xl sm:text-6xl"
-        animate={{ y: [0, -4, 0] }}
+        className="text-4xl sm:text-5xl mb-2"
+        animate={{ y: [0, -3, 0] }}
         transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
       >
         {icon}
       </motion.div>
-      <div>
-        <h2 className="text-xl sm:text-2xl font-serif font-semibold text-white mb-2">
-          {title}
-        </h2>
-        <p className="text-white/80 text-sm sm:text-base">
-          {description}
-        </p>
-      </div>
-      <div className="absolute bottom-4 right-4 text-white/40">
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-        </svg>
-      </div>
+      <h2 className="text-sm sm:text-base font-medium text-white text-center px-2 leading-tight">
+        {title}
+      </h2>
     </motion.a>
   );
 }
@@ -288,14 +274,14 @@ export default function Home() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
-          className="grid grid-cols-1 sm:grid-cols-2 gap-6"
+          className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4"
         >
           {(hasAnyVisits ? usedApps : apps).map((app, index) => (
             <motion.div
               key={app.title}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 + index * 0.05 }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.2 + index * 0.03 }}
               layout
             >
               <AppCard
@@ -328,27 +314,21 @@ export default function Home() {
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
-                className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4"
+                className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4 mt-4"
               >
                 {unusedApps.map((app, index) => (
-                  <motion.a
+                  <motion.div
                     key={app.title}
-                    href={app.href}
-                    target={app.href.startsWith('http') ? '_blank' : undefined}
-                    rel={app.href.startsWith('http') ? 'noopener noreferrer' : undefined}
-                    onClick={() => handleVisit(app.title)}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: index * 0.03 }}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="flex items-center gap-3 p-3 bg-gray-100 dark:bg-gray-800/50 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors opacity-60 hover:opacity-100"
+                    className="opacity-50 hover:opacity-100 transition-opacity"
                   >
-                    <span className="text-2xl">{app.icon}</span>
-                    <span className="text-sm font-medium text-gray-600 dark:text-gray-400 truncate">
-                      {app.title}
-                    </span>
-                  </motion.a>
+                    <AppCard
+                      {...app}
+                      onVisit={() => handleVisit(app.title)}
+                    />
+                  </motion.div>
                 ))}
               </motion.div>
             )}
