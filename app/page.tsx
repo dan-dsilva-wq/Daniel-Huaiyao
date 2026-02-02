@@ -12,7 +12,6 @@ interface AppCardProps {
   href: string;
   gradient: string;
   badge?: string;
-  visitCount?: number;
   newCount?: number;
   onVisit?: () => void;
 }
@@ -312,8 +311,7 @@ export default function Home() {
             >
               <AppCard
                 {...app}
-                visitCount={visitCounts[app.title] || 0}
-                newCount={newCounts[app.title] || 0}
+                newCount={newCounts[app.title]}
                 onVisit={() => handleVisit(app.title)}
               />
             </motion.div>
@@ -353,7 +351,7 @@ export default function Home() {
                   >
                     <AppCard
                       {...app}
-                      newCount={newCounts[app.title] || 0}
+                      newCount={newCounts[app.title]}
                       onVisit={() => handleVisit(app.title)}
                     />
                   </motion.div>
