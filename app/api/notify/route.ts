@@ -117,15 +117,15 @@ export async function POST(request: Request) {
     }
 
     // Prepare notification payload
-    const notificationTitle = 'Daniel & Huaiyao';
-    const message = `${senderName} ${ACTION_MESSAGES[action]}${title ? `: ${title}` : ''}`;
+    const notificationTitle = senderName;
+    const actionMessage = ACTION_MESSAGES[action] || 'updated something';
+    const message = title ? `${actionMessage}: ${title}` : actionMessage;
     const url = ACTION_URLS[action] || '/';
 
     const payload = JSON.stringify({
       title: notificationTitle,
       body: message,
       icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
       url: url,
       tag: action, // Prevents duplicate notifications
     });

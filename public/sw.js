@@ -67,16 +67,11 @@ self.addEventListener('push', (event) => {
   const options = {
     body: data.body,
     icon: data.icon || '/icons/icon-192.png',
-    badge: data.badge || '/icons/icon-192.png',
     tag: data.tag || 'default',
     renotify: true,
     data: {
       url: data.url || '/',
     },
-    actions: [
-      { action: 'open', title: 'Open' },
-      { action: 'close', title: 'Dismiss' },
-    ],
   };
 
   event.waitUntil(
