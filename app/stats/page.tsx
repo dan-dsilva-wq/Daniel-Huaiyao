@@ -151,10 +151,19 @@ export default function StatsPage() {
         return;
       }
 
-      alert('Date saved successfully!');
+      // Verify the save by reading directly from table
+      const { data: verifyData } = await supabase
+        .from('relationship_stats')
+        .select('first_date')
+        .eq('id', 'main')
+        .single();
+
+      alert(`Date saved! Verified in DB: ${verifyData?.first_date || 'not found'}`);
       setShowSetDate(false);
       setSavingDate(false);
-      fetchData();
+
+      // Force page reload to refresh all data
+      window.location.reload();
     } catch (error) {
       alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setSavingDate(false);
