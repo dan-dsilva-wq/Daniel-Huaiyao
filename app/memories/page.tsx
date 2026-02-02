@@ -316,9 +316,10 @@ export default function MemoriesPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50 dark:from-gray-900 dark:to-purple-950">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-6xl mx-auto px-4 py-4">
+        <div className="max-w-6xl mx-auto px-4 py-3 sm:py-4">
+          {/* Top row: Back button, title, and add button */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 sm:gap-4">
               <Link
                 href="/"
                 className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -327,33 +328,37 @@ export default function MemoriesPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>
               </Link>
-              <h1 className="text-2xl font-bold dark:text-white">Memories</h1>
+              <h1 className="text-xl sm:text-2xl font-bold dark:text-white">Memories</h1>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
               <ThemeToggle />
 
-              {/* View toggle */}
-              <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+              {/* View toggle - icon only on mobile, text on larger screens */}
+              <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-0.5 sm:p-1">
                 <button
                   onClick={() => setViewMode('timeline')}
-                  className={`px-3 py-1 rounded-md text-sm transition-colors ${
+                  className={`px-2 sm:px-3 py-1 rounded-md text-xs sm:text-sm transition-colors ${
                     viewMode === 'timeline'
                       ? 'bg-white dark:bg-gray-600 shadow text-purple-600 dark:text-purple-300'
                       : 'text-gray-600 dark:text-gray-300'
                   }`}
+                  title="Timeline view"
                 >
-                  Timeline
+                  <span className="hidden sm:inline">Timeline</span>
+                  <span className="sm:hidden">📅</span>
                 </button>
                 <button
                   onClick={() => setViewMode('grid')}
-                  className={`px-3 py-1 rounded-md text-sm transition-colors ${
+                  className={`px-2 sm:px-3 py-1 rounded-md text-xs sm:text-sm transition-colors ${
                     viewMode === 'grid'
                       ? 'bg-white dark:bg-gray-600 shadow text-purple-600 dark:text-purple-300'
                       : 'text-gray-600 dark:text-gray-300'
                   }`}
+                  title="Grid view"
                 >
-                  Grid
+                  <span className="hidden sm:inline">Grid</span>
+                  <span className="sm:hidden">⊞</span>
                 </button>
               </div>
 
@@ -361,71 +366,74 @@ export default function MemoriesPage() {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={() => setShowAddModal(true)}
-                className="px-4 py-2 bg-purple-500 text-white rounded-lg font-medium shadow-lg"
+                className="px-2.5 sm:px-4 py-1.5 sm:py-2 bg-purple-500 text-white rounded-lg font-medium shadow-lg text-sm"
               >
-                + Add Memory
+                <span className="hidden sm:inline">+ Add Memory</span>
+                <span className="sm:hidden">+</span>
               </motion.button>
             </div>
           </div>
 
-          {/* Filters */}
-          <div className="mt-4 flex flex-wrap gap-2">
-            {/* Type filters */}
-            <button
-              onClick={() => setFilterType(null)}
-              className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                filterType === null
-                  ? 'bg-purple-500 text-white'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-              }`}
-            >
-              All Types
-            </button>
-            {Object.entries(MEMORY_TYPE_CONFIG).map(([type, config]) => (
+          {/* Filters - horizontally scrollable on mobile */}
+          <div className="mt-3 sm:mt-4 -mx-4 px-4 overflow-x-auto scrollbar-hide">
+            <div className="flex gap-2 pb-1 min-w-max">
+              {/* Type filters */}
               <button
-                key={type}
-                onClick={() => setFilterType(type as MemoryType)}
-                className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                  filterType === type
+                onClick={() => setFilterType(null)}
+                className={`px-3 py-1 rounded-full text-sm whitespace-nowrap transition-colors ${
+                  filterType === null
                     ? 'bg-purple-500 text-white'
                     : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
                 }`}
               >
-                {config.emoji} {config.label}
+                All Types
               </button>
-            ))}
-
-            {/* Tag filters */}
-            {allTags.length > 0 && (
-              <>
-                <span className="text-gray-300 dark:text-gray-600">|</span>
+              {Object.entries(MEMORY_TYPE_CONFIG).map(([type, config]) => (
                 <button
-                  onClick={() => setFilterTag(null)}
-                  className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                    filterTag === null && filterType !== null
-                      ? 'bg-pink-500 text-white'
-                      : filterTag === null
-                      ? 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
+                  key={type}
+                  onClick={() => setFilterType(type as MemoryType)}
+                  className={`px-3 py-1 rounded-full text-sm whitespace-nowrap transition-colors ${
+                    filterType === type
+                      ? 'bg-purple-500 text-white'
                       : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
                   }`}
                 >
-                  All Tags
+                  {config.emoji} {config.label}
                 </button>
-                {allTags.slice(0, 5).map((tag) => (
+              ))}
+
+              {/* Tag filters */}
+              {allTags.length > 0 && (
+                <>
+                  <span className="text-gray-300 dark:text-gray-600 self-center">|</span>
                   <button
-                    key={tag}
-                    onClick={() => setFilterTag(tag)}
-                    className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                      filterTag === tag
+                    onClick={() => setFilterTag(null)}
+                    className={`px-3 py-1 rounded-full text-sm whitespace-nowrap transition-colors ${
+                      filterTag === null && filterType !== null
                         ? 'bg-pink-500 text-white'
+                        : filterTag === null
+                        ? 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
                         : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
                     }`}
                   >
-                    #{tag}
+                    All Tags
                   </button>
-                ))}
-              </>
-            )}
+                  {allTags.slice(0, 5).map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => setFilterTag(tag)}
+                      className={`px-3 py-1 rounded-full text-sm whitespace-nowrap transition-colors ${
+                        filterTag === tag
+                          ? 'bg-pink-500 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                      }`}
+                    >
+                      #{tag}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -605,10 +613,10 @@ export default function MemoriesPage() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto"
             >
-              <div className="p-6">
-                <h2 className="text-2xl font-bold mb-6 dark:text-white">Add Memory</h2>
+              <div className="p-4 sm:p-6">
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 dark:text-white">Add Memory</h2>
 
                 <form onSubmit={handleAddMemory} className="space-y-4">
                   {/* Memory Type */}
@@ -795,15 +803,15 @@ export default function MemoriesPage() {
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto"
             >
-              <div className="p-6">
+              <div className="p-4 sm:p-6">
                 {/* Header */}
                 <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <span className="text-4xl">{MEMORY_TYPE_CONFIG[selectedMemory.memory_type].emoji}</span>
-                    <div>
-                      <h2 className="text-2xl font-bold dark:text-white">{selectedMemory.title}</h2>
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <span className="text-3xl sm:text-4xl flex-shrink-0">{MEMORY_TYPE_CONFIG[selectedMemory.memory_type].emoji}</span>
+                    <div className="min-w-0">
+                      <h2 className="text-lg sm:text-2xl font-bold dark:text-white break-words">{selectedMemory.title}</h2>
                       <span className={`inline-block px-2 py-0.5 rounded text-xs mt-1 ${MEMORY_TYPE_CONFIG[selectedMemory.memory_type].color}`}>
                         {MEMORY_TYPE_CONFIG[selectedMemory.memory_type].label}
                       </span>
