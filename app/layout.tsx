@@ -5,6 +5,7 @@ import { ThemeProvider } from "./components/ThemeProvider";
 import { ServiceWorkerRegister } from "./components/ServiceWorkerRegister";
 import { OfflineIndicator } from "./components/OfflineIndicator";
 import NotificationPrompt from "./components/NotificationPrompt";
+import ChatBubble from "./components/ChatBubble";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -67,6 +68,7 @@ export default function RootLayout({
           {children}
           <ServiceWorkerRegister />
           <NotificationPrompt />
+          <ChatBubble />
         </ThemeProvider>
       </body>
     </html>
