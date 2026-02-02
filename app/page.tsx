@@ -144,7 +144,7 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     title: 'Hive',
     description: 'The buzzing strategy board game',
     icon: '🐝',
-    href: 'https://daniel-huaiyao-hive.vercel.app',
+    href: '/hive',
     gradient: 'from-yellow-500 to-amber-600',
   },
   // Stats
