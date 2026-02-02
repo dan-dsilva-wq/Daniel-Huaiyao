@@ -727,7 +727,13 @@ export default function MapPage() {
                       <Geography
                         key={geo.rsmKey}
                         geography={geo}
-                        onClick={() => regionCode && setZoomedRegion(regionCode)}
+                        onClick={() => {
+                          if (regionCode) {
+                            setZoomedRegion(regionCode);
+                            // Also open location modal for this country
+                            handleLocationClick(countryName, countryName, false);
+                          }
+                        }}
                         style={{
                           default: {
                             fill: fillColor,
