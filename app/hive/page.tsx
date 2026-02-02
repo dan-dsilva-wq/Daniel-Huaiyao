@@ -19,7 +19,7 @@ import {
   getNeighbors,
   getTopPieceAt,
 } from '@/lib/hive/hexUtils';
-import { getValidPlacements } from '@/lib/hive/placementRules';
+import { getValidPlacementPositions } from '@/lib/hive/placementRules';
 import { getValidMoves, executeMove } from '@/lib/hive/moveValidation';
 import { checkWinCondition } from '@/lib/hive/winCondition';
 
@@ -226,7 +226,7 @@ export default function HivePage() {
     }
 
     if (selectedPiece.source === 'hand') {
-      const placements = getValidPlacements(
+      const placements = getValidPlacementPositions(
         gameState.board,
         selectedPiece.piece.color,
         gameState.turnNumber
@@ -234,9 +234,8 @@ export default function HivePage() {
       setValidMoves(placements);
     } else {
       const moves = getValidMoves(
-        gameState.board,
-        selectedPiece.piece as PlacedPiece,
-        gameState
+        gameState,
+        selectedPiece.piece as PlacedPiece
       );
       setValidMoves(moves);
     }
@@ -265,10 +264,10 @@ export default function HivePage() {
       const newState = executeMove(gameState, move);
       if (newState) {
         // Check win condition
-        const winner = checkWinCondition(newState.board);
-        if (winner) {
+        const result = checkWinCondition(newState.board);
+        if (result.gameOver) {
           newState.status = 'finished';
-          newState.winner = winner;
+          newState.winner = result.winner;
         }
         setGameState(newState);
       }
