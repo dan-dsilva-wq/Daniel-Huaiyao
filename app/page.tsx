@@ -83,12 +83,6 @@ function AppCard({ title, description, icon, href, gradient, badge, visitCount, 
         active:scale-[0.98] touch-manipulation
       `}
     >
-      {/* Visit count badge */}
-      {visitCount !== undefined && visitCount > 0 && (
-        <div className="absolute top-3 left-3 px-2 py-1 bg-black/20 backdrop-blur-sm rounded-full text-xs font-medium text-white/70">
-          {visitCount}×
-        </div>
-      )}
       {badge && (
         <div className="absolute top-3 right-3 px-2 py-1 bg-white/20 backdrop-blur-sm rounded-full text-xs font-medium text-white">
           {badge}
