@@ -130,7 +130,7 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     title: 'Story Book',
     description: 'Writing a story together, one sentence at a time',
     icon: '📖',
-    href: 'https://daniel-huaiyao-book.vercel.app',
+    href: '/book',
     gradient: 'from-amber-600 to-orange-700',
   },
   {

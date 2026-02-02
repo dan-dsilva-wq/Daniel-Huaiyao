@@ -28,7 +28,7 @@ function isWithinAllowedHours(): boolean {
   return hour >= QUIET_HOURS_END && hour < QUIET_HOURS_START;
 }
 
-type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed' | 'memory_added' | 'gratitude_sent' | 'chat_message';
+type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed' | 'memory_added' | 'gratitude_sent' | 'chat_message' | 'book_sentence';
 
 const ACTION_MESSAGES: Record<ActionType, string> = {
   added: 'added a new date idea',
@@ -45,6 +45,7 @@ const ACTION_MESSAGES: Record<ActionType, string> = {
   memory_added: 'added a new memory',
   gratitude_sent: 'left you a note on the gratitude wall',
   chat_message: 'sent you a message',
+  book_sentence: 'added to your story',
 };
 
 const ACTION_URLS: Record<string, string> = {
@@ -62,6 +63,7 @@ const ACTION_URLS: Record<string, string> = {
   memory_added: '/memories',
   gratitude_sent: '/gratitude',
   chat_message: '/',
+  book_sentence: '/book',
 };
 
 export async function POST(request: Request) {
