@@ -85,7 +85,7 @@ export default function StatsPage() {
     if (!currentUser) return;
 
     try {
-      // Fetch first_date directly from table instead of broken RPC
+      // Fetch first_date
       const { data: relationshipData } = await supabase
         .from('relationship_stats')
         .select('first_date')
@@ -100,22 +100,68 @@ export default function StatsPage() {
         daysTogether = Math.floor((today.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
       }
 
-      // Build stats object with direct data
+      // Fetch actual counts from tables
+      const [
+        quizAnswersRes,
+        mysteriesRes,
+        gratitudeRes,
+        memoriesRes,
+        promptsRes,
+        mediaRes,
+      ] = await Promise.all([
+        supabase.from('quiz_answers').select('id', { count: 'exact', head: true }),
+        supabase.from('mystery_sessions').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
+        supabase.from('gratitude_notes').select('id', { count: 'exact', head: true }),
+        supabase.from('memories').select('id', { count: 'exact', head: true }),
+        supabase.from('prompt_responses').select('id', { count: 'exact', head: true }),
+        supabase.from('media_items').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
+      ]);
+
+      // Fetch per-player stats
+      const [
+        danielQuizRes,
+        huaiyaoQuizRes,
+        danielGratitudeRes,
+        huaiyaoGratitudeRes,
+        danielMemoriesRes,
+        huaiyaoMemoriesRes,
+      ] = await Promise.all([
+        supabase.from('quiz_answers').select('id', { count: 'exact', head: true }).eq('player', 'daniel').eq('is_correct', true),
+        supabase.from('quiz_answers').select('id', { count: 'exact', head: true }).eq('player', 'huaiyao').eq('is_correct', true),
+        supabase.from('gratitude_notes').select('id', { count: 'exact', head: true }).eq('from_player', 'daniel'),
+        supabase.from('gratitude_notes').select('id', { count: 'exact', head: true }).eq('from_player', 'huaiyao'),
+        supabase.from('memories').select('id', { count: 'exact', head: true }).eq('created_by', 'daniel'),
+        supabase.from('memories').select('id', { count: 'exact', head: true }).eq('created_by', 'huaiyao'),
+      ]);
+
+      // Build stats object with real data
       const statsData: StatsData = {
         days_together: daysTogether,
         stats: {
           first_date: relationshipData?.first_date || null,
-          quiz_questions_answered: 0,
-          mysteries_completed: 0,
-          dates_completed: 0,
-          gratitude_notes_sent: 0,
-          memories_created: 0,
-          prompts_answered: 0,
-          media_completed: 0,
+          quiz_questions_answered: quizAnswersRes.count || 0,
+          mysteries_completed: mysteriesRes.count || 0,
+          dates_completed: 0, // No dates table yet
+          gratitude_notes_sent: gratitudeRes.count || 0,
+          memories_created: memoriesRes.count || 0,
+          prompts_answered: promptsRes.count || 0,
+          media_completed: mediaRes.count || 0,
         },
         player_stats: {
-          daniel: { achievements_unlocked: 0, total_points: 0, quiz_correct: 0, gratitude_sent: 0, memories_created: 0 },
-          huaiyao: { achievements_unlocked: 0, total_points: 0, quiz_correct: 0, gratitude_sent: 0, memories_created: 0 },
+          daniel: {
+            achievements_unlocked: 0,
+            total_points: (danielQuizRes.count || 0) * 10,
+            quiz_correct: danielQuizRes.count || 0,
+            gratitude_sent: danielGratitudeRes.count || 0,
+            memories_created: danielMemoriesRes.count || 0,
+          },
+          huaiyao: {
+            achievements_unlocked: 0,
+            total_points: (huaiyaoQuizRes.count || 0) * 10,
+            quiz_correct: huaiyaoQuizRes.count || 0,
+            gratitude_sent: huaiyaoGratitudeRes.count || 0,
+            memories_created: huaiyaoMemoriesRes.count || 0,
+          },
         },
         recent_achievements: null,
       };
