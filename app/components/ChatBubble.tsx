@@ -198,15 +198,15 @@ export default function ChatBubble() {
             {/* Header */}
             <div className="bg-gradient-to-r from-pink-500 to-rose-500 p-4 text-white">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
+                <a href="/profile" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
                   <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center text-lg">
                     {currentUser === 'daniel' ? '🦊' : '🐰'}
                   </div>
                   <div>
                     <h3 className="font-semibold">{partnerName}</h3>
-                    <p className="text-xs text-white/70">Tap to chat</p>
+                    <p className="text-xs text-white/70">View profiles</p>
                   </div>
-                </div>
+                </a>
                 {/* Call buttons */}
                 <div className="flex gap-2">
                   {/* WhatsApp Voice Call (unofficial deep link - may work) */}
