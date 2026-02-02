@@ -202,20 +202,36 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
 export default function Home() {
   const [visitCounts, setVisitCounts] = useState<Record<string, number>>({});
   const [mounted, setMounted] = useState(false);
+  const [showUnused, setShowUnused] = useState(false);
 
   useEffect(() => {
     setMounted(true);
     setVisitCounts(getVisitCounts());
   }, []);
 
-  // Sort apps by visit count (descending), keeping original order for ties
-  const sortedApps = useMemo(() => {
-    if (!mounted) return apps;
-    return [...apps].sort((a, b) => {
+  // Separate apps into used (visited in last 30 days) and unused
+  const { usedApps, unusedApps } = useMemo(() => {
+    if (!mounted) return { usedApps: apps, unusedApps: [] };
+
+    const used: typeof apps = [];
+    const unused: typeof apps = [];
+
+    apps.forEach(app => {
+      if ((visitCounts[app.title] || 0) > 0) {
+        used.push(app);
+      } else {
+        unused.push(app);
+      }
+    });
+
+    // Sort used apps by visit count (descending)
+    used.sort((a, b) => {
       const countA = visitCounts[a.title] || 0;
       const countB = visitCounts[b.title] || 0;
       return countB - countA;
     });
+
+    return { usedApps: used, unusedApps: unused };
   }, [visitCounts, mounted]);
 
   const handleVisit = (appTitle: string) => {
@@ -225,7 +241,7 @@ export default function Home() {
   };
 
   // Check if any app has been visited
-  const hasAnyVisits = Object.values(visitCounts).some(count => count > 0);
+  const hasAnyVisits = usedApps.length > 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-slate-900 dark:to-zinc-900">
@@ -275,21 +291,16 @@ export default function Home() {
           <p className="text-lg sm:text-xl text-gray-500 dark:text-gray-400 max-w-md mx-auto">
             Some fun stuff we made
           </p>
-          {hasAnyVisits && (
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-              Sorted by visits (last 30 days)
-            </p>
-          )}
         </motion.div>
 
-        {/* Main Apps */}
+        {/* Main Apps (used in last 30 days) */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
           className="grid grid-cols-1 sm:grid-cols-2 gap-6"
         >
-          {sortedApps.map((app, index) => (
+          {(hasAnyVisits ? usedApps : apps).map((app, index) => (
             <motion.div
               key={app.title}
               initial={{ opacity: 0, y: 20 }}
@@ -305,6 +316,54 @@ export default function Home() {
             </motion.div>
           ))}
         </motion.div>
+
+        {/* Unused Apps Section */}
+        {hasAnyVisits && unusedApps.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+            className="mt-16"
+          >
+            <button
+              onClick={() => setShowUnused(!showUnused)}
+              className="w-full flex items-center justify-center gap-2 py-3 text-sm text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 transition-colors"
+            >
+              <span>{showUnused ? '▼' : '▶'}</span>
+              <span>Unused apps ({unusedApps.length})</span>
+            </button>
+
+            {showUnused && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4"
+              >
+                {unusedApps.map((app, index) => (
+                  <motion.a
+                    key={app.title}
+                    href={app.href}
+                    target={app.href.startsWith('http') ? '_blank' : undefined}
+                    rel={app.href.startsWith('http') ? 'noopener noreferrer' : undefined}
+                    onClick={() => handleVisit(app.title)}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.03 }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    className="flex items-center gap-3 p-3 bg-gray-100 dark:bg-gray-800/50 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors opacity-60 hover:opacity-100"
+                  >
+                    <span className="text-2xl">{app.icon}</span>
+                    <span className="text-sm font-medium text-gray-600 dark:text-gray-400 truncate">
+                      {app.title}
+                    </span>
+                  </motion.a>
+                ))}
+              </motion.div>
+            )}
+          </motion.div>
+        )}
 
         {/* Footer */}
         <motion.footer
