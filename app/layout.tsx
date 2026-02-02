@@ -4,6 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { ServiceWorkerRegister } from "./components/ServiceWorkerRegister";
 import { OfflineIndicator } from "./components/OfflineIndicator";
+import NotificationPrompt from "./components/NotificationPrompt";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -65,6 +66,7 @@ export default function RootLayout({
           <OfflineIndicator />
           {children}
           <ServiceWorkerRegister />
+          <NotificationPrompt />
         </ThemeProvider>
       </body>
     </html>

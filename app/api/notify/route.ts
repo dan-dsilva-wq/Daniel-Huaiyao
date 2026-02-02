@@ -1,12 +1,21 @@
 import { NextResponse } from 'next/server';
+import webpush from 'web-push';
+import { createClient } from '@supabase/supabase-js';
 
-const PUSHOVER_API = 'https://api.pushover.net/1/messages.json';
-const PUSHOVER_APP_TOKEN = 'awjs2cyd1q9m56vrpyruv52y4826m6';
+// Configure web-push with VAPID keys
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY!;
 
-const USER_KEYS = {
-  daniel: 'uqiumw91z3zg8r4favueo6h3785po5',
-  huaiyao: 'utu9t97tkvx5vvcookhhogqkh4axbf',
-};
+webpush.setVapidDetails(
+  'mailto:notifications@daniel-huaiyao.vercel.app',
+  VAPID_PUBLIC_KEY,
+  VAPID_PRIVATE_KEY
+);
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 // Quiet hours: only send between 9 AM and 11 PM (Eastern Time)
 const QUIET_HOURS_START = 23; // 11 PM
@@ -16,12 +25,10 @@ const TIMEZONE = 'America/New_York';
 function isWithinAllowedHours(): boolean {
   const now = new Date();
   const hour = parseInt(now.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: TIMEZONE }));
-  // Allowed: 9 AM (9) to 11 PM (23)
-  // NOT allowed: 11 PM (23) to 9 AM (9)
   return hour >= QUIET_HOURS_END && hour < QUIET_HOURS_START;
 }
 
-type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed';
+type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed' | 'memory_added' | 'gratitude_sent';
 
 const ACTION_MESSAGES: Record<ActionType, string> = {
   added: 'added a new date idea',
@@ -35,6 +42,24 @@ const ACTION_MESSAGES: Record<ActionType, string> = {
   mystery_started: 'started a mystery game',
   mystery_waiting: 'is waiting for you to join a mystery',
   mystery_agreed: 'made a decision together in the mystery',
+  memory_added: 'added a new memory',
+  gratitude_sent: 'left you a note on the gratitude wall',
+};
+
+const ACTION_URLS: Record<string, string> = {
+  added: '/dates',
+  removed: '/dates',
+  completed: '/dates',
+  uncompleted: '/dates',
+  question_added: '/quiz',
+  question_answered: '/quiz',
+  place_added: '/map',
+  place_visited: '/map',
+  mystery_started: '/mystery',
+  mystery_waiting: '/mystery',
+  mystery_agreed: '/mystery',
+  memory_added: '/memories',
+  gratitude_sent: '/gratitude',
 };
 
 export async function POST(request: Request) {
@@ -45,7 +70,7 @@ export async function POST(request: Request) {
       user: 'daniel' | 'huaiyao';
     };
 
-    if (!action || !title || !user) {
+    if (!action || !user) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -64,48 +89,79 @@ export async function POST(request: Request) {
       });
     }
 
-    // Determine notification type
-    const isQuiz = action === 'question_added' || action === 'question_answered';
-    const isMap = action === 'place_added' || action === 'place_visited';
-    // Note: isMystery already checked above and returns early
-
     // Notify the OTHER person
-    const recipientKey = user === 'daniel' ? USER_KEYS.huaiyao : USER_KEYS.daniel;
+    const recipient = user === 'daniel' ? 'huaiyao' : 'daniel';
     const senderName = user === 'daniel' ? 'Daniel' : 'Huaiyao';
 
-    const notificationTitle = isQuiz ? 'Quiz Time' : isMap ? 'Our Map' : 'Date Ideas Updated';
-    const message = `${senderName} ${ACTION_MESSAGES[action]}`;
-    const notificationUrl = isQuiz
-      ? 'https://daniel-huaiyao.vercel.app/quiz'
-      : isMap
-      ? 'https://daniel-huaiyao.vercel.app/map'
-      : 'https://daniel-huaiyao.vercel.app/dates';
-    const urlTitle = isQuiz ? 'Answer Quiz' : isMap ? 'View Map' : 'View Date Ideas';
+    // Get push subscriptions for the recipient
+    const { data: subscriptions, error: subError } = await supabase
+      .from('push_subscriptions')
+      .select('endpoint, p256dh, auth')
+      .eq('user_name', recipient);
 
-    const formData = new URLSearchParams({
-      token: PUSHOVER_APP_TOKEN,
-      user: recipientKey,
-      title: notificationTitle,
-      message,
-      sound: 'magic',
-      priority: '0',
-      url: notificationUrl,
-      url_title: urlTitle,
-    });
-
-    const response = await fetch(PUSHOVER_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formData.toString(),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Pushover error:', errorText);
-      return NextResponse.json({ error: 'Failed to send notification' }, { status: 500 });
+    if (subError) {
+      console.error('Error fetching subscriptions:', subError);
+      return NextResponse.json({ error: 'Failed to fetch subscriptions' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true });
+    if (!subscriptions || subscriptions.length === 0) {
+      return NextResponse.json({
+        success: true,
+        skipped: true,
+        reason: 'No push subscriptions for recipient'
+      });
+    }
+
+    // Prepare notification payload
+    const notificationTitle = 'Daniel & Huaiyao';
+    const message = `${senderName} ${ACTION_MESSAGES[action]}${title ? `: ${title}` : ''}`;
+    const url = ACTION_URLS[action] || '/';
+
+    const payload = JSON.stringify({
+      title: notificationTitle,
+      body: message,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      url: url,
+      tag: action, // Prevents duplicate notifications
+    });
+
+    // Send to all subscriptions for this user
+    const results = await Promise.allSettled(
+      subscriptions.map(async (sub) => {
+        const pushSubscription = {
+          endpoint: sub.endpoint,
+          keys: {
+            p256dh: sub.p256dh,
+            auth: sub.auth,
+          },
+        };
+
+        try {
+          await webpush.sendNotification(pushSubscription, payload);
+          return { success: true, endpoint: sub.endpoint };
+        } catch (error: unknown) {
+          // If subscription is invalid, remove it
+          const webPushError = error as { statusCode?: number };
+          if (webPushError.statusCode === 410 || webPushError.statusCode === 404) {
+            await supabase
+              .from('push_subscriptions')
+              .delete()
+              .eq('endpoint', sub.endpoint);
+          }
+          throw error;
+        }
+      })
+    );
+
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+
+    return NextResponse.json({
+      success: true,
+      sent: successful,
+      failed: failed
+    });
   } catch (error) {
     console.error('Notification error:', error);
     return NextResponse.json({ error: 'Failed to send notification' }, { status: 500 });
