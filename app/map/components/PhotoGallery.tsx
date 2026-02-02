@@ -11,6 +11,8 @@ interface Photo {
   taken_date: string | null;
   uploaded_by: string;
   created_at: string;
+  source: 'map' | 'memory';
+  memory_title: string | null;
 }
 
 interface PhotoGalleryProps {
@@ -31,8 +33,9 @@ export function PhotoGallery({ placeId, placeName, currentUser, onClose }: Photo
 
   const fetchPhotos = useCallback(async () => {
     try {
-      const { data, error } = await supabase.rpc('get_place_photos', {
+      const { data, error } = await supabase.rpc('get_place_photos_with_memories', {
         p_place_id: placeId,
+        p_place_name: placeName,
       });
 
       if (error) throw error;
@@ -42,7 +45,7 @@ export function PhotoGallery({ placeId, placeName, currentUser, onClose }: Photo
     } finally {
       setLoading(false);
     }
-  }, [placeId]);
+  }, [placeId, placeName]);
 
   useEffect(() => {
     fetchPhotos();
@@ -185,7 +188,7 @@ export function PhotoGallery({ placeId, placeName, currentUser, onClose }: Photo
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: index * 0.05 }}
                   onClick={() => setSelectedPhoto(photo)}
-                  className="aspect-square rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-teal-500 transition-all bg-gray-100 dark:bg-gray-700"
+                  className="aspect-square rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-teal-500 transition-all bg-gray-100 dark:bg-gray-700 relative"
                 >
                   <img
                     src={photo.storage_path}
@@ -193,6 +196,11 @@ export function PhotoGallery({ placeId, placeName, currentUser, onClose }: Photo
                     className="w-full h-full object-cover"
                     loading="lazy"
                   />
+                  {photo.source === 'memory' && (
+                    <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-pink-500/90 text-white text-[10px] font-medium rounded">
+                      Memory
+                    </div>
+                  )}
                 </motion.div>
               ))}
             </div>
@@ -294,13 +302,14 @@ export function PhotoGallery({ placeId, placeName, currentUser, onClose }: Photo
             >
               {/* Close button */}
               <div className="absolute top-4 right-4 z-10 flex gap-2">
-                {selectedPhoto.uploaded_by === currentUser && (
+                {selectedPhoto.source === 'map' && selectedPhoto.uploaded_by === currentUser && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       handleDeletePhoto(selectedPhoto.id);
                     }}
                     className="p-2 bg-red-500/80 hover:bg-red-500 text-white rounded-full transition-colors"
+                    title="Delete photo"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -330,8 +339,11 @@ export function PhotoGallery({ placeId, placeName, currentUser, onClose }: Photo
               </div>
 
               {/* Caption */}
-              {(selectedPhoto.caption || selectedPhoto.taken_date) && (
+              {(selectedPhoto.caption || selectedPhoto.taken_date || selectedPhoto.memory_title) && (
                 <div className="p-4 text-center text-white">
+                  {selectedPhoto.memory_title && (
+                    <p className="text-xs text-pink-300 mb-1">From memory: {selectedPhoto.memory_title}</p>
+                  )}
                   {selectedPhoto.caption && (
                     <p className="text-lg">{selectedPhoto.caption}</p>
                   )}
