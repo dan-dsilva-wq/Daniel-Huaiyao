@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
 import LocationSearch from '../components/LocationSearch';
 
@@ -39,6 +40,7 @@ const MEMORY_TYPE_CONFIG: Record<MemoryType, { emoji: string; label: string; col
 };
 
 export default function MemoriesPage() {
+  useMarkAppViewed('memories');
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [allTags, setAllTags] = useState<string[]>([]);

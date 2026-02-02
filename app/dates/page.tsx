@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured, DateIdea } from '@/lib/supabase';
+import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 interface LocalCategory {
@@ -14,6 +15,7 @@ interface LocalCategory {
 
 
 export default function DateIdeas() {
+  useMarkAppViewed('dates');
   const [categories, setCategories] = useState<LocalCategory[]>([]);
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(true);

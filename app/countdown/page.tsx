@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 interface ImportantDate {
@@ -26,6 +27,7 @@ const CATEGORY_OPTIONS = [
 ];
 
 export default function Countdown() {
+  useMarkAppViewed('countdown');
   const [dates, setDates] = useState<ImportantDate[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);

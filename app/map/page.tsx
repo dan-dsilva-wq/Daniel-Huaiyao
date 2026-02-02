@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, memo, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ComposableMap, Geographies, Geography, ZoomableGroup, Marker } from 'react-simple-maps';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import StatsPanel from './components/StatsPanel';
 import { PhotoGallery } from './components/PhotoGallery';
 import { TripPlanner } from './components/TripPlanner';
@@ -152,6 +153,7 @@ const REGION_COLORS: Record<string, { default: string; visited: string; wishlist
 const DEFAULT_COLOR = { default: '#e5e7eb', visited: '#6b7280', wishlist: '#d1d5db', hover: '#9ca3af' };
 
 export default function MapPage() {
+  useMarkAppViewed('map');
   const [regions, setRegions] = useState<Region[]>([]);
   const [zoomedRegion, setZoomedRegion] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);

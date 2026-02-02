@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 interface DailyPrompt {
@@ -29,6 +30,7 @@ interface PromptHistory {
 }
 
 export default function PromptsPage() {
+  useMarkAppViewed('prompts');
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [todayPrompt, setTodayPrompt] = useState<DailyPrompt | null>(null);
   const [history, setHistory] = useState<PromptHistory[]>([]);

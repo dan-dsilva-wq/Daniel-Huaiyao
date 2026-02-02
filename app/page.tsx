@@ -13,10 +13,11 @@ interface AppCardProps {
   gradient: string;
   badge?: string;
   visitCount?: number;
+  newCount?: number;
   onVisit?: () => void;
 }
 
-function AppCard({ title, icon, href, gradient, onVisit }: AppCardProps) {
+function AppCard({ title, icon, href, gradient, newCount, onVisit }: AppCardProps) {
   const isExternal = href.startsWith('http');
 
   const handleClick = () => {
@@ -42,6 +43,14 @@ function AppCard({ title, icon, href, gradient, onVisit }: AppCardProps) {
         active:scale-95 touch-manipulation
       `}
     >
+      {/* New content badge */}
+      {newCount && newCount > 0 && (
+        <div className="absolute top-2 right-2 min-w-5 h-5 px-1.5 bg-red-500 rounded-full flex items-center justify-center">
+          <span className="text-xs font-bold text-white">
+            {newCount > 9 ? '9+' : newCount}
+          </span>
+        </div>
+      )}
       <motion.div
         className="text-4xl sm:text-5xl mb-2"
         animate={{ y: [0, -3, 0] }}
@@ -150,6 +159,7 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
 
 export default function Home() {
   const [visitCounts, setVisitCounts] = useState<Record<string, number>>({});
+  const [newCounts, setNewCounts] = useState<Record<string, number>>({});
   const [mounted, setMounted] = useState(false);
   const [showUnused, setShowUnused] = useState(false);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
@@ -164,6 +174,19 @@ export default function Home() {
       }
     } catch (err) {
       console.error('Error fetching visit counts:', err);
+    }
+  };
+
+  // Fetch new item counts for badge display
+  const fetchNewCounts = async (user: string) => {
+    if (!isSupabaseConfigured) return;
+    try {
+      const { data, error } = await supabase.rpc('get_new_item_counts', { p_user_name: user });
+      if (!error && data) {
+        setNewCounts(data as Record<string, number>);
+      }
+    } catch (err) {
+      console.error('Error fetching new counts:', err);
     }
   };
 
@@ -190,6 +213,9 @@ export default function Home() {
     const savedUser = localStorage.getItem('currentUser');
     setCurrentUser(savedUser);
     fetchVisitCounts();
+    if (savedUser) {
+      fetchNewCounts(savedUser);
+    }
   }, []);
 
   // Separate apps into used (visited in last 30 days) and unused - keep original order
@@ -286,6 +312,7 @@ export default function Home() {
               <AppCard
                 {...app}
                 visitCount={visitCounts[app.title] || 0}
+                newCount={newCounts[app.title] || 0}
                 onVisit={() => handleVisit(app.title)}
               />
             </motion.div>
@@ -325,6 +352,7 @@ export default function Home() {
                   >
                     <AppCard
                       {...app}
+                      newCount={newCounts[app.title] || 0}
                       onVisit={() => handleVisit(app.title)}
                     />
                   </motion.div>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 interface GratitudeNote {
@@ -25,6 +26,7 @@ const CATEGORY_OPTIONS = [
 ];
 
 export default function Gratitude() {
+  useMarkAppViewed('gratitude');
   const [received, setReceived] = useState<GratitudeNote[]>([]);
   const [sent, setSent] = useState<GratitudeNote[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);

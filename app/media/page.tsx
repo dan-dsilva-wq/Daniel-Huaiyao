@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 interface MediaItem {
@@ -36,6 +37,7 @@ const STATUS_LABELS = {
 };
 
 export default function MediaPage() {
+  useMarkAppViewed('media');
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);

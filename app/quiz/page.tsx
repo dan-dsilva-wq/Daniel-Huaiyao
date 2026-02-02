@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TimedChallenge } from './components/TimedChallenge';
 
@@ -231,6 +232,7 @@ const questionSuggestions = {
 };
 
 export default function QuizPage() {
+  useMarkAppViewed('quiz');
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('answer');
   const [quizData, setQuizData] = useState<QuizData | null>(null);
