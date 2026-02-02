@@ -532,6 +532,13 @@ export default function MemoriesPage() {
                                 ))}
                               </div>
                             )}
+                            {/* Photo indicator */}
+                            {memory.photos && memory.photos.length > 0 && (
+                              <div className={`flex items-center gap-1 mt-2 text-xs text-pink-500 dark:text-pink-400 ${index % 2 === 1 ? 'md:justify-end' : ''}`}>
+                                <span>📷</span>
+                                <span>{memory.photos.length} photo{memory.photos.length > 1 ? 's' : ''}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </motion.div>
@@ -589,6 +596,24 @@ export default function MemoriesPage() {
                     ))}
                     {memory.tags.length > 3 && (
                       <span className="text-gray-400 text-xs">+{memory.tags.length - 3}</span>
+                    )}
+                  </div>
+                )}
+
+                {/* Photo thumbnail */}
+                {memory.photos && memory.photos.length > 0 && (
+                  <div className="mt-3 relative">
+                    <div className="aspect-video rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700">
+                      <img
+                        src={memory.photos[0].photo_url}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    {memory.photos.length > 1 && (
+                      <div className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/60 text-white text-xs rounded">
+                        +{memory.photos.length - 1} more
+                      </div>
                     )}
                   </div>
                 )}
@@ -832,6 +857,40 @@ export default function MemoriesPage() {
                   <p className="text-gray-700 dark:text-gray-300 mb-4 whitespace-pre-wrap">
                     {selectedMemory.description}
                   </p>
+                )}
+
+                {/* Photos */}
+                {selectedMemory.photos && selectedMemory.photos.length > 0 && (
+                  <div className="mb-4">
+                    <div className={`grid gap-2 ${
+                      selectedMemory.photos.length === 1
+                        ? 'grid-cols-1'
+                        : selectedMemory.photos.length === 2
+                          ? 'grid-cols-2'
+                          : 'grid-cols-2 sm:grid-cols-3'
+                    }`}>
+                      {selectedMemory.photos.map((photo) => (
+                        <a
+                          key={photo.id}
+                          href={photo.photo_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="relative aspect-square rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 hover:opacity-90 transition-opacity"
+                        >
+                          <img
+                            src={photo.photo_url}
+                            alt={photo.caption || 'Memory photo'}
+                            className="w-full h-full object-cover"
+                          />
+                          {photo.caption && (
+                            <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1 truncate">
+                              {photo.caption}
+                            </div>
+                          )}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 {/* Meta info */}
