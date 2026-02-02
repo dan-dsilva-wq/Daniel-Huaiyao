@@ -123,31 +123,41 @@ export default function StatsPage() {
     setCurrentUser(user);
   };
 
+  const [savingDate, setSavingDate] = useState(false);
+
   const handleSetFirstDate = async () => {
-    if (!firstDate) return;
+    if (!firstDate) {
+      alert('Please select a date first');
+      return;
+    }
+
+    setSavingDate(true);
 
     try {
       // Use upsert to handle both insert and update cases
-      const { error } = await supabase
+      const { error, data } = await supabase
         .from('relationship_stats')
         .upsert({
           id: 'main',
           first_date: firstDate
         }, {
           onConflict: 'id'
-        });
+        })
+        .select();
 
       if (error) {
-        console.error('Supabase error:', error);
-        alert(`Failed to save: ${error.message}`);
+        alert(`Database error: ${error.message}`);
+        setSavingDate(false);
         return;
       }
 
+      alert('Date saved successfully!');
       setShowSetDate(false);
+      setSavingDate(false);
       fetchData();
     } catch (error) {
-      console.error('Error setting first date:', error);
-      alert(`Failed to save date: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setSavingDate(false);
     }
   };
 
@@ -537,10 +547,10 @@ export default function StatsPage() {
                 </button>
                 <button
                   onClick={handleSetFirstDate}
-                  disabled={!firstDate}
+                  disabled={!firstDate || savingDate}
                   className="flex-1 px-4 py-2 bg-amber-500 text-white rounded-lg font-medium disabled:opacity-50 hover:bg-amber-600 transition-colors"
                 >
-                  Save
+                  {savingDate ? 'Saving...' : 'Save'}
                 </button>
               </div>
             </motion.div>
