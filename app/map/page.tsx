@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ComposableMap, Geographies, Geography, ZoomableGroup } from 'react-simple-maps';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import StatsPanel from './components/StatsPanel';
+import { PhotoGallery } from './components/PhotoGallery';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 interface Place {
@@ -138,6 +139,7 @@ export default function MapPage() {
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [clickedLocation, setClickedLocation] = useState<{ name: string; key: string; isState: boolean } | null>(null);
   const [showStats, setShowStats] = useState(false);
+  const [photoGalleryPlace, setPhotoGalleryPlace] = useState<{ id: string; name: string } | null>(null);
 
   // Get all places as a map for quick lookup
   const placesByLocation = useMemo(() => {
@@ -689,6 +691,18 @@ export default function MapPage() {
                         </button>
                       )}
 
+                      {place.status === 'visited' && (
+                        <button
+                          onClick={() => {
+                            setPhotoGalleryPlace({ id: place.id, name: clickedLocation.name });
+                            setClickedLocation(null);
+                          }}
+                          className="w-full py-3 bg-teal-500 text-white rounded-xl font-medium hover:bg-teal-600 transition-colors flex items-center justify-center gap-2"
+                        >
+                          <span>📷</span> View Photos
+                        </button>
+                      )}
+
                       <button
                         onClick={() => removePlace(place)}
                         className="w-full py-2 text-red-500 hover:text-red-700 transition-colors text-sm"
@@ -714,6 +728,18 @@ export default function MapPage() {
         <AnimatePresence>
           {showStats && (
             <StatsPanel regions={regions} onClose={() => setShowStats(false)} />
+          )}
+        </AnimatePresence>
+
+        {/* Photo Gallery */}
+        <AnimatePresence>
+          {photoGalleryPlace && currentUser && (
+            <PhotoGallery
+              placeId={photoGalleryPlace.id}
+              placeName={photoGalleryPlace.name}
+              currentUser={currentUser}
+              onClose={() => setPhotoGalleryPlace(null)}
+            />
           )}
         </AnimatePresence>
 
