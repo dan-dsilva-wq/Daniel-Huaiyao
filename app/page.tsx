@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ThemeToggle } from './components/ThemeToggle';
 
@@ -10,15 +11,66 @@ interface AppCardProps {
   href: string;
   gradient: string;
   badge?: string;
+  visitCount?: number;
+  onVisit?: () => void;
 }
 
-function AppCard({ title, description, icon, href, gradient, badge }: AppCardProps) {
+// Visit tracking utilities
+const VISIT_STORAGE_KEY = 'app_visits';
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+interface VisitRecord {
+  app: string;
+  timestamp: number;
+}
+
+function getVisits(): VisitRecord[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const stored = localStorage.getItem(VISIT_STORAGE_KEY);
+    if (!stored) return [];
+    const visits: VisitRecord[] = JSON.parse(stored);
+    // Filter to last 30 days
+    const cutoff = Date.now() - THIRTY_DAYS_MS;
+    return visits.filter(v => v.timestamp > cutoff);
+  } catch {
+    return [];
+  }
+}
+
+function recordVisit(appTitle: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const visits = getVisits();
+    visits.push({ app: appTitle, timestamp: Date.now() });
+    localStorage.setItem(VISIT_STORAGE_KEY, JSON.stringify(visits));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function getVisitCounts(): Record<string, number> {
+  const visits = getVisits();
+  const counts: Record<string, number> = {};
+  visits.forEach(v => {
+    counts[v.app] = (counts[v.app] || 0) + 1;
+  });
+  return counts;
+}
+
+function AppCard({ title, description, icon, href, gradient, badge, visitCount, onVisit }: AppCardProps) {
   const isExternal = href.startsWith('http');
+
+  const handleClick = () => {
+    onVisit?.();
+  };
+
   return (
     <motion.a
       href={href}
       target={isExternal ? '_blank' : undefined}
       rel={isExternal ? 'noopener noreferrer' : undefined}
+      onClick={handleClick}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ scale: 1.02, y: -4 }}
@@ -31,6 +83,12 @@ function AppCard({ title, description, icon, href, gradient, badge }: AppCardPro
         active:scale-[0.98] touch-manipulation
       `}
     >
+      {/* Visit count badge */}
+      {visitCount !== undefined && visitCount > 0 && (
+        <div className="absolute top-3 left-3 px-2 py-1 bg-black/20 backdrop-blur-sm rounded-full text-xs font-medium text-white/70">
+          {visitCount}×
+        </div>
+      )}
       {badge && (
         <div className="absolute top-3 right-3 px-2 py-1 bg-white/20 backdrop-blur-sm rounded-full text-xs font-medium text-white">
           {badge}
@@ -60,7 +118,7 @@ function AppCard({ title, description, icon, href, gradient, badge }: AppCardPro
   );
 }
 
-const apps: AppCardProps[] = [
+const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
   {
     title: 'Story Book',
     description: 'Writing a story together, one sentence at a time',
@@ -138,20 +196,43 @@ const apps: AppCardProps[] = [
     href: '/stats',
     gradient: 'from-amber-500 to-orange-600',
   },
-];
-
-const wipApps: AppCardProps[] = [
   {
     title: 'Our Map',
     description: 'Places we want to go and have been',
     icon: '🗺️',
     href: '/map',
     gradient: 'from-teal-500 to-cyan-500',
-    badge: 'WIP',
   },
 ];
 
 export default function Home() {
+  const [visitCounts, setVisitCounts] = useState<Record<string, number>>({});
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    setVisitCounts(getVisitCounts());
+  }, []);
+
+  // Sort apps by visit count (descending), keeping original order for ties
+  const sortedApps = useMemo(() => {
+    if (!mounted) return apps;
+    return [...apps].sort((a, b) => {
+      const countA = visitCounts[a.title] || 0;
+      const countB = visitCounts[b.title] || 0;
+      return countB - countA;
+    });
+  }, [visitCounts, mounted]);
+
+  const handleVisit = (appTitle: string) => {
+    recordVisit(appTitle);
+    // Update counts immediately for next render
+    setVisitCounts(getVisitCounts());
+  };
+
+  // Check if any app has been visited
+  const hasAnyVisits = Object.values(visitCounts).some(count => count > 0);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-slate-900 dark:to-zinc-900">
       {/* Theme Toggle */}
@@ -200,6 +281,11 @@ export default function Home() {
           <p className="text-lg sm:text-xl text-gray-500 dark:text-gray-400 max-w-md mx-auto">
             Some fun stuff we made
           </p>
+          {hasAnyVisits && (
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+              Sorted by visits (last 30 days)
+            </p>
+          )}
         </motion.div>
 
         {/* Main Apps */}
@@ -209,42 +295,22 @@ export default function Home() {
           transition={{ delay: 0.3 }}
           className="grid grid-cols-1 sm:grid-cols-2 gap-6"
         >
-          {apps.map((app, index) => (
+          {sortedApps.map((app, index) => (
             <motion.div
               key={app.title}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 + index * 0.1 }}
+              transition={{ delay: 0.4 + index * 0.05 }}
+              layout
             >
-              <AppCard {...app} />
+              <AppCard
+                {...app}
+                visitCount={visitCounts[app.title] || 0}
+                onVisit={() => handleVisit(app.title)}
+              />
             </motion.div>
           ))}
         </motion.div>
-
-        {/* Work in Progress Section */}
-        {wipApps.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.6 }}
-            className="mt-12"
-          >
-            <h2 className="text-lg font-medium text-gray-400 dark:text-gray-500 mb-4 text-center">Work in Progress</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {wipApps.map((app, index) => (
-                <motion.div
-                  key={app.title}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.7 + index * 0.1 }}
-                  className="opacity-80 hover:opacity-100 transition-opacity"
-                >
-                  <AppCard {...app} />
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
-        )}
 
         {/* Footer */}
         <motion.footer
