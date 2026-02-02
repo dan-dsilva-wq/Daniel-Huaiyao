@@ -70,7 +70,7 @@ export default function ChatBubble() {
 
     if (!isSupabaseConfigured) return;
 
-    // Subscribe to new messages
+    // Subscribe to new messages and updates (for read receipts)
     const channel = supabase
       .channel('chat_messages')
       .on('postgres_changes',
@@ -86,6 +86,16 @@ export default function ChatBubble() {
               setUnreadCount(prev => prev + 1);
             }
           }
+        }
+      )
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'chat_messages' },
+        (payload) => {
+          // Update message when read status changes
+          const updatedMsg = payload.new as Message;
+          setMessages(prev => prev.map(msg =>
+            msg.id === updatedMsg.id ? updatedMsg : msg
+          ));
         }
       )
       .subscribe();
@@ -247,9 +257,28 @@ export default function ChatBubble() {
                         }`}
                       >
                         <p className="text-sm break-words">{msg.message}</p>
-                        <p className={`text-xs mt-1 ${isMe ? 'text-white/60' : 'text-gray-400'}`}>
-                          {formatTime(msg.created_at)}
-                        </p>
+                        <div className={`flex items-center gap-1 mt-1 ${isMe ? 'justify-end' : ''}`}>
+                          <span className={`text-xs ${isMe ? 'text-white/60' : 'text-gray-400'}`}>
+                            {formatTime(msg.created_at)}
+                          </span>
+                          {/* Read/Delivered status - only show on own messages */}
+                          {isMe && (
+                            <span className={`text-xs ${msg.is_read ? 'text-blue-300' : 'text-white/40'}`}>
+                              {msg.is_read ? (
+                                // Double tick for read
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M2 12l5 5L18 6" />
+                                  <path d="M7 12l5 5L23 6" />
+                                </svg>
+                              ) : (
+                                // Single tick for delivered
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M5 12l5 5L20 7" />
+                                </svg>
+                              )}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
