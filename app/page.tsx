@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ThemeToggle } from './components/ThemeToggle';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
 interface AppCardProps {
   title: string;
@@ -13,49 +14,6 @@ interface AppCardProps {
   badge?: string;
   visitCount?: number;
   onVisit?: () => void;
-}
-
-// Visit tracking utilities
-const VISIT_STORAGE_KEY = 'app_visits';
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-
-interface VisitRecord {
-  app: string;
-  timestamp: number;
-}
-
-function getVisits(): VisitRecord[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const stored = localStorage.getItem(VISIT_STORAGE_KEY);
-    if (!stored) return [];
-    const visits: VisitRecord[] = JSON.parse(stored);
-    // Filter to last 30 days
-    const cutoff = Date.now() - THIRTY_DAYS_MS;
-    return visits.filter(v => v.timestamp > cutoff);
-  } catch {
-    return [];
-  }
-}
-
-function recordVisit(appTitle: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    const visits = getVisits();
-    visits.push({ app: appTitle, timestamp: Date.now() });
-    localStorage.setItem(VISIT_STORAGE_KEY, JSON.stringify(visits));
-  } catch {
-    // Ignore storage errors
-  }
-}
-
-function getVisitCounts(): Record<string, number> {
-  const visits = getVisits();
-  const counts: Record<string, number> = {};
-  visits.forEach(v => {
-    counts[v.app] = (counts[v.app] || 0) + 1;
-  });
-  return counts;
 }
 
 function AppCard({ title, description, icon, href, gradient, badge, visitCount, onVisit }: AppCardProps) {
@@ -203,10 +161,44 @@ export default function Home() {
   const [visitCounts, setVisitCounts] = useState<Record<string, number>>({});
   const [mounted, setMounted] = useState(false);
   const [showUnused, setShowUnused] = useState(false);
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+
+  // Fetch visit counts from Supabase
+  const fetchVisitCounts = async () => {
+    if (!isSupabaseConfigured) return;
+    try {
+      const { data, error } = await supabase.rpc('get_app_visit_counts');
+      if (!error && data) {
+        setVisitCounts(data as Record<string, number>);
+      }
+    } catch (err) {
+      console.error('Error fetching visit counts:', err);
+    }
+  };
+
+  // Record a visit to Supabase
+  const recordVisit = async (appTitle: string) => {
+    if (!isSupabaseConfigured) return;
+    try {
+      await supabase.rpc('record_app_visit', {
+        p_app_name: appTitle,
+        p_visited_by: currentUser || null,
+      });
+      // Optimistically update local count
+      setVisitCounts(prev => ({
+        ...prev,
+        [appTitle]: (prev[appTitle] || 0) + 1,
+      }));
+    } catch (err) {
+      console.error('Error recording visit:', err);
+    }
+  };
 
   useEffect(() => {
     setMounted(true);
-    setVisitCounts(getVisitCounts());
+    const savedUser = localStorage.getItem('currentUser');
+    setCurrentUser(savedUser);
+    fetchVisitCounts();
   }, []);
 
   // Separate apps into used (visited in last 30 days) and unused
@@ -236,8 +228,6 @@ export default function Home() {
 
   const handleVisit = (appTitle: string) => {
     recordVisit(appTitle);
-    // Update counts immediately for next render
-    setVisitCounts(getVisitCounts());
   };
 
   // Check if any app has been visited
