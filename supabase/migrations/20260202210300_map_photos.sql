@@ -23,22 +23,24 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- Storage policy to allow public read access
-CREATE POLICY IF NOT EXISTS "Allow public read map photos"
+-- Storage policies (drop and recreate to avoid conflicts)
+DROP POLICY IF EXISTS "Allow public read map photos" ON storage.objects;
+CREATE POLICY "Allow public read map photos"
 ON storage.objects FOR SELECT
 USING (bucket_id = 'map-photos');
 
--- Storage policy to allow authenticated uploads
-CREATE POLICY IF NOT EXISTS "Allow map photo uploads"
+DROP POLICY IF EXISTS "Allow map photo uploads" ON storage.objects;
+CREATE POLICY "Allow map photo uploads"
 ON storage.objects FOR INSERT
 WITH CHECK (bucket_id = 'map-photos');
 
--- Storage policy to allow deletes
-CREATE POLICY IF NOT EXISTS "Allow map photo deletes"
+DROP POLICY IF EXISTS "Allow map photo deletes" ON storage.objects;
+CREATE POLICY "Allow map photo deletes"
 ON storage.objects FOR DELETE
 USING (bucket_id = 'map-photos');
 
 -- Function to get photos for a place
+DROP FUNCTION IF EXISTS get_place_photos(UUID);
 CREATE OR REPLACE FUNCTION get_place_photos(p_place_id UUID)
 RETURNS TABLE(
   id UUID,
@@ -60,6 +62,7 @@ END;
 $$;
 
 -- Function to add a photo
+DROP FUNCTION IF EXISTS add_place_photo(UUID, TEXT, TEXT, DATE, TEXT);
 CREATE OR REPLACE FUNCTION add_place_photo(
   p_place_id UUID,
   p_storage_path TEXT,
@@ -82,6 +85,7 @@ END;
 $$;
 
 -- Function to delete a photo
+DROP FUNCTION IF EXISTS delete_place_photo(UUID);
 CREATE OR REPLACE FUNCTION delete_place_photo(p_photo_id UUID)
 RETURNS BOOLEAN
 LANGUAGE plpgsql

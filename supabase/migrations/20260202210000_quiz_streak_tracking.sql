@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS quiz_player_stats (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Add missing columns if table already exists
+ALTER TABLE quiz_player_stats ADD COLUMN IF NOT EXISTS total_correct INTEGER DEFAULT 0;
+ALTER TABLE quiz_player_stats ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE quiz_player_stats ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
 -- Initialize both players
 INSERT INTO quiz_player_stats (player, current_streak, longest_streak, total_questions_answered, total_correct)
 VALUES
