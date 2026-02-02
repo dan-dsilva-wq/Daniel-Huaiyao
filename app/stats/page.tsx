@@ -127,30 +127,27 @@ export default function StatsPage() {
     if (!firstDate) return;
 
     try {
-      // Try direct update instead of RPC to avoid migration issues
+      // Use upsert to handle both insert and update cases
       const { error } = await supabase
         .from('relationship_stats')
-        .update({ first_date: firstDate })
-        .eq('id', 'main');
+        .upsert({
+          id: 'main',
+          first_date: firstDate
+        }, {
+          onConflict: 'id'
+        });
 
       if (error) {
-        // If row doesn't exist, try to insert it
-        if (error.code === 'PGRST116' || error.message.includes('0 rows')) {
-          const { error: insertError } = await supabase
-            .from('relationship_stats')
-            .insert({ id: 'main', first_date: firstDate });
-
-          if (insertError) throw insertError;
-        } else {
-          throw error;
-        }
+        console.error('Supabase error:', error);
+        alert(`Failed to save: ${error.message}`);
+        return;
       }
 
       setShowSetDate(false);
       fetchData();
     } catch (error) {
       console.error('Error setting first date:', error);
-      alert('Failed to save date. Please try again.');
+      alert(`Failed to save date: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
