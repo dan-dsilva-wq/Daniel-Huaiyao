@@ -158,6 +158,7 @@ export default function MapPage() {
   const [photoGalleryPlace, setPhotoGalleryPlace] = useState<{ id: string; name: string } | null>(null);
   const [memoryLocations, setMemoryLocations] = useState<MemoryLocation[]>([]);
   const [showMemories, setShowMemories] = useState(true);
+  const [showUSStates, setShowUSStates] = useState(false);
 
   // Get all places as a map for quick lookup
   const placesByLocation = useMemo(() => {
@@ -456,9 +457,6 @@ export default function MapPage() {
       </div>
     );
   }
-
-  // Option to show US states (user toggles this)
-  const [showUSStates, setShowUSStates] = useState(false);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
