@@ -50,10 +50,10 @@ export default function Gratitude() {
       });
       if (error) throw error;
 
-      if (data) {
-        setReceived(data.received || []);
-        setSent(data.sent || []);
-        setUnreadCount(data.unread_count || 0);
+      if (data && data.length > 0) {
+        setReceived(data[0].received || []);
+        setSent(data[0].sent || []);
+        setUnreadCount(data[0].unread_count || 0);
       }
     } catch (error) {
       console.error('Error fetching notes:', error);
