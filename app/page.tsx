@@ -56,55 +56,15 @@ function AppCard({ title, icon, href, gradient, onVisit }: AppCardProps) {
   );
 }
 
+// Apps in logical order (not sorted by usage)
 const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
-  {
-    title: 'Story Book',
-    description: 'Writing a story together, one sentence at a time',
-    icon: '📖',
-    href: 'https://daniel-huaiyao-book.vercel.app',
-    gradient: 'from-amber-600 to-orange-700',
-  },
-  {
-    title: 'Date Ideas',
-    description: 'Track our bucket list of things to do',
-    icon: '✨',
-    href: '/dates',
-    gradient: 'from-purple-500 to-pink-500',
-  },
-  {
-    title: 'Hive',
-    description: 'The buzzing strategy board game',
-    icon: '🐝',
-    href: 'https://daniel-huaiyao-hive.vercel.app',
-    gradient: 'from-yellow-500 to-amber-600',
-  },
+  // Daily connection
   {
     title: 'Quiz Time',
     description: 'How well do you know each other?',
     icon: '🧠',
     href: '/quiz',
     gradient: 'from-indigo-500 to-purple-600',
-  },
-  {
-    title: 'Mystery Files',
-    description: 'Solve mysteries together',
-    icon: '🔍',
-    href: '/mystery',
-    gradient: 'from-purple-900 to-slate-900',
-  },
-  {
-    title: 'Countdown',
-    description: 'Track important dates and anniversaries',
-    icon: '⏰',
-    href: '/countdown',
-    gradient: 'from-amber-500 to-rose-500',
-  },
-  {
-    title: 'Gratitude Wall',
-    description: 'Leave little notes of appreciation',
-    icon: '💝',
-    href: '/gratitude',
-    gradient: 'from-rose-400 to-pink-500',
   },
   {
     title: 'Daily Prompts',
@@ -114,11 +74,26 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     gradient: 'from-cyan-500 to-teal-500',
   },
   {
-    title: 'Media Tracker',
-    description: 'Movies, shows, books to enjoy together',
-    icon: '🎬',
-    href: '/media',
-    gradient: 'from-violet-500 to-fuchsia-500',
+    title: 'Gratitude Wall',
+    description: 'Leave little notes of appreciation',
+    icon: '💝',
+    href: '/gratitude',
+    gradient: 'from-rose-400 to-pink-500',
+  },
+  // Planning & tracking
+  {
+    title: 'Date Ideas',
+    description: 'Track our bucket list of things to do',
+    icon: '✨',
+    href: '/dates',
+    gradient: 'from-purple-500 to-pink-500',
+  },
+  {
+    title: 'Countdown',
+    description: 'Track important dates and anniversaries',
+    icon: '⏰',
+    href: '/countdown',
+    gradient: 'from-amber-500 to-rose-500',
   },
   {
     title: 'Memories',
@@ -128,18 +103,48 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     gradient: 'from-pink-500 to-rose-600',
   },
   {
-    title: 'Stats & Achievements',
-    description: 'Track your progress and unlock badges',
-    icon: '🏆',
-    href: '/stats',
-    gradient: 'from-amber-500 to-orange-600',
-  },
-  {
     title: 'Our Map',
     description: 'Places we want to go and have been',
     icon: '🗺️',
     href: '/map',
     gradient: 'from-teal-500 to-cyan-500',
+  },
+  // Entertainment
+  {
+    title: 'Media Tracker',
+    description: 'Movies, shows, books to enjoy together',
+    icon: '🎬',
+    href: '/media',
+    gradient: 'from-violet-500 to-fuchsia-500',
+  },
+  {
+    title: 'Story Book',
+    description: 'Writing a story together, one sentence at a time',
+    icon: '📖',
+    href: 'https://daniel-huaiyao-book.vercel.app',
+    gradient: 'from-amber-600 to-orange-700',
+  },
+  {
+    title: 'Mystery Files',
+    description: 'Solve mysteries together',
+    icon: '🔍',
+    href: '/mystery',
+    gradient: 'from-purple-900 to-slate-900',
+  },
+  {
+    title: 'Hive',
+    description: 'The buzzing strategy board game',
+    icon: '🐝',
+    href: 'https://daniel-huaiyao-hive.vercel.app',
+    gradient: 'from-yellow-500 to-amber-600',
+  },
+  // Stats
+  {
+    title: 'Stats',
+    description: 'Track your progress and unlock badges',
+    icon: '🏆',
+    href: '/stats',
+    gradient: 'from-amber-500 to-orange-600',
   },
 ];
 
@@ -187,26 +192,20 @@ export default function Home() {
     fetchVisitCounts();
   }, []);
 
-  // Separate apps into used (visited in last 30 days) and unused
+  // Separate apps into used (visited in last 30 days) and unused - keep original order
   const { usedApps, unusedApps } = useMemo(() => {
     if (!mounted) return { usedApps: apps, unusedApps: [] };
 
     const used: typeof apps = [];
     const unused: typeof apps = [];
 
+    // Maintain the original logical order from the apps array
     apps.forEach(app => {
       if ((visitCounts[app.title] || 0) > 0) {
         used.push(app);
       } else {
         unused.push(app);
       }
-    });
-
-    // Sort used apps by visit count (descending)
-    used.sort((a, b) => {
-      const countA = visitCounts[a.title] || 0;
-      const countB = visitCounts[b.title] || 0;
-      return countB - countA;
     });
 
     return { usedApps: used, unusedApps: unused };
