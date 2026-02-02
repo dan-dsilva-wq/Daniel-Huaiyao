@@ -182,10 +182,38 @@ export default function MapPage() {
     }
 
     try {
-      // Fetch map data
-      const { data, error } = await supabase.rpc('get_map_data');
-      if (error) throw error;
-      if (data) setRegions(data as Region[]);
+      // Try RPC first, fall back to direct query
+      let mapData: Region[] | null = null;
+
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_map_data');
+      if (!rpcError && rpcData) {
+        mapData = rpcData as Region[];
+      } else {
+        console.warn('RPC failed, falling back to direct query:', rpcError);
+        // Fallback: fetch directly from tables
+        const { data: regionsData } = await supabase
+          .from('map_regions')
+          .select('id, code, display_name, color_from, color_to')
+          .order('display_name');
+
+        if (regionsData) {
+          const regionsWithPlaces = await Promise.all(
+            regionsData.map(async (region) => {
+              const { data: places } = await supabase
+                .from('map_places')
+                .select('*')
+                .eq('region_id', region.id);
+              return {
+                ...region,
+                places: (places || []) as Place[],
+              };
+            })
+          );
+          mapData = regionsWithPlaces as Region[];
+        }
+      }
+
+      if (mapData) setRegions(mapData);
 
       // Fetch memories with locations
       const { data: memories, error: memoriesError } = await supabase
