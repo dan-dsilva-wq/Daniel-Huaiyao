@@ -19,6 +19,20 @@ interface Place {
   notes: string | null;
   visit_date: string | null;
   created_at: string;
+  // Dual status fields
+  daniel_status: 'wishlist' | 'visited' | null;
+  daniel_visit_date: string | null;
+  huaiyao_status: 'wishlist' | 'visited' | null;
+  huaiyao_visit_date: string | null;
+}
+
+interface MemoryLocation {
+  id: string;
+  title: string;
+  location_name: string;
+  location_lat: number;
+  location_lng: number;
+  memory_date: string;
 }
 
 interface Region {
@@ -194,9 +208,10 @@ export default function MapPage() {
     }
   };
 
-  const addPlace = async (name: string, locationKey: string, isState: boolean, status: 'wishlist' | 'visited') => {
+  const addPlace = async (name: string, locationKey: string, isState: boolean, status: 'wishlist' | 'visited', player?: 'daniel' | 'huaiyao') => {
     const regionCode = isState ? 'north-america' : COUNTRY_TO_REGION[name];
     const region = regions.find(r => r.code === regionCode);
+    const addedBy = player || currentUser;
 
     if (!region) {
       alert(`Could not find region for ${name}. Make sure you've run the SQL schema in Supabase.`);
@@ -211,7 +226,7 @@ export default function MapPage() {
       p_country: country,
       p_location_key: locationKey,
       p_status: status,
-      p_added_by: currentUser,
+      p_added_by: addedBy,
       p_notes: null,
     });
 
@@ -223,12 +238,28 @@ export default function MapPage() {
 
     sendNotification(status === 'visited' ? 'place_visited' : 'place_added', name);
     fetchData();
-    setClickedLocation(null);
+  };
+
+  const clearPlaceStatus = async (placeId: string | undefined, player: 'daniel' | 'huaiyao') => {
+    if (!placeId) return;
+
+    const { error } = await supabase.rpc('clear_place_status', {
+      p_place_id: placeId,
+      p_player: player,
+    });
+
+    if (error) {
+      console.error('Error clearing status:', error);
+      return;
+    }
+
+    fetchData();
   };
 
   const markAsVisited = async (place: Place) => {
     const { error } = await supabase.rpc('toggle_map_place_status', {
       p_place_id: place.id,
+      p_player: currentUser,
     });
 
     if (error) {
@@ -266,36 +297,85 @@ export default function MapPage() {
     setClickedLocation({ name, key: locationKey, isState });
   };
 
-  const getLocationInfo = (locationKey: string, name: string): { status: 'none' | 'wishlist' | 'visited'; owner: 'daniel' | 'huaiyao' | null } => {
-    const place = placesByLocation.get(locationKey) || placesByLocation.get(name);
-    if (!place) return { status: 'none', owner: null };
-    return { status: place.status, owner: place.added_by };
-  };
-
   const getPlaceForLocation = (locationKey: string, name: string): Place | undefined => {
     return placesByLocation.get(locationKey) || placesByLocation.get(name);
   };
 
-  // Color function based on owner and status
-  const getLocationColor = (locationKey: string, name: string, regionCode: string): string => {
-    const { status, owner } = getLocationInfo(locationKey, name);
-    const regionColors = REGION_COLORS[regionCode] || DEFAULT_COLOR;
-
-    if (status === 'none') return regionColors.default;
-
-    // Daniel = blue shades, Huaiyao = rose shades
-    if (owner === 'daniel') {
-      return status === 'visited' ? '#1d4ed8' : '#93c5fd'; // blue-700 : blue-300
-    } else if (owner === 'huaiyao') {
-      return status === 'visited' ? '#be123c' : '#fda4af'; // rose-700 : rose-300
+  // Dual status helper - returns status summary for both users
+  const getDualStatus = (place: Place | undefined): {
+    danielStatus: 'wishlist' | 'visited' | null;
+    huaiyaoStatus: 'wishlist' | 'visited' | null;
+    bothWantToGo: boolean;
+    bothVisited: boolean;
+    anyMarked: boolean;
+  } => {
+    if (!place) {
+      return { danielStatus: null, huaiyaoStatus: null, bothWantToGo: false, bothVisited: false, anyMarked: false };
     }
-
-    // Fallback to region colors
-    return status === 'visited' ? regionColors.visited : regionColors.wishlist;
+    const danielStatus = place.daniel_status || (place.added_by === 'daniel' ? place.status : null);
+    const huaiyaoStatus = place.huaiyao_status || (place.added_by === 'huaiyao' ? place.status : null);
+    return {
+      danielStatus,
+      huaiyaoStatus,
+      bothWantToGo: danielStatus === 'wishlist' && huaiyaoStatus === 'wishlist',
+      bothVisited: danielStatus === 'visited' && huaiyaoStatus === 'visited',
+      anyMarked: danielStatus !== null || huaiyaoStatus !== null,
+    };
   };
 
-  const totalWishlist = regions.reduce((sum, r) => sum + r.places.filter(p => p.status === 'wishlist').length, 0);
-  const totalVisited = regions.reduce((sum, r) => sum + r.places.filter(p => p.status === 'visited').length, 0);
+  // Color function based on BOTH users' statuses
+  const getLocationColor = (locationKey: string, name: string, regionCode: string): string => {
+    const place = getPlaceForLocation(locationKey, name);
+    const { danielStatus, huaiyaoStatus, bothWantToGo, bothVisited } = getDualStatus(place);
+    const regionColors = REGION_COLORS[regionCode] || DEFAULT_COLOR;
+
+    if (!danielStatus && !huaiyaoStatus) return regionColors.default;
+
+    // BOTH want to go - gold (this is what we want to highlight!)
+    if (bothWantToGo) return '#f59e0b'; // amber-500
+
+    // BOTH have visited - special green
+    if (bothVisited) return '#10b981'; // emerald-500
+
+    // Mixed: one visited, one wants to go - teal
+    if ((danielStatus === 'visited' && huaiyaoStatus === 'wishlist') ||
+        (danielStatus === 'wishlist' && huaiyaoStatus === 'visited')) {
+      return '#14b8a6'; // teal-500
+    }
+
+    // Only one person marked it
+    if (danielStatus && !huaiyaoStatus) {
+      return danielStatus === 'visited' ? '#1d4ed8' : '#93c5fd'; // blue-700 : blue-300
+    }
+    if (huaiyaoStatus && !danielStatus) {
+      return huaiyaoStatus === 'visited' ? '#be123c' : '#fda4af'; // rose-700 : rose-300
+    }
+
+    // Fallback
+    return regionColors.default;
+  };
+
+  // Count places where BOTH want to go (gold), and total unique marked places
+  const totalBothWantToGo = regions.reduce((sum, r) =>
+    sum + r.places.filter(p => {
+      const ds = p.daniel_status || (p.added_by === 'daniel' ? p.status : null);
+      const hs = p.huaiyao_status || (p.added_by === 'huaiyao' ? p.status : null);
+      return ds === 'wishlist' && hs === 'wishlist';
+    }).length, 0);
+
+  const totalWishlist = regions.reduce((sum, r) =>
+    sum + r.places.filter(p => {
+      const ds = p.daniel_status || (p.added_by === 'daniel' ? p.status : null);
+      const hs = p.huaiyao_status || (p.added_by === 'huaiyao' ? p.status : null);
+      return ds === 'wishlist' || hs === 'wishlist';
+    }).length, 0);
+
+  const totalVisited = regions.reduce((sum, r) =>
+    sum + r.places.filter(p => {
+      const ds = p.daniel_status || (p.added_by === 'daniel' ? p.status : null);
+      const hs = p.huaiyao_status || (p.added_by === 'huaiyao' ? p.status : null);
+      return ds === 'visited' || hs === 'visited';
+    }).length, 0);
 
   // User selection screen
   if (!currentUser) {
@@ -335,8 +415,8 @@ export default function MapPage() {
     );
   }
 
-  // Show US states when zoomed into North America
-  const showUSStates = zoomedRegion === 'north-america';
+  // Option to show US states (user toggles this)
+  const [showUSStates, setShowUSStates] = useState(false);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
@@ -358,7 +438,30 @@ export default function MapPage() {
             <ThemeToggle />
           </div>
           <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 dark:text-white mb-2">Our Travel Map</h1>
-          <p className="text-gray-500 dark:text-gray-400">{totalWishlist} wishlist · {totalVisited} visited</p>
+          <p className="text-gray-500 dark:text-gray-400">
+            {totalBothWantToGo > 0 && <span className="text-amber-500 font-medium">{totalBothWantToGo} both want</span>}
+            {totalBothWantToGo > 0 && ' · '}
+            {totalWishlist} wishlist · {totalVisited} visited
+          </p>
+          {/* Color legend */}
+          <div className="flex flex-wrap justify-center gap-3 mt-3 text-xs">
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+              <span className="text-gray-500 dark:text-gray-400">Both want</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+              <span className="text-gray-500 dark:text-gray-400">Both visited</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full bg-blue-400"></div>
+              <span className="text-gray-500 dark:text-gray-400">Daniel</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 rounded-full bg-rose-400"></div>
+              <span className="text-gray-500 dark:text-gray-400">Huaiyao</span>
+            </div>
+          </div>
           <div className="flex justify-center gap-3 mt-3">
             <button
               onClick={() => setShowStats(true)}
@@ -375,19 +478,40 @@ export default function MapPage() {
           </div>
         </motion.div>
 
-        {/* Back button when zoomed */}
+        {/* Back button and controls when zoomed */}
         {zoomedRegion && (
-          <motion.button
+          <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            onClick={() => setZoomedRegion(null)}
-            className="mb-4 px-4 py-2 bg-white/80 dark:bg-gray-800/80 backdrop-blur rounded-lg shadow-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors flex items-center gap-2"
+            className="mb-4 flex flex-wrap items-center gap-2"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            Back to World Map
-          </motion.button>
+            <button
+              onClick={() => {
+                setZoomedRegion(null);
+                setShowUSStates(false);
+              }}
+              className="px-4 py-2 bg-white/80 dark:bg-gray-800/80 backdrop-blur rounded-lg shadow-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              Back to World
+            </button>
+
+            {/* US States toggle - only show in North America */}
+            {zoomedRegion === 'north-america' && (
+              <button
+                onClick={() => setShowUSStates(!showUSStates)}
+                className={`px-4 py-2 rounded-lg shadow-sm transition-colors flex items-center gap-2 ${
+                  showUSStates
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-white/80 dark:bg-gray-800/80 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white'
+                }`}
+              >
+                🇺🇸 {showUSStates ? 'Show Countries' : 'Show US States'}
+              </button>
+            )}
+          </motion.div>
         )}
 
         {/* Map Container */}
@@ -599,7 +723,7 @@ export default function MapPage() {
           </p>
         </motion.div>
 
-        {/* Location Action Modal */}
+        {/* Location Action Modal - Dual Status */}
         <AnimatePresence>
           {clickedLocation && (
             <motion.div
@@ -616,92 +740,124 @@ export default function MapPage() {
                 className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 w-full max-w-sm"
                 onClick={(e) => e.stopPropagation()}
               >
-                <h3 className="text-xl font-serif font-bold text-gray-800 dark:text-white mb-2">
+                <h3 className="text-xl font-serif font-bold text-gray-800 dark:text-white mb-1">
                   {clickedLocation.name}
                 </h3>
                 {clickedLocation.isState && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">United States</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">United States</p>
                 )}
 
                 {(() => {
                   const place = getPlaceForLocation(clickedLocation.key, clickedLocation.name);
+                  const { danielStatus, huaiyaoStatus, bothWantToGo, bothVisited } = getDualStatus(place);
 
-                  if (!place) {
-                    return (
-                      <div className="space-y-3">
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Add to wishlist:</p>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'wishlist')}
-                            className="flex-1 py-3 bg-blue-500 text-white rounded-xl font-medium hover:bg-blue-600 transition-colors"
-                          >
-                            Daniel
-                          </button>
-                          <button
-                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'wishlist')}
-                            className="flex-1 py-3 bg-rose-500 text-white rounded-xl font-medium hover:bg-rose-600 transition-colors"
-                          >
-                            Huaiyao
-                          </button>
-                        </div>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2 mt-4">Or mark as visited:</p>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'visited')}
-                            className="flex-1 py-3 bg-blue-700 text-white rounded-xl font-medium hover:bg-blue-800 transition-colors"
-                          >
-                            Daniel
-                          </button>
-                          <button
-                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'visited')}
-                            className="flex-1 py-3 bg-rose-700 text-white rounded-xl font-medium hover:bg-rose-800 transition-colors"
-                          >
-                            Huaiyao
-                          </button>
-                        </div>
-                        <button
-                          onClick={() => setClickedLocation(null)}
-                          className="w-full py-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors mt-2"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    );
-                  }
-
-                  const isOwner = place.added_by === currentUser;
-                  const ownerName = place.added_by === 'daniel' ? 'Daniel' : 'Huaiyao';
-                  const ownerColor = place.added_by === 'daniel' ? 'blue' : 'rose';
+                  // Show special banner if both want to go
+                  const showBanner = bothWantToGo || bothVisited;
 
                   return (
-                    <div className="space-y-3">
-                      <div className={`text-sm px-3 py-2 rounded-lg ${
-                        place.added_by === 'daniel'
-                          ? (place.status === 'visited' ? 'bg-blue-200 text-blue-800' : 'bg-blue-100 text-blue-700')
-                          : (place.status === 'visited' ? 'bg-rose-200 text-rose-800' : 'bg-rose-100 text-rose-700')
-                      }`}>
-                        <span className="font-medium">{ownerName}'s {place.status === 'visited' ? 'visited' : 'wishlist'}</span>
+                    <div className="space-y-4">
+                      {/* Special banner for both */}
+                      {showBanner && (
+                        <div className={`text-center py-2 px-3 rounded-lg ${
+                          bothWantToGo ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' :
+                          'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                        }`}>
+                          {bothWantToGo ? '✨ You both want to visit!' : '🎉 You\'ve both been here!'}
+                        </div>
+                      )}
+
+                      {/* Daniel's status */}
+                      <div className="border border-blue-200 dark:border-blue-800 rounded-xl p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium text-blue-700 dark:text-blue-300">Daniel</span>
+                          {danielStatus && (
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              danielStatus === 'visited' ? 'bg-blue-700 text-white' : 'bg-blue-200 text-blue-700'
+                            }`}>
+                              {danielStatus === 'visited' ? '✓ Visited' : '★ Wishlist'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'wishlist', 'daniel')}
+                            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                              danielStatus === 'wishlist'
+                                ? 'bg-blue-500 text-white'
+                                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
+                            }`}
+                          >
+                            Wishlist
+                          </button>
+                          <button
+                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'visited', 'daniel')}
+                            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                              danielStatus === 'visited'
+                                ? 'bg-blue-700 text-white'
+                                : 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
+                            }`}
+                          >
+                            Visited
+                          </button>
+                          {danielStatus && (
+                            <button
+                              onClick={() => clearPlaceStatus(place?.id, 'daniel')}
+                              className="px-2 py-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                              title="Clear"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
                       </div>
 
-                      {place.status === 'wishlist' && (
-                        <button
-                          onClick={() => markAsVisited(place)}
-                          className={`w-full py-3 ${place.added_by === 'daniel' ? 'bg-blue-700 hover:bg-blue-800' : 'bg-rose-700 hover:bg-rose-800'} text-white rounded-xl font-medium transition-colors`}
-                        >
-                          Mark as Visited
-                        </button>
-                      )}
+                      {/* Huaiyao's status */}
+                      <div className="border border-rose-200 dark:border-rose-800 rounded-xl p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium text-rose-700 dark:text-rose-300">Huaiyao</span>
+                          {huaiyaoStatus && (
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              huaiyaoStatus === 'visited' ? 'bg-rose-700 text-white' : 'bg-rose-200 text-rose-700'
+                            }`}>
+                              {huaiyaoStatus === 'visited' ? '✓ Visited' : '★ Wishlist'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'wishlist', 'huaiyao')}
+                            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                              huaiyaoStatus === 'wishlist'
+                                ? 'bg-rose-500 text-white'
+                                : 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-900/50'
+                            }`}
+                          >
+                            Wishlist
+                          </button>
+                          <button
+                            onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'visited', 'huaiyao')}
+                            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                              huaiyaoStatus === 'visited'
+                                ? 'bg-rose-700 text-white'
+                                : 'bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 hover:bg-rose-200 dark:hover:bg-rose-900/50'
+                            }`}
+                          >
+                            Visited
+                          </button>
+                          {huaiyaoStatus && (
+                            <button
+                              onClick={() => clearPlaceStatus(place?.id, 'huaiyao')}
+                              className="px-2 py-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                              title="Clear"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
 
-                      {place.status === 'visited' && (
-                        <button
-                          onClick={() => markAsVisited(place)}
-                          className={`w-full py-3 ${place.added_by === 'daniel' ? 'bg-blue-500 hover:bg-blue-600' : 'bg-rose-500 hover:bg-rose-600'} text-white rounded-xl font-medium transition-colors`}
-                        >
-                          Move back to Wishlist
-                        </button>
-                      )}
-
-                      {place.status === 'visited' && (
+                      {/* Photo gallery if either has visited */}
+                      {place && (danielStatus === 'visited' || huaiyaoStatus === 'visited') && (
                         <button
                           onClick={() => {
                             setPhotoGalleryPlace({ id: place.id, name: clickedLocation.name });
@@ -714,17 +870,10 @@ export default function MapPage() {
                       )}
 
                       <button
-                        onClick={() => removePlace(place)}
-                        className="w-full py-2 text-red-500 hover:text-red-700 transition-colors text-sm"
-                      >
-                        Remove
-                      </button>
-
-                      <button
                         onClick={() => setClickedLocation(null)}
                         className="w-full py-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
                       >
-                        Cancel
+                        Close
                       </button>
                     </div>
                   );
