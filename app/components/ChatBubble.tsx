@@ -197,11 +197,11 @@ export default function ChatBubble() {
                     <p className="text-xs text-white/70">Tap to chat</p>
                   </div>
                 </div>
-                {/* Call buttons - WhatsApp video, WhatsApp call, then phone fallback */}
+                {/* Call buttons - WhatsApp, then phone fallback */}
                 <div className="flex gap-2">
-                  {/* WhatsApp Video Call */}
+                  {/* WhatsApp */}
                   <a
-                    href={`https://wa.me/447774475890?text=`}
+                    href={`https://wa.me/${currentUser === 'daniel' ? '447774475890' : '447577432052'}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center hover:bg-white/30 transition-colors"
@@ -213,7 +213,7 @@ export default function ChatBubble() {
                   </a>
                   {/* Phone fallback */}
                   <a
-                    href="tel:+447774475890"
+                    href={`tel:${currentUser === 'daniel' ? '+447774475890' : '+447577432052'}`}
                     className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center hover:bg-white/30 transition-colors"
                     title="Call"
                   >
