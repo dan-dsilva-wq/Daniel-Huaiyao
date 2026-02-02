@@ -13,6 +13,7 @@ interface QuizQuestion {
   correct_answer_index: number | null;
   correct_answer_indices: number[] | null;
   is_multiple_choice?: boolean;
+  category?: string;
   created_at: string;
   is_two_way?: boolean;
   linked_question_id?: string | null;
@@ -29,6 +30,12 @@ interface QuizQuestion {
     is_correct: boolean;
     answered_at: string;
   } | null;
+}
+
+interface QuizCategory {
+  name: string;
+  emoji: string;
+  description: string;
 }
 
 interface QuizData {
@@ -223,6 +230,11 @@ export default function QuizPage() {
   const [isTwoWay, setIsTwoWay] = useState(false);
   const [isMultipleChoice, setIsMultipleChoice] = useState(false);
   const [showInspiration, setShowInspiration] = useState(false);
+  const [newCategory, setNewCategory] = useState('general');
+
+  // Category filter state
+  const [categories, setCategories] = useState<QuizCategory[]>([]);
+  const [filterCategory, setFilterCategory] = useState<string | null>(null);
 
   // Setup two-way question state
   const [setupQuestion, setSetupQuestion] = useState<QuizQuestion | null>(null);
@@ -398,10 +410,28 @@ export default function QuizPage() {
     }
   }, []);
 
+  // Fetch quiz categories
+  const fetchCategories = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('quiz_categories')
+        .select('name, emoji, description')
+        .order('sort_order');
+
+      if (error) throw error;
+      setCategories(data || []);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+    }
+  }, []);
+
   useEffect(() => {
     const savedUser = localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
     setCurrentUser(savedUser);
-  }, []);
+    fetchCategories(); // Fetch categories on mount
+  }, [fetchCategories]);
 
   useEffect(() => {
     if (currentUser) {
@@ -558,6 +588,7 @@ export default function QuizPage() {
           is_two_way: isTwoWay,
           is_multiple_choice: isMultipleChoice,
           correct_answer_indices: isMultipleChoice ? correctIndices : null,
+          category: newCategory,
           pending_setup: false,
         })
         .select()
@@ -583,6 +614,7 @@ export default function QuizPage() {
             is_two_way: true,
             is_multiple_choice: isMultipleChoice,
             correct_answer_indices: null,
+            category: newCategory,
             pending_setup: true,
             linked_question_id: newQ.id,
           })
@@ -606,6 +638,7 @@ export default function QuizPage() {
       setCorrectIndex(null);
       setCorrectIndices([]);
       setIsTwoWay(false);
+      setNewCategory('general');
       setIsMultipleChoice(false);
       setShowAddForm(false);
       fetchData();
@@ -754,7 +787,17 @@ export default function QuizPage() {
 
   const questionsToAnswer = quizData?.questions_to_answer || [];
   const myQuestions = quizData?.my_questions || [];
-  const unansweredQuestions = questionsToAnswer.filter((q) => !q.answer);
+
+  // Apply category filter
+  const filteredQuestionsToAnswer = filterCategory
+    ? questionsToAnswer.filter((q) => q.category === filterCategory)
+    : questionsToAnswer;
+  const filteredMyQuestions = filterCategory
+    ? myQuestions.filter((q) => q.category === filterCategory)
+    : myQuestions;
+
+  const unansweredQuestions = filteredQuestionsToAnswer.filter((q) => !q.answer);
+  const answeredQuestionsFiltered = filteredQuestionsToAnswer.filter((q) => q.answer);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
@@ -1084,7 +1127,36 @@ export default function QuizPage() {
                 How well do you know {partnerName}?
               </h2>
 
-              {questionsToAnswer.length === 0 ? (
+              {/* Category Filter */}
+              {categories.length > 0 && questionsToAnswer.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-4 -mx-1">
+                  <button
+                    onClick={() => setFilterCategory(null)}
+                    className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                      filterCategory === null
+                        ? 'bg-indigo-500 text-white'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {categories.map((cat) => (
+                    <button
+                      key={cat.name}
+                      onClick={() => setFilterCategory(cat.name)}
+                      className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                        filterCategory === cat.name
+                          ? 'bg-indigo-500 text-white'
+                          : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                      }`}
+                    >
+                      {cat.emoji} {cat.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {filteredQuestionsToAnswer.length === 0 ? (
                 <div className="text-center py-12 text-gray-400 dark:text-gray-500">
                   <div className="text-4xl mb-4">📝</div>
                   <p>{partnerName} hasn't added any questions yet.</p>
@@ -1112,11 +1184,11 @@ export default function QuizPage() {
                   )}
 
                   {/* Answered questions */}
-                  {answeredQuestions.length > 0 && (
+                  {answeredQuestionsFiltered.length > 0 && (
                     <div className="mt-8">
                       <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Already Answered</h3>
                       <div className="space-y-3">
-                        {answeredQuestions.map((question) => (
+                        {answeredQuestionsFiltered.map((question) => (
                           <AnsweredQuestionCard key={question.id} question={question} />
                         ))}
                       </div>
@@ -1351,6 +1423,29 @@ export default function QuizPage() {
                   >
                     <span>💡</span> Need inspiration?
                   </button>
+
+                  {/* Category selector */}
+                  {categories.length > 0 && (
+                    <div className="mb-4">
+                      <label className="block text-sm text-gray-600 dark:text-gray-400 mb-2">Category:</label>
+                      <div className="flex flex-wrap gap-2">
+                        {categories.map((cat) => (
+                          <button
+                            key={cat.name}
+                            type="button"
+                            onClick={() => setNewCategory(cat.name)}
+                            className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                              newCategory === cat.name
+                                ? 'bg-indigo-500 text-white'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                            }`}
+                          >
+                            {cat.emoji} {cat.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Inspiration Modal */}
                   <AnimatePresence>
