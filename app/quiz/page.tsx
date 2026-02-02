@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { TimedChallenge } from './components/TimedChallenge';
 
 interface QuizQuestion {
   id: string;
@@ -235,6 +236,9 @@ export default function QuizPage() {
   // Category filter state
   const [categories, setCategories] = useState<QuizCategory[]>([]);
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
+
+  // Challenge mode state
+  const [showChallenge, setShowChallenge] = useState(false);
 
   // Setup two-way question state
   const [setupQuestion, setSetupQuestion] = useState<QuizQuestion | null>(null);
@@ -912,8 +916,28 @@ export default function QuizPage() {
                 }
               })()}
             </div>
+
+            {/* Challenge Mode Button */}
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setShowChallenge(true)}
+              className="w-full mt-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+            >
+              <span>⚡</span> Challenge Mode
+            </motion.button>
           </motion.div>
         )}
+
+        {/* Timed Challenge Modal */}
+        <AnimatePresence>
+          {showChallenge && currentUser && (
+            <TimedChallenge
+              currentUser={currentUser}
+              onClose={() => setShowChallenge(false)}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Answer Result Popup Modal */}
         <AnimatePresence>
