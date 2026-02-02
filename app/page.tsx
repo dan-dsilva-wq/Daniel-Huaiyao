@@ -1,6 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import { ThemeToggle } from './components/ThemeToggle';
 
 interface AppCardProps {
   title: string;
@@ -95,6 +96,48 @@ const apps: AppCardProps[] = [
     href: '/mystery',
     gradient: 'from-purple-900 to-slate-900',
   },
+  {
+    title: 'Countdown',
+    description: 'Track important dates and anniversaries',
+    icon: '⏰',
+    href: '/countdown',
+    gradient: 'from-amber-500 to-rose-500',
+  },
+  {
+    title: 'Gratitude Wall',
+    description: 'Leave little notes of appreciation',
+    icon: '💝',
+    href: '/gratitude',
+    gradient: 'from-rose-400 to-pink-500',
+  },
+  {
+    title: 'Daily Prompts',
+    description: 'Daily questions to connect deeper',
+    icon: '💬',
+    href: '/prompts',
+    gradient: 'from-cyan-500 to-teal-500',
+  },
+  {
+    title: 'Media Tracker',
+    description: 'Movies, shows, books to enjoy together',
+    icon: '🎬',
+    href: '/media',
+    gradient: 'from-violet-500 to-fuchsia-500',
+  },
+  {
+    title: 'Memories',
+    description: 'Our timeline of special moments',
+    icon: '📸',
+    href: '/memories',
+    gradient: 'from-pink-500 to-rose-600',
+  },
+  {
+    title: 'Stats & Achievements',
+    description: 'Track your progress and unlock badges',
+    icon: '🏆',
+    href: '/stats',
+    gradient: 'from-amber-500 to-orange-600',
+  },
 ];
 
 const wipApps: AppCardProps[] = [
@@ -110,11 +153,16 @@ const wipApps: AppCardProps[] = [
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-slate-900 dark:to-zinc-900">
+      {/* Theme Toggle */}
+      <div className="fixed top-4 right-4 z-50">
+        <ThemeToggle />
+      </div>
+
       {/* Subtle background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <motion.div
-          className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-100/40 rounded-full blur-3xl"
+          className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-100/40 dark:bg-amber-900/20 rounded-full blur-3xl"
           animate={{
             scale: [1, 1.1, 1],
             x: [0, 20, 0],
@@ -122,7 +170,7 @@ export default function Home() {
           transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
         />
         <motion.div
-          className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-slate-200/40 rounded-full blur-3xl"
+          className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-slate-200/40 dark:bg-slate-700/20 rounded-full blur-3xl"
           animate={{
             scale: [1.1, 1, 1.1],
             x: [0, -20, 0],
@@ -146,10 +194,10 @@ export default function Home() {
           >
             👋
           </motion.div>
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-bold text-gray-800 mb-4">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-serif font-bold text-gray-800 dark:text-gray-100 mb-4">
             Daniel & Huaiyao
           </h1>
-          <p className="text-lg sm:text-xl text-gray-500 max-w-md mx-auto">
+          <p className="text-lg sm:text-xl text-gray-500 dark:text-gray-400 max-w-md mx-auto">
             Some fun stuff we made
           </p>
         </motion.div>
@@ -181,7 +229,7 @@ export default function Home() {
             transition={{ delay: 0.6 }}
             className="mt-12"
           >
-            <h2 className="text-lg font-medium text-gray-400 mb-4 text-center">Work in Progress</h2>
+            <h2 className="text-lg font-medium text-gray-400 dark:text-gray-500 mb-4 text-center">Work in Progress</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {wipApps.map((app, index) => (
                 <motion.div
@@ -203,7 +251,7 @@ export default function Home() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.8 }}
-          className="text-center mt-16 text-gray-400 text-sm"
+          className="text-center mt-16 text-gray-400 dark:text-gray-500 text-sm"
         >
           <p>Built for fun</p>
         </motion.footer>

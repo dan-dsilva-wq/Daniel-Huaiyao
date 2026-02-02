@@ -1,0 +1,42 @@
+{
+  "name": "Daniel & Huaiyao",
+  "short_name": "D&H",
+  "description": "Fun stuff we made together",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#8b5cf6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["lifestyle", "entertainment"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Quiz",
+      "short_name": "Quiz",
+      "description": "Take a quiz",
+      "url": "/quiz",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Countdown",
+      "short_name": "Countdown",
+      "description": "View important dates",
+      "url": "/countdown",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

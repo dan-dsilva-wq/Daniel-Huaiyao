@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 interface QuizQuestion {
   id: string;
@@ -369,7 +370,7 @@ export default function QuizPage() {
   }, []);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('quiz-user') as 'daniel' | 'huaiyao' | null;
+    const savedUser = localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
     setCurrentUser(savedUser);
   }, []);
 
@@ -396,7 +397,7 @@ export default function QuizPage() {
 
   const selectUser = (user: 'daniel' | 'huaiyao') => {
     setCurrentUser(user);
-    localStorage.setItem('quiz-user', user);
+    localStorage.setItem('currentUser', user);
   };
 
   const handleAnswerSelect = (questionId: string, index: number, isMultiple: boolean) => {
@@ -660,7 +661,7 @@ export default function QuizPage() {
   // User selection screen
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -673,8 +674,8 @@ export default function QuizPage() {
           >
             🧠
           </motion.div>
-          <h1 className="text-3xl font-serif font-bold text-gray-800 mb-4">Who are you?</h1>
-          <p className="text-gray-500 mb-8">Let's see how well you know each other!</p>
+          <h1 className="text-3xl font-serif font-bold text-gray-800 dark:text-white mb-4">Who are you?</h1>
+          <p className="text-gray-500 dark:text-gray-400 mb-8">Let's see how well you know each other!</p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -700,7 +701,7 @@ export default function QuizPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center">
         <motion.div
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
@@ -715,16 +716,16 @@ export default function QuizPage() {
   const unansweredQuestions = questionsToAnswer.filter((q) => !q.answer);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       {/* Background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <motion.div
-          className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-100/30 rounded-full blur-3xl"
+          className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-100/30 dark:bg-indigo-900/20 rounded-full blur-3xl"
           animate={{ scale: [1, 1.1, 1], x: [0, 20, 0] }}
           transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
         />
         <motion.div
-          className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-100/30 rounded-full blur-3xl"
+          className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-100/30 dark:bg-purple-900/20 rounded-full blur-3xl"
           animate={{ scale: [1.1, 1, 1.1], x: [0, -20, 0] }}
           transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
         />
@@ -737,16 +738,19 @@ export default function QuizPage() {
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-6 sm:mb-8"
         >
-          <a
-            href="/"
-            className="inline-block mb-4 px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 active:text-gray-800 transition-colors touch-manipulation"
-          >
-            ← Home
-          </a>
-          <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 mb-2">
+          <div className="flex items-center justify-between mb-4">
+            <a
+              href="/"
+              className="px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 active:text-gray-800 transition-colors touch-manipulation"
+            >
+              ← Home
+            </a>
+            <ThemeToggle />
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 dark:text-white mb-2">
             Quiz Time
           </h1>
-          <p className="text-gray-500">How well do you know each other?</p>
+          <p className="text-gray-500 dark:text-gray-400">How well do you know each other?</p>
 
         </motion.div>
 
@@ -983,7 +987,7 @@ export default function QuizPage() {
             className={`flex-1 py-3 px-4 rounded-xl font-medium transition-all ${
               activeTab === 'answer'
                 ? 'bg-indigo-500 text-white shadow-lg'
-                : 'bg-white/70 text-gray-600 hover:bg-white'
+                : 'bg-white/70 dark:bg-gray-800/70 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
             }`}
           >
             Answer Questions
@@ -998,7 +1002,7 @@ export default function QuizPage() {
             className={`flex-1 py-3 px-4 rounded-xl font-medium transition-all ${
               activeTab === 'your-questions'
                 ? 'bg-indigo-500 text-white shadow-lg'
-                : 'bg-white/70 text-gray-600 hover:bg-white'
+                : 'bg-white/70 dark:bg-gray-800/70 text-gray-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700'
             }`}
           >
             Your Questions
@@ -1018,12 +1022,12 @@ export default function QuizPage() {
               exit={{ opacity: 0, x: 20 }}
               className="space-y-4"
             >
-              <h2 className="text-lg font-medium text-gray-700 mb-4">
+              <h2 className="text-lg font-medium text-gray-700 dark:text-gray-300 mb-4">
                 How well do you know {partnerName}?
               </h2>
 
               {questionsToAnswer.length === 0 ? (
-                <div className="text-center py-12 text-gray-400">
+                <div className="text-center py-12 text-gray-400 dark:text-gray-500">
                   <div className="text-4xl mb-4">📝</div>
                   <p>{partnerName} hasn't added any questions yet.</p>
                   <p className="text-sm mt-2">Ask them to write some!</p>
@@ -1052,7 +1056,7 @@ export default function QuizPage() {
                   {/* Answered questions */}
                   {answeredQuestions.length > 0 && (
                     <div className="mt-8">
-                      <h3 className="text-sm font-medium text-gray-500 mb-3">Already Answered</h3>
+                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Already Answered</h3>
                       <div className="space-y-3">
                         {answeredQuestions.map((question) => (
                           <AnsweredQuestionCard key={question.id} question={question} />
@@ -1074,7 +1078,7 @@ export default function QuizPage() {
               exit={{ opacity: 0, x: -20 }}
               className="space-y-4"
             >
-              <h2 className="text-lg font-medium text-gray-700 mb-4">
+              <h2 className="text-lg font-medium text-gray-700 dark:text-gray-300 mb-4">
                 Questions you wrote about yourself
               </h2>
 
@@ -1244,7 +1248,7 @@ export default function QuizPage() {
               </AnimatePresence>
 
               {myQuestions.filter((q) => !q.pending_setup).length === 0 && !showAddForm ? (
-                <div className="text-center py-12 text-gray-400">
+                <div className="text-center py-12 text-gray-400 dark:text-gray-500">
                   <div className="text-4xl mb-4">🤔</div>
                   <p>You haven't created any questions yet.</p>
                   <p className="text-sm mt-2">Add questions about yourself for {partnerName} to answer!</p>
@@ -1269,16 +1273,16 @@ export default function QuizPage() {
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-white/70 backdrop-blur rounded-xl p-4 shadow-sm"
+                  className="bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-xl p-4 shadow-sm"
                 >
-                  <h3 className="font-medium text-gray-800 mb-4">Add a question about yourself</h3>
+                  <h3 className="font-medium text-gray-800 dark:text-white mb-4">Add a question about yourself</h3>
 
                   <input
                     type="text"
                     placeholder="e.g., What's my favorite food?"
                     value={newQuestion}
                     onChange={(e) => setNewQuestion(e.target.value)}
-                    className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 mb-2"
+                    className="w-full px-4 py-3 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 dark:text-white mb-2"
                   />
 
                   {/* Inspiration button */}
@@ -1515,7 +1519,7 @@ export default function QuizPage() {
               ) : (
                 <button
                   onClick={() => setShowAddForm(true)}
-                  className="w-full py-4 border-2 border-dashed border-gray-300 hover:border-indigo-400 rounded-xl text-gray-400 hover:text-indigo-500 transition-colors"
+                  className="w-full py-4 border-2 border-dashed border-gray-300 dark:border-gray-600 hover:border-indigo-400 dark:hover:border-indigo-500 rounded-xl text-gray-400 dark:text-gray-500 hover:text-indigo-500 transition-colors"
                 >
                   + Add Question
                 </button>
@@ -1529,7 +1533,7 @@ export default function QuizPage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.5 }}
-          className="text-center mt-12 text-gray-400 text-sm"
+          className="text-center mt-12 text-gray-400 dark:text-gray-500 text-sm"
         >
           <p>
             Logged in as{' '}
@@ -1539,10 +1543,10 @@ export default function QuizPage() {
             {' · '}
             <button
               onClick={() => {
-                localStorage.removeItem('quiz-user');
+                localStorage.removeItem('currentUser');
                 setCurrentUser(null);
               }}
-              className="underline hover:text-gray-600"
+              className="underline hover:text-gray-600 dark:hover:text-gray-300"
             >
               Switch
             </button>
@@ -1581,21 +1585,21 @@ function QuestionCard({
   return (
     <motion.div
       layout
-      className="bg-white/70 backdrop-blur rounded-xl p-4 shadow-sm"
+      className="bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-xl p-4 shadow-sm"
     >
       <div className="flex flex-wrap gap-2 mb-2">
         {question.is_two_way && (
-          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">
+          <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs rounded-full">
             Two-way
           </span>
         )}
         {isMultiple && (
-          <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+          <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs rounded-full">
             Select all that apply
           </span>
         )}
       </div>
-      <h3 className="font-medium text-gray-800 mb-4">{question.question_text}</h3>
+      <h3 className="font-medium text-gray-800 dark:text-white mb-4">{question.question_text}</h3>
 
       <div className={`grid gap-2 ${question.options.length > 4 ? 'grid-cols-1' : 'grid-cols-2'}`}>
         {question.options.map((option, idx) => {
@@ -1609,7 +1613,7 @@ function QuestionCard({
               className={`p-3 rounded-lg text-left transition-all ${
                 isSelected
                   ? 'bg-indigo-500 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'
               }`}
             >
               {option}
@@ -1675,7 +1679,7 @@ function AnsweredQuestionCard({ question }: { question: QuizQuestion }) {
   return (
     <motion.div
       layout
-      className={`bg-white/70 backdrop-blur rounded-xl p-4 shadow-sm border-l-4 ${borderColor}`}
+      className={`bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-xl p-4 shadow-sm border-l-4 ${borderColor}`}
     >
       <div className="flex items-start gap-2">
         <span className={`text-lg ${scoreColor}`}>
@@ -1684,12 +1688,12 @@ function AnsweredQuestionCard({ question }: { question: QuizQuestion }) {
         <div className="flex-1">
           <div className="flex flex-wrap gap-1 mb-1">
             {question.is_two_way && (
-              <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">
+              <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs rounded-full">
                 Two-way
               </span>
             )}
             {isMultiple && (
-              <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+              <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs rounded-full">
                 Multiple choice
               </span>
             )}
@@ -1701,14 +1705,14 @@ function AnsweredQuestionCard({ question }: { question: QuizQuestion }) {
               </span>
             )}
           </div>
-          <h3 className="font-medium text-gray-800">{question.question_text}</h3>
+          <h3 className="font-medium text-gray-800 dark:text-white">{question.question_text}</h3>
 
           <p className={`text-sm mt-2 ${isPerfect ? 'text-green-600' : isZero ? 'text-red-500' : 'text-yellow-600'}`}>
             You answered: {getSelectedText()} {isPerfect ? '✓' : isZero ? '✗' : `(${scorePercent}%)`}
           </p>
 
           {!isPerfect && (
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Correct answer{isMultiple ? 's' : ''}: {getCorrectText()}
             </p>
           )}
@@ -1817,25 +1821,25 @@ function MyQuestionCard({
   const scoreColor = isPerfect ? 'text-green-600' : isZero ? 'text-red-500' : 'text-yellow-600';
 
   return (
-    <motion.div layout className="bg-white/70 backdrop-blur rounded-xl p-4 shadow-sm group">
+    <motion.div layout className="bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-xl p-4 shadow-sm group">
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">
           <div className="flex flex-wrap gap-1 mb-1">
             {question.is_two_way && (
-              <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-xs rounded-full">
+              <span className="px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs rounded-full">
                 Two-way
               </span>
             )}
             {isMultiple && (
-              <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded-full">
+              <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs rounded-full">
                 Multiple choice
               </span>
             )}
           </div>
-          <h3 className="font-medium text-gray-800">{question.question_text}</h3>
+          <h3 className="font-medium text-gray-800 dark:text-white">{question.question_text}</h3>
 
           {question.options && (question.correct_answer_index !== null || question.correct_answer_indices) && (
-            <div className="mt-2 text-sm text-gray-500">
+            <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
               <span className="text-green-600">
                 Correct: {getCorrectText()}
               </span>
@@ -1848,7 +1852,7 @@ function MyQuestionCard({
               {isPerfect ? '✓' : isZero ? '✗' : `(${partnerScorePercent}%)`}
             </div>
           ) : (
-            <div className="mt-2 text-sm text-gray-400">
+            <div className="mt-2 text-sm text-gray-400 dark:text-gray-500">
               {partnerName} hasn't answered yet
             </div>
           )}

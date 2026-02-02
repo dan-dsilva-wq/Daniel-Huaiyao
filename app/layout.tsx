@@ -1,6 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Crimson_Pro, Inter } from "next/font/google";
 import "./globals.css";
+import { ThemeProvider } from "./components/ThemeProvider";
+import { ServiceWorkerRegister } from "./components/ServiceWorkerRegister";
+import { OfflineIndicator } from "./components/OfflineIndicator";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -15,10 +18,35 @@ const crimsonPro = Crimson_Pro({
 export const metadata: Metadata = {
   title: "Daniel & Huaiyao",
   description: "Some fun stuff we made",
+  manifest: "/manifest.json",
   icons: {
     icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👋</text></svg>",
+    apple: "/icons/apple-touch-icon.png",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Daniel & Huaiyao",
   },
 };
+
+export const viewport: Viewport = {
+  themeColor: "#8b5cf6",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+};
+
+// Inline script to prevent flash of wrong theme
+const themeScript = `
+  (function() {
+    try {
+      var theme = localStorage.getItem('theme');
+      var isDark = theme === 'dark' || (theme === 'system' || !theme) && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (isDark) document.documentElement.classList.add('dark');
+    } catch (e) {}
+  })();
+`;
 
 export default function RootLayout({
   children,
@@ -26,11 +54,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body
         className={`${inter.variable} ${crimsonPro.variable} font-sans antialiased`}
       >
-        {children}
+        <ThemeProvider>
+          <OfflineIndicator />
+          {children}
+          <ServiceWorkerRegister />
+        </ThemeProvider>
       </body>
     </html>
   );

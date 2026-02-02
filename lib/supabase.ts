@@ -43,6 +43,9 @@ export interface MysteryEpisode {
   description: string | null;
   is_available: boolean;
   is_ai_driven?: boolean;
+  difficulty?: number;
+  estimated_duration_minutes?: number;
+  puzzle_count?: number;
 }
 
 export interface MysteryScene {
@@ -97,7 +100,7 @@ export interface MysteryGameState {
 }
 
 // Puzzle Types
-export type PuzzleType = 'cryptography' | 'number_theory' | 'logic' | 'geometry' | 'sequence' | 'research' | 'minigame';
+export type PuzzleType = 'cryptography' | 'number_theory' | 'logic' | 'geometry' | 'sequence' | 'research' | 'minigame' | 'word_puzzle' | 'visual_puzzle' | 'riddle' | 'anagram' | 'crossword';
 export type PuzzleAnswerType = 'exact' | 'numeric' | 'multiple_choice' | 'set';
 export type PuzzleStatus = 'pending' | 'agreed' | 'disagreed' | 'solved' | 'failed';
 

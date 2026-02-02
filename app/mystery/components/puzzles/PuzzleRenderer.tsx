@@ -299,6 +299,169 @@ export default function PuzzleRenderer({
           </div>
         );
 
+      case 'word_puzzle': {
+        const scrambledWords = Array.isArray(puzzle_data.scrambled_words) ? puzzle_data.scrambled_words as string[] : null;
+        const wordBank = typeof puzzle_data.word_bank === 'string' ? puzzle_data.word_bank : null;
+        const clue = typeof puzzle_data.clue === 'string' ? puzzle_data.clue : null;
+        return (
+          <div className="space-y-4">
+            {scrambledWords && (
+              <div className="bg-slate-800/50 rounded-lg p-4">
+                <p className="text-amber-400 text-sm font-medium mb-2">Unscramble these words:</p>
+                <div className="flex flex-wrap gap-2">
+                  {scrambledWords.map((word: string, i: number) => (
+                    <span key={i} className="px-3 py-2 bg-purple-700/50 rounded-lg text-purple-200 font-mono text-lg">
+                      {word}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {wordBank && (
+              <div className="bg-slate-800/30 rounded-lg p-4">
+                <p className="text-purple-300 text-sm mb-2">Available letters:</p>
+                <div className="flex flex-wrap gap-1">
+                  {wordBank.split('').map((letter: string, i: number) => (
+                    <span key={i} className="w-8 h-8 flex items-center justify-center bg-purple-600/50 rounded text-white font-mono">
+                      {letter}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {clue && (
+              <p className="text-purple-300 text-sm">{clue}</p>
+            )}
+          </div>
+        );
+      }
+
+      case 'visual_puzzle': {
+        const imageUrl = typeof puzzle_data.image_url === 'string' ? puzzle_data.image_url : null;
+        const pattern = Array.isArray(puzzle_data.pattern) ? puzzle_data.pattern as string[] : null;
+        const question = typeof puzzle_data.question === 'string' ? puzzle_data.question : null;
+        return (
+          <div className="space-y-4">
+            {imageUrl && (
+              <div className="bg-slate-800/50 rounded-lg p-4 flex justify-center">
+                <img
+                  src={imageUrl}
+                  alt="Visual puzzle"
+                  className="max-w-full max-h-64 rounded-lg"
+                />
+              </div>
+            )}
+            {pattern && (
+              <div className="bg-slate-800/50 rounded-lg p-4">
+                <p className="text-amber-400 text-sm font-medium mb-2">Find the pattern:</p>
+                <div className="grid grid-cols-3 gap-2 max-w-xs mx-auto">
+                  {pattern.map((item: string, i: number) => (
+                    <div key={i} className="aspect-square flex items-center justify-center bg-purple-700/50 rounded-lg text-2xl">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {question && (
+              <p className="text-white font-medium text-center">{question}</p>
+            )}
+          </div>
+        );
+      }
+
+      case 'riddle': {
+        const riddle = typeof puzzle_data.riddle === 'string' ? puzzle_data.riddle : null;
+        const category = typeof puzzle_data.category === 'string' ? puzzle_data.category : null;
+        return (
+          <div className="space-y-4">
+            <div className="bg-gradient-to-br from-purple-900/50 to-amber-900/30 rounded-lg p-6 text-center">
+              <span className="text-4xl mb-4 block">🤔</span>
+              {riddle && (
+                <p className="text-purple-100 text-lg italic leading-relaxed">
+                  &quot;{riddle}&quot;
+                </p>
+              )}
+            </div>
+            {category && (
+              <p className="text-amber-400 text-sm text-center">
+                Category: {category}
+              </p>
+            )}
+          </div>
+        );
+      }
+
+      case 'anagram': {
+        const letters = typeof puzzle_data.letters === 'string' ? puzzle_data.letters : null;
+        const hint = typeof puzzle_data.hint === 'string' ? puzzle_data.hint : null;
+        const wordCount = typeof puzzle_data.word_count === 'number' ? puzzle_data.word_count : null;
+        return (
+          <div className="space-y-4">
+            <div className="bg-slate-800/50 rounded-lg p-6 text-center">
+              <p className="text-amber-400 text-sm font-medium mb-3">Rearrange these letters:</p>
+              {letters && (
+                <div className="flex justify-center gap-1 flex-wrap">
+                  {letters.split('').map((letter: string, i: number) => (
+                    <span key={i} className="w-10 h-10 flex items-center justify-center bg-purple-600 rounded-lg text-white font-mono text-xl font-bold shadow-lg">
+                      {letter}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            {hint && (
+              <p className="text-purple-300 text-sm text-center italic">
+                Hint: {hint}
+              </p>
+            )}
+            {wordCount && (
+              <p className="text-purple-400 text-xs text-center">
+                {wordCount} word{wordCount > 1 ? 's' : ''}
+              </p>
+            )}
+          </div>
+        );
+      }
+
+      case 'crossword': {
+        const acrossClues = puzzle_data.across as Record<string, string> | undefined;
+        const downClues = puzzle_data.down as Record<string, string> | undefined;
+        const answerFormat = puzzle_data.answer_format as string | undefined;
+        return (
+          <div className="space-y-4">
+            <div className="bg-slate-800/50 rounded-lg p-4">
+              <p className="text-amber-400 text-sm font-medium mb-3">Crossword Clues:</p>
+              {acrossClues && (
+                <div className="mb-4">
+                  <p className="text-purple-400 text-xs font-medium mb-1">ACROSS:</p>
+                  {Object.entries(acrossClues).map(([num, clue]) => (
+                    <p key={num} className="text-purple-200 text-sm">
+                      <span className="text-amber-400 font-mono">{num}.</span> {clue}
+                    </p>
+                  ))}
+                </div>
+              )}
+              {downClues && (
+                <div>
+                  <p className="text-purple-400 text-xs font-medium mb-1">DOWN:</p>
+                  {Object.entries(downClues).map(([num, clue]) => (
+                    <p key={num} className="text-purple-200 text-sm">
+                      <span className="text-amber-400 font-mono">{num}.</span> {clue}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+            {answerFormat && (
+              <p className="text-purple-300 text-xs text-center">
+                Answer format: {answerFormat}
+              </p>
+            )}
+          </div>
+        );
+      }
+
       default:
         // Generic puzzle display
         return (
@@ -324,6 +487,11 @@ export default function PuzzleRenderer({
       sequence: '🔢',
       research: '📚',
       minigame: '🎮',
+      word_puzzle: '📝',
+      visual_puzzle: '👁️',
+      riddle: '🤔',
+      anagram: '🔤',
+      crossword: '✏️',
     };
     return emojis[type] || '🧩';
   };

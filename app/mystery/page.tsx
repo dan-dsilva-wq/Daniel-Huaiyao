@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { Player, MysteryEpisode, MysterySession } from '@/lib/supabase';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 interface WaitingGame {
   session: MysterySession;
@@ -107,7 +108,7 @@ export default function MysteryPage() {
   }, [currentUser]);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('mystery-user') as Player | null;
+    const savedUser = localStorage.getItem('currentUser') as Player | null;
     setCurrentUser(savedUser);
   }, []);
 
@@ -188,7 +189,7 @@ export default function MysteryPage() {
 
   const selectUser = (user: Player) => {
     setCurrentUser(user);
-    localStorage.setItem('mystery-user', user);
+    localStorage.setItem('currentUser', user);
   };
 
   const startGame = async (episode: MysteryEpisode) => {
@@ -417,12 +418,15 @@ export default function MysteryPage() {
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-8"
         >
-          <a
-            href="/"
-            className="inline-block mb-4 px-4 py-2 -mx-4 text-purple-300 hover:text-white active:text-amber-400 transition-colors touch-manipulation"
-          >
-            ← Home
-          </a>
+          <div className="flex items-center justify-between mb-4">
+            <a
+              href="/"
+              className="px-4 py-2 -mx-4 text-purple-300 hover:text-white active:text-amber-400 transition-colors touch-manipulation"
+            >
+              ← Home
+            </a>
+            <ThemeToggle />
+          </div>
           <motion.div
             animate={{ y: [0, -5, 0] }}
             transition={{ duration: 3, repeat: Infinity }}
@@ -591,6 +595,28 @@ export default function MysteryPage() {
                             {episode.description}
                           </p>
                         )}
+                        {/* Difficulty & duration info */}
+                        <div className="flex flex-wrap items-center gap-3 mt-3 text-xs">
+                          {episode.difficulty && (
+                            <span className="flex items-center gap-1 text-amber-400">
+                              {Array.from({ length: 5 }).map((_, i) => (
+                                <span key={i} className={i < episode.difficulty! ? 'opacity-100' : 'opacity-30'}>
+                                  ★
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                          {episode.estimated_duration_minutes && (
+                            <span className="text-purple-300">
+                              ~{episode.estimated_duration_minutes} min
+                            </span>
+                          )}
+                          {episode.puzzle_count !== undefined && episode.puzzle_count > 0 && (
+                            <span className="text-purple-300">
+                              {episode.puzzle_count} puzzle{episode.puzzle_count !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
                         {completedEpisodes.has(episode.id) && (
                           <p className="text-green-400/70 text-xs mt-2">
                             Completed {new Date(completedEpisodes.get(episode.id)!.completed_at).toLocaleDateString()}
@@ -625,7 +651,7 @@ export default function MysteryPage() {
             {' · '}
             <button
               onClick={() => {
-                localStorage.removeItem('mystery-user');
+                localStorage.removeItem('currentUser');
                 setCurrentUser(null);
               }}
               className="underline hover:text-white transition-colors"

@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, memo, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ComposableMap, Geographies, Geography, ZoomableGroup } from 'react-simple-maps';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import StatsPanel from './components/StatsPanel';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 interface Place {
   id: string;
@@ -135,6 +137,7 @@ export default function MapPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [clickedLocation, setClickedLocation] = useState<{ name: string; key: string; isState: boolean } | null>(null);
+  const [showStats, setShowStats] = useState(false);
 
   // Get all places as a map for quick lookup
   const placesByLocation = useMemo(() => {
@@ -169,7 +172,7 @@ export default function MapPage() {
   }, []);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('map-user') as 'daniel' | 'huaiyao' | null;
+    const savedUser = localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
     setCurrentUser(savedUser);
     fetchData();
   }, [fetchData]);
@@ -252,7 +255,7 @@ export default function MapPage() {
 
   const selectUser = (user: 'daniel' | 'huaiyao') => {
     setCurrentUser(user);
-    localStorage.setItem('map-user', user);
+    localStorage.setItem('currentUser', user);
   };
 
   const handleLocationClick = (name: string, locationKey: string, isState: boolean) => {
@@ -293,7 +296,7 @@ export default function MapPage() {
   // User selection screen
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -302,8 +305,8 @@ export default function MapPage() {
           <motion.div animate={{ y: [0, -5, 0] }} transition={{ duration: 3, repeat: Infinity }} className="text-6xl mb-6">
             🗺️
           </motion.div>
-          <h1 className="text-3xl font-serif font-bold text-gray-800 mb-4">Who are you?</h1>
-          <p className="text-gray-500 mb-8">So we know who to notify when you make changes</p>
+          <h1 className="text-3xl font-serif font-bold text-gray-800 dark:text-white mb-4">Who are you?</h1>
+          <p className="text-gray-500 dark:text-gray-400 mb-8">So we know who to notify when you make changes</p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => selectUser('daniel')}
               className="px-8 py-4 rounded-xl bg-blue-500 text-white font-medium shadow-lg hover:bg-blue-600 transition-colors">
@@ -321,7 +324,7 @@ export default function MapPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex items-center justify-center">
         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
           className="w-8 h-8 border-4 border-teal-200 border-t-teal-500 rounded-full" />
       </div>
@@ -332,23 +335,32 @@ export default function MapPage() {
   const showUSStates = zoomedRegion === 'north-america';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       {/* Background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <motion.div className="absolute top-1/4 left-1/4 w-96 h-96 bg-teal-100/30 rounded-full blur-3xl"
+        <motion.div className="absolute top-1/4 left-1/4 w-96 h-96 bg-teal-100/30 dark:bg-teal-900/20 rounded-full blur-3xl"
           animate={{ scale: [1, 1.1, 1], x: [0, 20, 0] }} transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }} />
-        <motion.div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyan-100/30 rounded-full blur-3xl"
+        <motion.div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-cyan-100/30 dark:bg-cyan-900/20 rounded-full blur-3xl"
           animate={{ scale: [1.1, 1, 1.1], x: [0, -20, 0] }} transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }} />
       </div>
 
       <main className="relative z-10 max-w-4xl mx-auto px-4 py-6 sm:py-12 pb-safe">
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-6 sm:mb-8">
-          <a href="/" className="inline-block mb-4 px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 active:text-gray-800 transition-colors touch-manipulation">
-            ← Home
-          </a>
-          <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 mb-2">Our Travel Map</h1>
-          <p className="text-gray-500">{totalWishlist} wishlist · {totalVisited} visited</p>
+          <div className="flex items-center justify-between mb-4">
+            <a href="/" className="px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 active:text-gray-800 transition-colors touch-manipulation">
+              ← Home
+            </a>
+            <ThemeToggle />
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 dark:text-white mb-2">Our Travel Map</h1>
+          <p className="text-gray-500 dark:text-gray-400">{totalWishlist} wishlist · {totalVisited} visited</p>
+          <button
+            onClick={() => setShowStats(true)}
+            className="mt-3 px-4 py-2 bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded-lg text-sm font-medium hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors"
+          >
+            View Stats
+          </button>
         </motion.div>
 
         {/* Back button when zoomed */}
@@ -357,7 +369,7 @@ export default function MapPage() {
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             onClick={() => setZoomedRegion(null)}
-            className="mb-4 px-4 py-2 bg-white/80 backdrop-blur rounded-lg shadow-sm text-gray-600 hover:text-gray-800 transition-colors flex items-center gap-2"
+            className="mb-4 px-4 py-2 bg-white/80 dark:bg-gray-800/80 backdrop-blur rounded-lg shadow-sm text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors flex items-center gap-2"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -370,7 +382,7 @@ export default function MapPage() {
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="relative bg-white/70 backdrop-blur rounded-2xl shadow-lg p-4 sm:p-6 mb-6 overflow-hidden"
+          className="relative bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-2xl shadow-lg p-4 sm:p-6 mb-6 overflow-hidden"
         >
           {showUSStates ? (
             // US States Map
@@ -523,7 +535,7 @@ export default function MapPage() {
           )}
 
           {/* Legend */}
-          <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500">
+          <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500 dark:text-gray-400">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded bg-gray-300" />
               <span>Not added</span>
@@ -567,8 +579,8 @@ export default function MapPage() {
         </motion.div>
 
         {/* Instructions */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white/70 backdrop-blur rounded-xl shadow-sm p-4 mb-6">
-          <p className="text-center text-gray-500 text-sm">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-xl shadow-sm p-4 mb-6">
+          <p className="text-center text-gray-500 dark:text-gray-400 text-sm">
             {zoomedRegion
               ? 'Click a country or state to add it to your wishlist or mark as visited'
               : 'Click a region to zoom in, then click countries to add them'}
@@ -589,14 +601,14 @@ export default function MapPage() {
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.9, opacity: 0 }}
-                className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm"
+                className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6 w-full max-w-sm"
                 onClick={(e) => e.stopPropagation()}
               >
-                <h3 className="text-xl font-serif font-bold text-gray-800 mb-2">
+                <h3 className="text-xl font-serif font-bold text-gray-800 dark:text-white mb-2">
                   {clickedLocation.name}
                 </h3>
                 {clickedLocation.isState && (
-                  <p className="text-sm text-gray-500 mb-4">United States</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">United States</p>
                 )}
 
                 {(() => {
@@ -605,7 +617,7 @@ export default function MapPage() {
                   if (!place) {
                     return (
                       <div className="space-y-3">
-                        <p className="text-sm text-gray-500 mb-2">Add to wishlist:</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Add to wishlist:</p>
                         <div className="flex gap-2">
                           <button
                             onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'wishlist')}
@@ -620,7 +632,7 @@ export default function MapPage() {
                             Huaiyao
                           </button>
                         </div>
-                        <p className="text-sm text-gray-500 mb-2 mt-4">Or mark as visited:</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2 mt-4">Or mark as visited:</p>
                         <div className="flex gap-2">
                           <button
                             onClick={() => addPlace(clickedLocation.name, clickedLocation.key, clickedLocation.isState, 'visited')}
@@ -637,7 +649,7 @@ export default function MapPage() {
                         </div>
                         <button
                           onClick={() => setClickedLocation(null)}
-                          className="w-full py-2 text-gray-500 hover:text-gray-700 transition-colors mt-2"
+                          className="w-full py-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors mt-2"
                         >
                           Cancel
                         </button>
@@ -686,7 +698,7 @@ export default function MapPage() {
 
                       <button
                         onClick={() => setClickedLocation(null)}
-                        className="w-full py-2 text-gray-500 hover:text-gray-700 transition-colors"
+                        className="w-full py-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
                       >
                         Cancel
                       </button>
@@ -698,9 +710,16 @@ export default function MapPage() {
           )}
         </AnimatePresence>
 
+        {/* Stats Panel */}
+        <AnimatePresence>
+          {showStats && (
+            <StatsPanel regions={regions} onClose={() => setShowStats(false)} />
+          )}
+        </AnimatePresence>
+
         {/* Footer */}
         <motion.footer initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
-          className="text-center mt-12 text-gray-400 text-sm">
+          className="text-center mt-12 text-gray-400 dark:text-gray-500 text-sm">
           <p className="mt-2">
             Logged in as{' '}
             <span className={currentUser === 'daniel' ? 'text-blue-500' : 'text-rose-500'}>
@@ -709,10 +728,10 @@ export default function MapPage() {
             {' · '}
             <button
               onClick={() => {
-                localStorage.removeItem('map-user');
+                localStorage.removeItem('currentUser');
                 setCurrentUser(null);
               }}
-              className="underline hover:text-gray-600"
+              className="underline hover:text-gray-600 dark:hover:text-gray-300"
             >
               Switch
             </button>
