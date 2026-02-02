@@ -127,16 +127,31 @@ export default function ChatBubble() {
     e.preventDefault();
     if (!newMessage.trim() || !currentUser || isSending) return;
 
+    const messageText = newMessage.trim();
     setIsSending(true);
     const { error } = await supabase
       .from('chat_messages')
       .insert({
         from_user: currentUser,
-        message: newMessage.trim(),
+        message: messageText,
       });
 
     if (!error) {
       setNewMessage('');
+      // Send push notification to partner
+      try {
+        await fetch('/api/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'chat_message',
+            title: messageText.length > 50 ? messageText.substring(0, 50) + '...' : messageText,
+            user: currentUser,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to send notification:', err);
+      }
     }
     setIsSending(false);
   };
