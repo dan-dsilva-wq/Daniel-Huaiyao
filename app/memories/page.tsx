@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
+import LocationSearch from '../components/LocationSearch';
 
 type MemoryType = 'milestone' | 'note' | 'photo' | 'moment';
 
@@ -54,6 +55,8 @@ export default function MemoriesPage() {
   const [formDescription, setFormDescription] = useState('');
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
   const [formLocation, setFormLocation] = useState('');
+  const [formLocationLat, setFormLocationLat] = useState<number | null>(null);
+  const [formLocationLng, setFormLocationLng] = useState<number | null>(null);
   const [formTags, setFormTags] = useState('');
   const [formPhotos, setFormPhotos] = useState<File[]>([]);
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState<string[]>([]);
@@ -163,6 +166,8 @@ export default function MemoriesPage() {
         p_description: formDescription.trim() || null,
         p_memory_date: formDate,
         p_location_name: formLocation.trim() || null,
+        p_location_lat: formLocationLat,
+        p_location_lng: formLocationLng,
         p_tags: tags,
       });
 
@@ -189,6 +194,8 @@ export default function MemoriesPage() {
       setFormDescription('');
       setFormDate(new Date().toISOString().split('T')[0]);
       setFormLocation('');
+      setFormLocationLat(null);
+      setFormLocationLng(null);
       setFormTags('');
       setFormPhotos([]);
       photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
@@ -716,12 +723,20 @@ export default function MemoriesPage() {
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                       Location (optional)
                     </label>
-                    <input
-                      type="text"
+                    <LocationSearch
                       value={formLocation}
-                      onChange={(e) => setFormLocation(e.target.value)}
-                      placeholder="Where did this happen?"
-                      className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                      onChange={(loc) => {
+                        if (loc) {
+                          setFormLocation(loc.name);
+                          setFormLocationLat(loc.lat);
+                          setFormLocationLng(loc.lng);
+                        } else {
+                          setFormLocation('');
+                          setFormLocationLat(null);
+                          setFormLocationLng(null);
+                        }
+                      }}
+                      placeholder="Search for a location..."
                     />
                   </div>
 

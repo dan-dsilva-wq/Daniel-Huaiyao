@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, memo, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ComposableMap, Geographies, Geography, ZoomableGroup } from 'react-simple-maps';
+import { ComposableMap, Geographies, Geography, ZoomableGroup, Marker } from 'react-simple-maps';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import StatsPanel from './components/StatsPanel';
 import { PhotoGallery } from './components/PhotoGallery';
@@ -216,15 +216,16 @@ export default function MapPage() {
 
       if (mapData) setRegions(mapData);
 
-      // Fetch memories with locations
+      // Fetch memories with coordinates (for map markers)
       const { data: memories, error: memoriesError } = await supabase
         .from('memories')
         .select('id, title, location_name, location_lat, location_lng, memory_date')
-        .not('location_name', 'is', null)
+        .not('location_lat', 'is', null)
+        .not('location_lng', 'is', null)
         .order('memory_date', { ascending: false });
 
       if (!memoriesError && memories) {
-        setMemoryLocations(memories.filter(m => m.location_name) as MemoryLocation[]);
+        setMemoryLocations(memories.filter(m => m.location_lat && m.location_lng) as MemoryLocation[]);
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -619,6 +620,18 @@ export default function MapPage() {
                   })
                 }
               </Geographies>
+
+              {/* Memory markers in US States view */}
+              {showMemories && memoryLocations
+                .filter(m => m.location_lng >= -125 && m.location_lng <= -66 && m.location_lat >= 24 && m.location_lat <= 50)
+                .map((memory) => (
+                  <Marker key={memory.id} coordinates={[memory.location_lng, memory.location_lat]}>
+                    <g style={{ cursor: 'pointer' }}>
+                      <circle r={6} fill="#a855f7" stroke="#fff" strokeWidth={2} />
+                      <title>{memory.title} - {memory.location_name}</title>
+                    </g>
+                  </Marker>
+                ))}
             </ComposableMap>
           ) : zoomedRegion ? (
             // Zoomed region map
@@ -671,6 +684,16 @@ export default function MapPage() {
                     })
                 }
               </Geographies>
+
+              {/* Memory markers in zoomed region */}
+              {showMemories && memoryLocations.map((memory) => (
+                <Marker key={memory.id} coordinates={[memory.location_lng, memory.location_lat]}>
+                  <g style={{ cursor: 'pointer' }}>
+                    <circle r={8} fill="#a855f7" stroke="#fff" strokeWidth={2} />
+                    <title>{memory.title} - {memory.location_name}</title>
+                  </g>
+                </Marker>
+              ))}
             </ComposableMap>
           ) : (
             // World overview map
@@ -719,6 +742,22 @@ export default function MapPage() {
                   })
                 }
               </Geographies>
+
+              {/* Memory location markers */}
+              {showMemories && memoryLocations.map((memory) => (
+                <Marker key={memory.id} coordinates={[memory.location_lng, memory.location_lat]}>
+                  <g
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // Could show memory details here
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <circle r={6} fill="#a855f7" stroke="#fff" strokeWidth={2} />
+                    <title>{memory.title} - {memory.location_name}</title>
+                  </g>
+                </Marker>
+              ))}
             </ComposableMap>
           )}
 
