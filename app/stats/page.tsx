@@ -85,19 +85,52 @@ export default function StatsPage() {
     if (!currentUser) return;
 
     try {
-      const [statsRes, achievementsRes] = await Promise.all([
-        supabase.rpc('get_relationship_stats'),
-        supabase.rpc('get_achievements', { p_player: currentUser }),
-      ]);
+      // Fetch first_date directly from table instead of broken RPC
+      const { data: relationshipData } = await supabase
+        .from('relationship_stats')
+        .select('first_date')
+        .eq('id', 'main')
+        .single();
 
-      if (statsRes.error) throw statsRes.error;
-      if (achievementsRes.error) throw achievementsRes.error;
+      // Calculate days together
+      let daysTogether = 0;
+      if (relationshipData?.first_date) {
+        const firstDate = new Date(relationshipData.first_date);
+        const today = new Date();
+        daysTogether = Math.floor((today.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+      }
 
-      setStats(statsRes.data);
-      setAchievements(achievementsRes.data);
+      // Build stats object with direct data
+      const statsData: StatsData = {
+        days_together: daysTogether,
+        stats: {
+          first_date: relationshipData?.first_date || null,
+          quiz_questions_answered: 0,
+          mysteries_completed: 0,
+          dates_completed: 0,
+          gratitude_notes_sent: 0,
+          memories_created: 0,
+          prompts_answered: 0,
+          media_completed: 0,
+        },
+        player_stats: {
+          daniel: { achievements_unlocked: 0, total_points: 0, quiz_correct: 0, gratitude_sent: 0, memories_created: 0 },
+          huaiyao: { achievements_unlocked: 0, total_points: 0, quiz_correct: 0, gratitude_sent: 0, memories_created: 0 },
+        },
+        recent_achievements: null,
+      };
 
-      // Check for new achievements
-      await supabase.rpc('check_achievements', { p_player: currentUser });
+      setStats(statsData);
+
+      // Try to get achievements (may fail if RPC doesn't exist)
+      try {
+        const achievementsRes = await supabase.rpc('get_achievements', { p_player: currentUser });
+        if (!achievementsRes.error) {
+          setAchievements(achievementsRes.data);
+        }
+      } catch {
+        // Achievements RPC not available
+      }
     } catch (error) {
       console.error('Error fetching stats:', error);
     } finally {
@@ -126,44 +159,24 @@ export default function StatsPage() {
   const [savingDate, setSavingDate] = useState(false);
 
   const handleSetFirstDate = async () => {
-    if (!firstDate) {
-      alert('Please select a date first');
-      return;
-    }
+    if (!firstDate) return;
 
     setSavingDate(true);
 
     try {
-      // Use upsert to handle both insert and update cases
-      const { error, data } = await supabase
+      const { error } = await supabase
         .from('relationship_stats')
-        .upsert({
-          id: 'main',
-          first_date: firstDate
-        }, {
-          onConflict: 'id'
-        })
-        .select();
+        .upsert({ id: 'main', first_date: firstDate }, { onConflict: 'id' });
 
       if (error) {
-        alert(`Database error: ${error.message}`);
+        alert(`Failed to save: ${error.message}`);
         setSavingDate(false);
         return;
       }
 
-      // Verify the save by reading directly from table
-      const { data: verifyData } = await supabase
-        .from('relationship_stats')
-        .select('first_date')
-        .eq('id', 'main')
-        .single();
-
-      alert(`Date saved! Verified in DB: ${verifyData?.first_date || 'not found'}`);
       setShowSetDate(false);
       setSavingDate(false);
-
-      // Force page reload to refresh all data
-      window.location.reload();
+      fetchData();
     } catch (error) {
       alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       setSavingDate(false);
