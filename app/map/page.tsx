@@ -8,6 +8,10 @@ import StatsPanel from './components/StatsPanel';
 import { PhotoGallery } from './components/PhotoGallery';
 import { TripPlanner } from './components/TripPlanner';
 import { ThemeToggle } from '../components/ThemeToggle';
+import dynamic from 'next/dynamic';
+
+// Dynamically import Leaflet to avoid SSR issues
+const LeafletMap = dynamic(() => import('./components/LeafletMap'), { ssr: false });
 
 interface Place {
   id: string;
@@ -159,6 +163,7 @@ export default function MapPage() {
   const [memoryLocations, setMemoryLocations] = useState<MemoryLocation[]>([]);
   const [showMemories, setShowMemories] = useState(true);
   const [showUSStates, setShowUSStates] = useState(false);
+  const [showDetailedMap, setShowDetailedMap] = useState(false);
 
   // Get all places as a map for quick lookup
   const placesByLocation = useMemo(() => {
@@ -528,6 +533,12 @@ export default function MapPage() {
                 📍 Memories ({memoryLocations.length})
               </button>
             )}
+            <button
+              onClick={() => setShowDetailedMap(true)}
+              className="px-3 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-lg text-sm font-medium hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors"
+            >
+              🔍 Zoom In
+            </button>
           </div>
         </motion.div>
 
@@ -999,6 +1010,16 @@ export default function MapPage() {
             <TripPlanner
               currentUser={currentUser}
               onClose={() => setShowTripPlanner(false)}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Detailed Leaflet Map */}
+        <AnimatePresence>
+          {showDetailedMap && (
+            <LeafletMap
+              memories={memoryLocations}
+              onClose={() => setShowDetailedMap(false)}
             />
           )}
         </AnimatePresence>
