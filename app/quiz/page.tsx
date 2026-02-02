@@ -204,6 +204,30 @@ const questionSuggestions = {
       "What's my spirit animal?",
     ],
   },
+  wilty: {
+    emoji: '🎭',
+    title: 'Would I Lie To You',
+    questions: [
+      "I once got stuck in a lift with a celebrity",
+      "I've been banned from a shop",
+      "I accidentally called my teacher 'mum'",
+      "I've eaten food off the floor in a restaurant",
+      "I once pretended to be someone else for an entire day",
+      "I've been on TV without knowing it",
+      "I have a secret talent nobody knows about",
+      "I once won a competition by accident",
+      "I've been mistaken for a staff member somewhere",
+      "I once fell asleep in a very unusual place",
+      "I have a strange fear that most people don't have",
+      "I've kept a secret from you for over a year",
+      "I once lied to get out of a social event",
+      "I've done something embarrassing in public",
+      "I have a weird habit I do when I'm alone",
+      "I once got lost in my own neighbourhood",
+      "I've pretended to like something I actually hate",
+      "I once sent an embarrassing text to the wrong person",
+    ],
+  },
 };
 
 export default function QuizPage() {
