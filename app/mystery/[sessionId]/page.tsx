@@ -11,6 +11,7 @@ import AgreementCelebration from '../components/AgreementCelebration';
 import PartnerStatus from '../components/PartnerStatus';
 import { PuzzleRenderer, MiniGameContainer } from '../components/puzzles';
 import AIStoryMode from '../components/AIStoryMode';
+import { BranchVisualization } from '../components/BranchVisualization';
 
 export default function MysterySessionPage() {
   const params = useParams();
@@ -28,6 +29,7 @@ export default function MysterySessionPage() {
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null);
   const [textComplete, setTextComplete] = useState(false);
   const [isAIEpisode, setIsAIEpisode] = useState<boolean | null>(null);
+  const [showBranchViz, setShowBranchViz] = useState(false);
   const votingRef = useRef(false); // Use ref to prevent race conditions
   const currentPuzzleIdRef = useRef<string | null>(null); // Track current puzzle to prevent stale callbacks
 
@@ -391,12 +393,29 @@ export default function MysterySessionPage() {
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <button
+              onClick={() => setShowBranchViz(true)}
+              className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-purple-950 rounded-xl font-medium transition-colors"
+            >
+              🗺️ View Story Path
+            </button>
+            <button
               onClick={() => router.push('/mystery')}
               className="px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-medium transition-colors"
             >
               Choose Another Mystery
             </button>
           </div>
+
+          {/* Branch Visualization Modal */}
+          <AnimatePresence>
+            {showBranchViz && (
+              <BranchVisualization
+                sessionId={sessionId}
+                episodeId={episode.id}
+                onClose={() => setShowBranchViz(false)}
+              />
+            )}
+          </AnimatePresence>
         </motion.div>
       </div>
     );

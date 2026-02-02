@@ -6,6 +6,7 @@ import { ComposableMap, Geographies, Geography, ZoomableGroup } from 'react-simp
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import StatsPanel from './components/StatsPanel';
 import { PhotoGallery } from './components/PhotoGallery';
+import { TripPlanner } from './components/TripPlanner';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 interface Place {
@@ -139,6 +140,7 @@ export default function MapPage() {
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [clickedLocation, setClickedLocation] = useState<{ name: string; key: string; isState: boolean } | null>(null);
   const [showStats, setShowStats] = useState(false);
+  const [showTripPlanner, setShowTripPlanner] = useState(false);
   const [photoGalleryPlace, setPhotoGalleryPlace] = useState<{ id: string; name: string } | null>(null);
 
   // Get all places as a map for quick lookup
@@ -357,12 +359,20 @@ export default function MapPage() {
           </div>
           <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 dark:text-white mb-2">Our Travel Map</h1>
           <p className="text-gray-500 dark:text-gray-400">{totalWishlist} wishlist · {totalVisited} visited</p>
-          <button
-            onClick={() => setShowStats(true)}
-            className="mt-3 px-4 py-2 bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded-lg text-sm font-medium hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors"
-          >
-            View Stats
-          </button>
+          <div className="flex justify-center gap-3 mt-3">
+            <button
+              onClick={() => setShowStats(true)}
+              className="px-4 py-2 bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded-lg text-sm font-medium hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors"
+            >
+              📊 View Stats
+            </button>
+            <button
+              onClick={() => setShowTripPlanner(true)}
+              className="px-4 py-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-lg text-sm font-medium hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors"
+            >
+              ✈️ Plan Trip
+            </button>
+          </div>
         </motion.div>
 
         {/* Back button when zoomed */}
@@ -739,6 +749,16 @@ export default function MapPage() {
               placeName={photoGalleryPlace.name}
               currentUser={currentUser}
               onClose={() => setPhotoGalleryPlace(null)}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Trip Planner */}
+        <AnimatePresence>
+          {showTripPlanner && currentUser && (
+            <TripPlanner
+              currentUser={currentUser}
+              onClose={() => setShowTripPlanner(false)}
             />
           )}
         </AnimatePresence>
