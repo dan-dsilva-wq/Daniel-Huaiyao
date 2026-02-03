@@ -41,6 +41,8 @@ export default function StoryBookPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [content, setContent] = useState('');
   const [expandedSentence, setExpandedSentence] = useState<string | null>(null);
+  const [partnerTyping, setPartnerTyping] = useState(false);
+  const typingTimeoutRef = useCallback(() => ({ current: null as NodeJS.Timeout | null }), [])();
 
   // Get current user
   useEffect(() => {
@@ -88,11 +90,43 @@ export default function StoryBookPage() {
     fetchSentences();
   }, [fetchSentences]);
 
+  // Update typing status
+  const updateTypingStatus = useCallback(async (isTyping: boolean) => {
+    if (!currentUser || !isSupabaseConfigured) return;
+
+    try {
+      await supabase.rpc('set_typing_status', {
+        p_player: currentUser,
+        p_app_name: 'book',
+        p_is_typing: isTyping,
+      });
+    } catch (err) {
+      console.error('Error updating typing status:', err);
+    }
+  }, [currentUser]);
+
+  // Handle typing indicator
+  const handleTyping = useCallback(() => {
+    updateTypingStatus(true);
+
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    // Set timeout to clear typing status after 2 seconds of no typing
+    typingTimeoutRef.current = setTimeout(() => {
+      updateTypingStatus(false);
+    }, 2000);
+  }, [updateTypingStatus, typingTimeoutRef]);
+
   // Realtime subscription
   useEffect(() => {
     if (!isSupabaseConfigured || !currentUser) return;
 
-    const channel = supabase
+    const partner = currentUser === 'daniel' ? 'huaiyao' : 'daniel';
+
+    const sentenceChannel = supabase
       .channel('book-sentences')
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'book_sentences' },
@@ -112,10 +146,25 @@ export default function StoryBookPage() {
       )
       .subscribe();
 
+    // Subscribe to partner's typing status
+    const typingChannel = supabase
+      .channel('book-typing')
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'typing_status', filter: `player=eq.${partner}` },
+        (payload) => {
+          const typingData = payload.new as { is_typing: boolean; app_name: string };
+          setPartnerTyping(typingData.is_typing && typingData.app_name === 'book');
+        }
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(sentenceChannel);
+      supabase.removeChannel(typingChannel);
+      // Clear typing status when component unmounts
+      updateTypingStatus(false);
     };
-  }, [currentUser]);
+  }, [currentUser, updateTypingStatus]);
 
   const goToPage = (page: number) => {
     if (page < 1 || page > totalPages || page === currentPage) return;
@@ -345,7 +394,11 @@ export default function StoryBookPage() {
               <div className="relative">
                 <textarea
                   value={content}
-                  onChange={(e) => setContent(e.target.value)}
+                  onChange={(e) => {
+                    setContent(e.target.value);
+                    handleTyping();
+                  }}
+                  onBlur={() => updateTypingStatus(false)}
                   placeholder="Continue the story..."
                   disabled={isSubmitting}
                   maxLength={500}
@@ -378,19 +431,41 @@ export default function StoryBookPage() {
               exit={{ opacity: 0, y: -20 }}
               className="text-center py-8 px-6 bg-amber-100/50 dark:bg-amber-900/30 rounded-xl"
             >
-              <motion.div
-                animate={{ y: [0, -5, 0] }}
-                transition={{ repeat: Infinity, duration: 2 }}
-                className="text-4xl mb-4"
-              >
-                ✨
-              </motion.div>
-              <p className="text-amber-700 dark:text-amber-300 font-serif">
-                It&apos;s {formatWriterName(currentTurn)}&apos;s turn to add to your story.
-              </p>
-              <p className="text-amber-500 dark:text-amber-500 text-sm mt-2">
-                You&apos;ll be able to write when they&apos;re done!
-              </p>
+              {partnerTyping ? (
+                <>
+                  <motion.div
+                    animate={{ scale: [1, 1.1, 1] }}
+                    transition={{ repeat: Infinity, duration: 1 }}
+                    className="text-4xl mb-4"
+                  >
+                    ✍️
+                  </motion.div>
+                  <p className="text-amber-700 dark:text-amber-300 font-serif">
+                    {formatWriterName(currentTurn)} is writing...
+                  </p>
+                  <div className="flex justify-center gap-1 mt-3">
+                    <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <motion.div
+                    animate={{ y: [0, -5, 0] }}
+                    transition={{ repeat: Infinity, duration: 2 }}
+                    className="text-4xl mb-4"
+                  >
+                    ✨
+                  </motion.div>
+                  <p className="text-amber-700 dark:text-amber-300 font-serif">
+                    It&apos;s {formatWriterName(currentTurn)}&apos;s turn to add to your story.
+                  </p>
+                  <p className="text-amber-500 dark:text-amber-500 text-sm mt-2">
+                    You&apos;ll be able to write when they&apos;re done!
+                  </p>
+                </>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

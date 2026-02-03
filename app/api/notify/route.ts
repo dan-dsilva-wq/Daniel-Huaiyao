@@ -28,7 +28,7 @@ function isWithinAllowedHours(): boolean {
   return hour >= QUIET_HOURS_END && hour < QUIET_HOURS_START;
 }
 
-type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed' | 'memory_added' | 'gratitude_sent' | 'chat_message' | 'book_sentence';
+type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed' | 'memory_added' | 'gratitude_sent' | 'chat_message' | 'book_sentence' | 'date_added' | 'date_removed' | 'prompt_answered' | 'media_added';
 
 const ACTION_MESSAGES: Record<ActionType, string> = {
   added: 'added a new date idea',
@@ -46,6 +46,10 @@ const ACTION_MESSAGES: Record<ActionType, string> = {
   gratitude_sent: 'left you a note on the gratitude wall',
   chat_message: 'sent you a message',
   book_sentence: 'added to your story',
+  date_added: 'added a countdown event',
+  date_removed: 'removed a countdown event',
+  prompt_answered: 'answered today\'s prompt',
+  media_added: 'added something to watch',
 };
 
 const ACTION_URLS: Record<string, string> = {
@@ -64,6 +68,32 @@ const ACTION_URLS: Record<string, string> = {
   gratitude_sent: '/gratitude',
   chat_message: '/',
   book_sentence: '/book',
+  date_added: '/countdown',
+  date_removed: '/countdown',
+  prompt_answered: '/prompts',
+  media_added: '/media',
+};
+
+const ACTION_APP_NAMES: Record<string, string> = {
+  added: 'dates',
+  removed: 'dates',
+  completed: 'dates',
+  uncompleted: 'dates',
+  question_added: 'quiz',
+  question_answered: 'quiz',
+  place_added: 'map',
+  place_visited: 'map',
+  mystery_started: 'mystery',
+  mystery_waiting: 'mystery',
+  mystery_agreed: 'mystery',
+  memory_added: 'memories',
+  gratitude_sent: 'gratitude',
+  chat_message: 'chat',
+  book_sentence: 'book',
+  date_added: 'countdown',
+  date_removed: 'countdown',
+  prompt_answered: 'prompts',
+  media_added: 'media',
 };
 
 export async function POST(request: Request) {
@@ -78,10 +108,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    // Temporarily disable mystery notifications
-    const isMystery = action === 'mystery_started' || action === 'mystery_waiting' || action === 'mystery_agreed';
-    if (isMystery) {
-      return NextResponse.json({ success: true, skipped: true, reason: 'Mystery notifications temporarily disabled' });
+    // Log activity (do this regardless of notification status)
+    const appName = ACTION_APP_NAMES[action] || 'home';
+    try {
+      await supabase.rpc('log_activity', {
+        p_player: user,
+        p_action_type: action,
+        p_app_name: appName,
+        p_action_title: title || null,
+      });
+    } catch (activityError) {
+      console.error('Error logging activity:', activityError);
+      // Continue even if activity logging fails
     }
 
     // Check if within allowed hours (9 AM - 11 PM Eastern)

@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/gratitude-reminder",
+      "schedule": "0 1 * * *"
+    }
+  ]
+}

@@ -150,6 +150,19 @@ export default function MemoriesPage() {
     return uploadedUrls;
   };
 
+  const sendNotification = async (title: string) => {
+    if (!currentUser) return;
+    try {
+      await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'memory_added', title, user: currentUser }),
+      });
+    } catch (error) {
+      console.error('Notification error:', error);
+    }
+  };
+
   const handleAddMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !formTitle.trim()) return;
@@ -178,6 +191,9 @@ export default function MemoriesPage() {
       });
 
       if (error) throw error;
+
+      // Notify partner
+      sendNotification(formTitle.trim());
 
       // Upload photos if any
       if (formPhotos.length > 0 && memoryData?.id) {

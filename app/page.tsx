@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ThemeToggle } from './components/ThemeToggle';
+import { FeedbackChat } from './components/FeedbackChat';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
 interface AppCardProps {
@@ -14,6 +15,54 @@ interface AppCardProps {
   badge?: string;
   newCount?: number;
   onVisit?: () => void;
+}
+
+interface MemoryFlashback {
+  id: string;
+  title: string;
+  description: string | null;
+  memory_date: string;
+  years_ago: number;
+  photo_url: string | null;
+  memory_type: string;
+  location_name: string | null;
+}
+
+interface PartnerActivity {
+  id: string;
+  action_type: string;
+  action_title: string | null;
+  app_name: string;
+  created_at: string;
+}
+
+interface SharedStreak {
+  current_streak: number;
+  longest_streak: number;
+  last_both_active: string | null;
+  daniel_checked_in_today: boolean;
+  huaiyao_checked_in_today: boolean;
+}
+
+interface PartnerPresence {
+  is_online: boolean;
+  last_seen: string | null;
+  current_app: string | null;
+}
+
+interface PartnerWatching {
+  media_id: string;
+  title: string;
+  media_type: string;
+  started_at: string;
+}
+
+interface EngagementData {
+  flashbacks: MemoryFlashback[];
+  partner_activity: PartnerActivity[];
+  shared_streak: SharedStreak | null;
+  partner_presence: PartnerPresence | null;
+  partner_watching: PartnerWatching[];
 }
 
 function AppCard({ title, icon, href, gradient, newCount, onVisit }: AppCardProps) {
@@ -163,6 +212,11 @@ export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [showUnused, setShowUnused] = useState(false);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [engagementData, setEngagementData] = useState<EngagementData | null>(null);
+  const [showActivityFeed, setShowActivityFeed] = useState(false);
+  const [showFeedbackChat, setShowFeedbackChat] = useState(false);
+
+  const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
 
   // Fetch visit counts from Supabase
   const fetchVisitCounts = async () => {
@@ -190,6 +244,36 @@ export default function Home() {
     }
   };
 
+  // Fetch all engagement data
+  const fetchEngagementData = useCallback(async (user: string) => {
+    if (!isSupabaseConfigured) return;
+    try {
+      const { data, error } = await supabase.rpc('get_home_engagement_data', { p_player: user });
+      if (!error && data && data[0]) {
+        setEngagementData({
+          flashbacks: data[0].flashbacks || [],
+          partner_activity: data[0].partner_activity || [],
+          shared_streak: data[0].shared_streak || null,
+          partner_presence: data[0].partner_presence || null,
+          partner_watching: data[0].partner_watching || [],
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching engagement data:', err);
+    }
+  }, []);
+
+  // Record check-in and update presence
+  const recordCheckIn = useCallback(async (user: string) => {
+    if (!isSupabaseConfigured) return;
+    try {
+      await supabase.rpc('record_check_in', { p_player: user });
+      await supabase.rpc('update_presence', { p_player: user, p_is_online: true, p_current_app: 'home' });
+    } catch (err) {
+      console.error('Error recording check-in:', err);
+    }
+  }, []);
+
   // Record a visit to Supabase
   const recordVisit = async (appTitle: string) => {
     if (!isSupabaseConfigured) return;
@@ -215,8 +299,10 @@ export default function Home() {
     fetchVisitCounts();
     if (savedUser) {
       fetchNewCounts(savedUser);
+      fetchEngagementData(savedUser);
+      recordCheckIn(savedUser);
     }
-  }, []);
+  }, [fetchEngagementData, recordCheckIn]);
 
   // Separate apps into used (visited in last 30 days) and unused - keep original order
   const { usedApps, unusedApps } = useMemo(() => {
@@ -292,7 +378,163 @@ export default function Home() {
           <p className="text-lg sm:text-xl text-gray-500 dark:text-gray-400 max-w-md mx-auto">
             Some fun stuff we made
           </p>
+
+          {/* Partner Status Indicator */}
+          {currentUser && engagementData?.partner_presence && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-4 flex items-center justify-center gap-2"
+            >
+              <div className="flex items-center gap-2 px-4 py-2 bg-white/80 dark:bg-gray-800/80 backdrop-blur rounded-full shadow-sm">
+                <div className="relative">
+                  <motion.div
+                    animate={engagementData.partner_presence.is_online ? { scale: [1, 1.2, 1] } : {}}
+                    transition={{ duration: 2, repeat: Infinity }}
+                    className={`w-2.5 h-2.5 rounded-full ${
+                      engagementData.partner_presence.is_online
+                        ? 'bg-green-500'
+                        : 'bg-gray-400'
+                    }`}
+                  />
+                  {engagementData.partner_presence.is_online && (
+                    <motion.div
+                      animate={{ scale: [1, 1.5], opacity: [0.5, 0] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                      className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-green-500"
+                    />
+                  )}
+                </div>
+                <span className="text-sm text-gray-600 dark:text-gray-300">
+                  {partnerName} is {engagementData.partner_presence.is_online ? 'online' : 'away'}
+                  {engagementData.partner_presence.is_online && engagementData.partner_presence.current_app && (
+                    <span className="text-gray-400 dark:text-gray-500"> ({engagementData.partner_presence.current_app})</span>
+                  )}
+                </span>
+              </div>
+            </motion.div>
+          )}
         </motion.div>
+
+        {/* Engagement Section */}
+        {currentUser && engagementData && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+            className="mb-8 space-y-4"
+          >
+            {/* Memory Flashbacks ("On This Day") */}
+            {engagementData.flashbacks.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl p-4 text-white shadow-lg"
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xl">📸</span>
+                  <span className="font-medium">On this day...</span>
+                </div>
+                <div className="space-y-2">
+                  {engagementData.flashbacks.slice(0, 3).map((flashback) => (
+                    <a
+                      key={flashback.id}
+                      href="/memories"
+                      className="flex items-center gap-3 p-2 bg-white/20 rounded-lg hover:bg-white/30 transition-colors"
+                    >
+                      {flashback.photo_url ? (
+                        <img
+                          src={flashback.photo_url}
+                          alt=""
+                          className="w-12 h-12 rounded-lg object-cover"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-lg bg-white/20 flex items-center justify-center text-xl">
+                          {flashback.memory_type === 'milestone' ? '🏆' : flashback.memory_type === 'photo' ? '📷' : '✨'}
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium truncate">{flashback.title}</div>
+                        <div className="text-sm opacity-80">{flashback.years_ago} year{flashback.years_ago !== 1 ? 's' : ''} ago</div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {/* Activity Feed Toggle */}
+            {engagementData.partner_activity.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+              >
+                <button
+                  onClick={() => setShowActivityFeed(!showActivityFeed)}
+                  className="w-full flex items-center justify-between p-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur rounded-2xl shadow-sm hover:bg-white dark:hover:bg-gray-800 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <span>👀</span>
+                    <span className="font-medium text-gray-800 dark:text-gray-200">
+                      What {partnerName}&apos;s been up to
+                    </span>
+                  </div>
+                  <span className={`text-gray-400 transition-transform ${showActivityFeed ? 'rotate-180' : ''}`}>
+                    ▼
+                  </span>
+                </button>
+
+                <AnimatePresence>
+                  {showActivityFeed && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="mt-2 space-y-2">
+                        {engagementData.partner_activity.map((activity) => (
+                          <a
+                            key={activity.id}
+                            href={`/${activity.app_name}`}
+                            className="flex items-center gap-3 p-3 bg-white/60 dark:bg-gray-800/60 backdrop-blur rounded-xl hover:bg-white dark:hover:bg-gray-800 transition-colors"
+                          >
+                            <span className="text-xl">
+                              {activity.action_type === 'gratitude_sent' ? '💝' :
+                               activity.action_type === 'memory_added' ? '📸' :
+                               activity.action_type === 'question_answered' ? '🧠' :
+                               activity.action_type === 'book_sentence' ? '📖' :
+                               activity.action_type === 'media_added' ? '🎬' :
+                               activity.action_type === 'place_added' ? '🗺️' : '✨'}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-gray-800 dark:text-gray-200">
+                                {activity.action_type === 'gratitude_sent' && 'Left you a note'}
+                                {activity.action_type === 'memory_added' && `Added a memory${activity.action_title ? `: ${activity.action_title}` : ''}`}
+                                {activity.action_type === 'question_answered' && 'Answered your quiz question'}
+                                {activity.action_type === 'book_sentence' && 'Added to your story'}
+                                {activity.action_type === 'media_added' && `Added ${activity.action_title || 'media'}`}
+                                {activity.action_type === 'place_added' && `Added ${activity.action_title || 'a place'}`}
+                              </div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                {new Date(activity.created_at).toLocaleDateString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: 'numeric',
+                                  minute: '2-digit'
+                                })}
+                              </div>
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            )}
+          </motion.div>
+        )}
 
         {/* Main Apps (used in last 30 days) */}
         <motion.div
@@ -371,6 +613,24 @@ export default function Home() {
           <p>Built for fun</p>
         </motion.footer>
       </main>
+
+      {/* Feedback button - visible to both for now (normally just Huaiyao) */}
+      {currentUser && (
+        <motion.button
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setShowFeedbackChat(true)}
+          className="fixed bottom-6 right-6 z-40 w-14 h-14 bg-gradient-to-r from-rose-500 to-pink-500 text-white rounded-full shadow-lg flex items-center justify-center hover:shadow-xl transition-shadow"
+          title="Tell Daniel something"
+        >
+          <span className="text-2xl">💬</span>
+        </motion.button>
+      )}
+
+      {/* Feedback Chat Modal */}
+      <FeedbackChat isOpen={showFeedbackChat} onClose={() => setShowFeedbackChat(false)} />
     </div>
   );
 }

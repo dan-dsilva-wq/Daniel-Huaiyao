@@ -141,6 +141,11 @@ export default function Gratitude() {
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
 
+  // Check if user wrote today
+  const today = new Date().toDateString();
+  const wroteToday = sent.some((note) => new Date(note.created_at).toDateString() === today);
+  const partnerWroteToday = received.some((note) => new Date(note.created_at).toDateString() === today);
+
   // User selection screen
   if (!currentUser) {
     return (
@@ -238,6 +243,45 @@ export default function Gratitude() {
           <p className="text-gray-500 dark:text-gray-400">
             Little notes of appreciation
           </p>
+        </motion.div>
+
+        {/* Today's Status */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-6 p-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur rounded-2xl shadow-sm"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                wroteToday
+                  ? 'bg-green-100 dark:bg-green-900/30'
+                  : 'bg-gray-100 dark:bg-gray-700'
+              }`}>
+                <span className="text-lg">{wroteToday ? '✓' : '💭'}</span>
+              </div>
+              <div>
+                <p className="font-medium text-gray-800 dark:text-gray-100">
+                  {wroteToday ? "You've shared gratitude today" : "Write something today?"}
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {partnerWroteToday
+                    ? `${partnerName} left you a note today 💝`
+                    : `${partnerName} hasn't written yet`}
+                </p>
+              </div>
+            </div>
+            {!wroteToday && (
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setShowWriteModal(true)}
+                className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium"
+              >
+                Write
+              </motion.button>
+            )}
+          </div>
         </motion.div>
 
         {/* Write note button */}

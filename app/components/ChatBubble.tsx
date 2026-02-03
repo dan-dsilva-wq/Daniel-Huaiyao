@@ -19,8 +19,10 @@ export default function ChatBubble() {
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isSending, setIsSending] = useState(false);
+  const [partnerTyping, setPartnerTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Get current user
   useEffect(() => {
@@ -64,14 +66,46 @@ export default function ChatBubble() {
     setUnreadCount(0);
   };
 
+  // Update typing status
+  const updateTypingStatus = async (isTyping: boolean) => {
+    if (!currentUser || !isSupabaseConfigured) return;
+
+    try {
+      await supabase.rpc('set_typing_status', {
+        p_player: currentUser,
+        p_app_name: 'chat',
+        p_is_typing: isTyping,
+      });
+    } catch (err) {
+      console.error('Error updating typing status:', err);
+    }
+  };
+
+  // Handle typing indicator
+  const handleTyping = () => {
+    updateTypingStatus(true);
+
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    // Set timeout to clear typing status after 2 seconds of no typing
+    typingTimeoutRef.current = setTimeout(() => {
+      updateTypingStatus(false);
+    }, 2000);
+  };
+
   // Initial fetch and realtime subscription
   useEffect(() => {
     fetchMessages();
 
     if (!isSupabaseConfigured) return;
 
+    const partner = currentUser === 'daniel' ? 'huaiyao' : 'daniel';
+
     // Subscribe to new messages and updates (for read receipts)
-    const channel = supabase
+    const messageChannel = supabase
       .channel('chat_messages')
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'chat_messages' },
@@ -100,8 +134,25 @@ export default function ChatBubble() {
       )
       .subscribe();
 
+    // Subscribe to partner's typing status
+    const typingChannel = supabase
+      .channel('chat_typing')
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'typing_status', filter: `player=eq.${partner}` },
+        (payload) => {
+          const typingData = payload.new as { is_typing: boolean; app_name: string };
+          setPartnerTyping(typingData.is_typing && typingData.app_name === 'chat');
+        }
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(messageChannel);
+      supabase.removeChannel(typingChannel);
+      // Clear typing status when component unmounts
+      if (currentUser) {
+        updateTypingStatus(false);
+      }
     };
   }, [currentUser, isOpen]);
 
@@ -299,6 +350,21 @@ export default function ChatBubble() {
                   );
                 })
               )}
+              {/* Typing indicator */}
+              {partnerTyping && (
+                <div className="flex justify-start">
+                  <div className="max-w-[80%] px-4 py-2 rounded-2xl bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-bl-md shadow-sm">
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm">{partnerName} is typing</span>
+                      <span className="flex gap-0.5">
+                        <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
 
@@ -309,7 +375,11 @@ export default function ChatBubble() {
                   ref={inputRef}
                   type="text"
                   value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
+                  onChange={(e) => {
+                    setNewMessage(e.target.value);
+                    handleTyping();
+                  }}
+                  onBlur={() => updateTypingStatus(false)}
                   placeholder={`Message ${partnerName}...`}
                   className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-pink-500 dark:text-white"
                 />
