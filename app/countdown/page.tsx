@@ -19,6 +19,10 @@ interface ImportantDate {
   next_occurrence: string;
 }
 
+interface PastEvent extends ImportantDate {
+  actual_date: string; // The date that just passed
+}
+
 const CATEGORY_OPTIONS = [
   { value: 'anniversary', label: 'Anniversary', emoji: '💕' },
   { value: 'birthday', label: 'Birthday', emoji: '🎂' },
@@ -29,9 +33,16 @@ const CATEGORY_OPTIONS = [
 export default function Countdown() {
   useMarkAppViewed('countdown');
   const [dates, setDates] = useState<ImportantDate[]>([]);
+  const [pastEvents, setPastEvents] = useState<PastEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showMemoryModal, setShowMemoryModal] = useState(false);
+  const [savingEvent, setSavingEvent] = useState<PastEvent | null>(null);
+  const [memoryDescription, setMemoryDescription] = useState('');
+  const [memoryPhotos, setMemoryPhotos] = useState<File[]>([]);
+  const [photoPreviewUrls, setPhotoPreviewUrls] = useState<string[]>([]);
+  const [savingMemory, setSavingMemory] = useState(false);
   const [newDate, setNewDate] = useState({
     title: '',
     event_date: '',
@@ -49,7 +60,25 @@ export default function Countdown() {
     try {
       const { data, error } = await supabase.rpc('get_important_dates');
       if (error) throw error;
-      setDates(data || []);
+
+      // Separate upcoming and past non-recurring events
+      const upcoming: ImportantDate[] = [];
+      const past: PastEvent[] = [];
+
+      for (const date of (data || [])) {
+        if (date.days_until < 0 && !date.is_recurring) {
+          // Past non-recurring event - candidate for saving to memories
+          past.push({
+            ...date,
+            actual_date: date.event_date,
+          });
+        } else {
+          upcoming.push(date);
+        }
+      }
+
+      setDates(upcoming);
+      setPastEvents(past);
     } catch (error) {
       console.error('Error fetching dates:', error);
     }
@@ -105,6 +134,102 @@ export default function Countdown() {
       return;
     }
     sendNotification('date_removed', title);
+    fetchDates();
+  };
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const newPhotos = [...memoryPhotos, ...files].slice(0, 5);
+    setMemoryPhotos(newPhotos);
+
+    const newPreviewUrls = newPhotos.map((file) => URL.createObjectURL(file));
+    photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+    setPhotoPreviewUrls(newPreviewUrls);
+  };
+
+  const removePhoto = (index: number) => {
+    URL.revokeObjectURL(photoPreviewUrls[index]);
+    setMemoryPhotos(memoryPhotos.filter((_, i) => i !== index));
+    setPhotoPreviewUrls(photoPreviewUrls.filter((_, i) => i !== index));
+  };
+
+  const openMemoryModal = (event: PastEvent) => {
+    setSavingEvent(event);
+    setMemoryDescription('');
+    setMemoryPhotos([]);
+    setPhotoPreviewUrls([]);
+    setShowMemoryModal(true);
+  };
+
+  const saveToMemories = async () => {
+    if (!savingEvent || !currentUser) return;
+
+    setSavingMemory(true);
+    try {
+      // Create the memory
+      const { data: memoryData, error } = await supabase.rpc('add_memory', {
+        p_created_by: currentUser,
+        p_memory_type: 'moment',
+        p_title: `${savingEvent.emoji} ${savingEvent.title}`,
+        p_description: memoryDescription.trim() || null,
+        p_memory_date: savingEvent.actual_date,
+        p_location_name: null,
+        p_location_lat: null,
+        p_location_lng: null,
+        p_tags: [savingEvent.category],
+      });
+
+      if (error) throw error;
+
+      // Upload photos if any
+      if (memoryPhotos.length > 0 && memoryData?.id) {
+        for (const file of memoryPhotos) {
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${memoryData.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('memory-photos')
+            .upload(fileName, file);
+
+          if (!uploadError) {
+            const { data: { publicUrl } } = supabase.storage
+              .from('memory-photos')
+              .getPublicUrl(fileName);
+
+            await supabase.from('memory_photos').insert({
+              memory_id: memoryData.id,
+              photo_url: publicUrl,
+            });
+          }
+        }
+      }
+
+      // Delete the countdown event
+      await supabase.rpc('delete_important_date', { p_id: savingEvent.id });
+
+      // Clean up
+      photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+      setShowMemoryModal(false);
+      setSavingEvent(null);
+      setMemoryDescription('');
+      setMemoryPhotos([]);
+      setPhotoPreviewUrls([]);
+
+      fetchDates();
+      alert('Saved to memories! ✨');
+    } catch (error) {
+      console.error('Error saving to memories:', error);
+      alert('Failed to save. Please try again.');
+    } finally {
+      setSavingMemory(false);
+    }
+  };
+
+  const dismissPastEvent = async (id: string) => {
+    if (!confirm('Remove this without saving to memories?')) return;
+    await supabase.rpc('delete_important_date', { p_id: id });
     fetchDates();
   };
 
@@ -318,7 +443,7 @@ export default function Countdown() {
           ))}
         </div>
 
-        {dates.length === 0 && (
+        {dates.length === 0 && pastEvents.length === 0 && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -326,6 +451,66 @@ export default function Countdown() {
           >
             <div className="text-5xl mb-4">📅</div>
             <p>No dates yet. Add your first important date!</p>
+          </motion.div>
+        )}
+
+        {/* Past Events - Save to Memories */}
+        {pastEvents.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-8"
+          >
+            <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-4 flex items-center gap-2">
+              <span>✨</span> Save These Memories
+            </h2>
+            <div className="space-y-3">
+              {pastEvents.map((event) => (
+                <motion.div
+                  key={event.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="p-4 bg-gradient-to-r from-amber-50 to-rose-50 dark:from-amber-900/20 dark:to-rose-900/20
+                             border border-amber-200 dark:border-amber-800 rounded-xl"
+                >
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className="text-2xl">{event.emoji}</span>
+                    <div className="flex-1">
+                      <h3 className="font-medium text-gray-800 dark:text-gray-100">
+                        {event.title}
+                      </h3>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {new Date(event.actual_date).toLocaleDateString('en-US', {
+                          weekday: 'long',
+                          month: 'long',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-amber-700 dark:text-amber-300 mb-3">
+                    This event has passed! Would you like to save it as a memory?
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openMemoryModal(event)}
+                      className="flex-1 px-4 py-2 bg-amber-500 text-white rounded-lg font-medium
+                                 hover:bg-amber-600 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <span>📸</span> Save to Memories
+                    </button>
+                    <button
+                      onClick={() => dismissPastEvent(event.id)}
+                      className="px-4 py-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300
+                                 transition-colors"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
           </motion.div>
         )}
 
@@ -454,6 +639,118 @@ export default function Countdown() {
                              hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   Add Date
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Save to Memory Modal */}
+      <AnimatePresence>
+        {showMemoryModal && savingEvent && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+            onClick={() => setShowMemoryModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-xl font-serif font-bold text-gray-800 dark:text-gray-100 mb-2">
+                Save to Memories
+              </h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                {savingEvent.emoji} {savingEvent.title} • {new Date(savingEvent.actual_date).toLocaleDateString()}
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    How was it? (optional)
+                  </label>
+                  <textarea
+                    value={memoryDescription}
+                    onChange={(e) => setMemoryDescription(e.target.value)}
+                    placeholder="Share your thoughts about this event..."
+                    rows={3}
+                    className="w-full px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-xl
+                               bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100
+                               focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Add Photos (optional)
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handlePhotoSelect}
+                    className="hidden"
+                    id="memory-photos"
+                  />
+                  <label
+                    htmlFor="memory-photos"
+                    className="block w-full p-4 border-2 border-dashed border-gray-300 dark:border-gray-600
+                               rounded-xl text-center text-gray-500 dark:text-gray-400 cursor-pointer
+                               hover:border-amber-400 hover:text-amber-500 transition-colors"
+                  >
+                    📷 Tap to add photos (max 5)
+                  </label>
+
+                  {photoPreviewUrls.length > 0 && (
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {photoPreviewUrls.map((url, index) => (
+                        <div key={index} className="relative aspect-square">
+                          <img
+                            src={url}
+                            alt={`Preview ${index + 1}`}
+                            className="w-full h-full object-cover rounded-lg"
+                          />
+                          <button
+                            onClick={() => removePhoto(index)}
+                            className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full
+                                       text-sm flex items-center justify-center shadow-lg"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+                    setShowMemoryModal(false);
+                    setSavingEvent(null);
+                    setMemoryPhotos([]);
+                    setPhotoPreviewUrls([]);
+                  }}
+                  className="flex-1 px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800
+                             dark:hover:text-gray-200 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveToMemories}
+                  disabled={savingMemory}
+                  className="flex-1 px-4 py-2 bg-amber-500 text-white rounded-xl font-medium
+                             hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {savingMemory ? 'Saving...' : 'Save Memory ✨'}
                 </button>
               </div>
             </motion.div>
