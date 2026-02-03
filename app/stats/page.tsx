@@ -19,16 +19,15 @@ interface Achievement {
   unlocked_at: string | null;
 }
 
-interface PlayerStats {
-  achievements_unlocked: number;
-  total_points: number;
+interface TeamStats {
   quiz_correct: number;
   gratitude_sent: number;
   memories_created: number;
+  prompts_answered: number;
+  places_visited: number;
 }
 
 interface RecentAchievement {
-  player: string;
   title: string;
   emoji: string;
   unlocked_at: string;
@@ -45,11 +44,10 @@ interface StatsData {
     memories_created: number;
     prompts_answered: number;
     media_completed: number;
+    places_visited: number;
+    book_sentences: number;
   };
-  player_stats: {
-    daniel: PlayerStats;
-    huaiyao: PlayerStats;
-  };
+  team_stats: TeamStats;
   recent_achievements: RecentAchievement[] | null;
 }
 
@@ -72,7 +70,6 @@ const CATEGORY_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 export default function StatsPage() {
-  const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [stats, setStats] = useState<StatsData | null>(null);
   const [achievements, setAchievements] = useState<AchievementsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,8 +79,6 @@ export default function StatsPage() {
   const [firstDate, setFirstDate] = useState('');
 
   const fetchData = useCallback(async () => {
-    if (!currentUser) return;
-
     try {
       // Fetch first_date
       const { data: relationshipData } = await supabase
@@ -100,77 +95,59 @@ export default function StatsPage() {
         daysTogether = Math.floor((today.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
       }
 
-      // Fetch actual counts from tables
+      // Fetch actual counts from tables (team totals)
       const [
         quizAnswersRes,
+        quizCorrectRes,
         mysteriesRes,
         gratitudeRes,
         memoriesRes,
         promptsRes,
         mediaRes,
+        placesRes,
+        bookRes,
       ] = await Promise.all([
         supabase.from('quiz_answers').select('id', { count: 'exact', head: true }),
+        supabase.from('quiz_answers').select('id', { count: 'exact', head: true }).eq('is_correct', true),
         supabase.from('mystery_sessions').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
         supabase.from('gratitude_notes').select('id', { count: 'exact', head: true }),
         supabase.from('memories').select('id', { count: 'exact', head: true }),
         supabase.from('prompt_responses').select('id', { count: 'exact', head: true }),
         supabase.from('media_items').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
+        supabase.from('map_places').select('id', { count: 'exact', head: true }).or('daniel_status.eq.visited,huaiyao_status.eq.visited'),
+        supabase.from('book_sentences').select('id', { count: 'exact', head: true }),
       ]);
 
-      // Fetch per-player stats
-      const [
-        danielQuizRes,
-        huaiyaoQuizRes,
-        danielGratitudeRes,
-        huaiyaoGratitudeRes,
-        danielMemoriesRes,
-        huaiyaoMemoriesRes,
-      ] = await Promise.all([
-        supabase.from('quiz_answers').select('id', { count: 'exact', head: true }).eq('player', 'daniel').eq('is_correct', true),
-        supabase.from('quiz_answers').select('id', { count: 'exact', head: true }).eq('player', 'huaiyao').eq('is_correct', true),
-        supabase.from('gratitude_notes').select('id', { count: 'exact', head: true }).eq('from_player', 'daniel'),
-        supabase.from('gratitude_notes').select('id', { count: 'exact', head: true }).eq('from_player', 'huaiyao'),
-        supabase.from('memories').select('id', { count: 'exact', head: true }).eq('created_by', 'daniel'),
-        supabase.from('memories').select('id', { count: 'exact', head: true }).eq('created_by', 'huaiyao'),
-      ]);
-
-      // Build stats object with real data
+      // Build stats object with team data
       const statsData: StatsData = {
         days_together: daysTogether,
         stats: {
           first_date: relationshipData?.first_date || null,
           quiz_questions_answered: quizAnswersRes.count || 0,
           mysteries_completed: mysteriesRes.count || 0,
-          dates_completed: 0, // No dates table yet
+          dates_completed: 0,
           gratitude_notes_sent: gratitudeRes.count || 0,
           memories_created: memoriesRes.count || 0,
           prompts_answered: promptsRes.count || 0,
           media_completed: mediaRes.count || 0,
+          places_visited: placesRes.count || 0,
+          book_sentences: bookRes.count || 0,
         },
-        player_stats: {
-          daniel: {
-            achievements_unlocked: 0,
-            total_points: (danielQuizRes.count || 0) * 10,
-            quiz_correct: danielQuizRes.count || 0,
-            gratitude_sent: danielGratitudeRes.count || 0,
-            memories_created: danielMemoriesRes.count || 0,
-          },
-          huaiyao: {
-            achievements_unlocked: 0,
-            total_points: (huaiyaoQuizRes.count || 0) * 10,
-            quiz_correct: huaiyaoQuizRes.count || 0,
-            gratitude_sent: huaiyaoGratitudeRes.count || 0,
-            memories_created: huaiyaoMemoriesRes.count || 0,
-          },
+        team_stats: {
+          quiz_correct: quizCorrectRes.count || 0,
+          gratitude_sent: gratitudeRes.count || 0,
+          memories_created: memoriesRes.count || 0,
+          prompts_answered: promptsRes.count || 0,
+          places_visited: placesRes.count || 0,
         },
         recent_achievements: null,
       };
 
       setStats(statsData);
 
-      // Try to get achievements (may fail if RPC doesn't exist)
+      // Try to get team achievements (may fail if RPC doesn't exist)
       try {
-        const achievementsRes = await supabase.rpc('get_achievements', { p_player: currentUser });
+        const achievementsRes = await supabase.rpc('get_team_achievements');
         if (!achievementsRes.error) {
           setAchievements(achievementsRes.data);
         }
@@ -182,25 +159,11 @@ export default function StatsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentUser]);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('currentUser');
-    if (saved === 'daniel' || saved === 'huaiyao') {
-      setCurrentUser(saved);
-    }
   }, []);
 
   useEffect(() => {
-    if (currentUser) {
-      fetchData();
-    }
-  }, [currentUser, fetchData]);
-
-  const handleUserSelect = (user: 'daniel' | 'huaiyao') => {
-    localStorage.setItem('currentUser', user);
-    setCurrentUser(user);
-  };
+    fetchData();
+  }, [fetchData]);
 
   const [savingDate, setSavingDate] = useState(false);
 
@@ -245,35 +208,6 @@ export default function StatsPage() {
   const filteredAchievements = achievements?.achievements.filter(
     (a) => !filterCategory || a.category === filterCategory
   );
-
-  // User selection
-  if (!currentUser) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-amber-50 dark:from-gray-900 dark:to-amber-950 flex items-center justify-center p-4">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 max-w-md w-full text-center"
-        >
-          <h1 className="text-3xl font-bold mb-2 dark:text-white">Stats & Achievements</h1>
-          <p className="text-gray-600 dark:text-gray-300 mb-8">Who&apos;s checking their progress?</p>
-          <div className="flex gap-4 justify-center">
-            {(['daniel', 'huaiyao'] as const).map((user) => (
-              <motion.button
-                key={user}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => handleUserSelect(user)}
-                className="px-8 py-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl font-medium capitalize shadow-lg"
-              >
-                {user}
-              </motion.button>
-            ))}
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
 
   // Loading state
   if (loading) {
@@ -378,60 +312,43 @@ export default function StatsPage() {
                 )}
               </motion.div>
 
-              {/* Player Comparison */}
-              <div className="grid grid-cols-2 gap-4">
-                {(['daniel', 'huaiyao'] as const).map((player) => {
-                  const playerStats = stats?.player_stats[player];
-                  return (
-                    <motion.div
-                      key={player}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: player === 'daniel' ? 0.1 : 0.2 }}
-                      className={`bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg ${
-                        player === currentUser ? 'ring-2 ring-amber-500' : ''
-                      }`}
-                    >
-                      <h3 className="text-lg font-bold capitalize dark:text-white mb-4 flex items-center gap-2">
-                        {player}
-                        {player === currentUser && <span className="text-amber-500 text-sm">(You)</span>}
-                      </h3>
-                      <div className="space-y-3">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">Points</span>
-                          <span className="font-bold text-amber-600 dark:text-amber-400">
-                            {playerStats?.total_points || 0}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">Achievements</span>
-                          <span className="font-semibold dark:text-white">
-                            {playerStats?.achievements_unlocked || 0}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">Quiz Correct</span>
-                          <span className="font-semibold dark:text-white">
-                            {playerStats?.quiz_correct || 0}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">Gratitude Sent</span>
-                          <span className="font-semibold dark:text-white">
-                            {playerStats?.gratitude_sent || 0}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600 dark:text-gray-400">Memories</span>
-                          <span className="font-semibold dark:text-white">
-                            {playerStats?.memories_created || 0}
-                          </span>
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
+              {/* Team Progress */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg"
+              >
+                <h3 className="text-lg font-bold dark:text-white mb-4 flex items-center gap-2">
+                  <span>💕</span> Our Journey Together
+                </h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="text-center p-4 bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 rounded-xl">
+                    <div className="text-3xl font-bold text-indigo-600 dark:text-indigo-400">
+                      {stats?.team_stats.quiz_correct || 0}
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Quiz Questions Aced</div>
+                  </div>
+                  <div className="text-center p-4 bg-gradient-to-br from-rose-50 to-pink-50 dark:from-rose-900/20 dark:to-pink-900/20 rounded-xl">
+                    <div className="text-3xl font-bold text-rose-600 dark:text-rose-400">
+                      {stats?.team_stats.gratitude_sent || 0}
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Love Notes Shared</div>
+                  </div>
+                  <div className="text-center p-4 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-xl">
+                    <div className="text-3xl font-bold text-amber-600 dark:text-amber-400">
+                      {stats?.team_stats.memories_created || 0}
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Memories Captured</div>
+                  </div>
+                  <div className="text-center p-4 bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 rounded-xl">
+                    <div className="text-3xl font-bold text-teal-600 dark:text-teal-400">
+                      {stats?.team_stats.places_visited || 0}
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Places Explored</div>
+                  </div>
+                </div>
+              </motion.div>
 
               {/* Recent Achievements */}
               {stats?.recent_achievements && stats.recent_achievements.length > 0 && (
@@ -451,8 +368,7 @@ export default function StatsPage() {
                         <span className="text-2xl">{achievement.emoji}</span>
                         <div className="flex-1">
                           <div className="font-medium dark:text-white">{achievement.title}</div>
-                          <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">
-                            {achievement.player} •{' '}
+                          <div className="text-sm text-gray-500 dark:text-gray-400">
                             {new Date(achievement.unlocked_at).toLocaleDateString()}
                           </div>
                         </div>
@@ -462,7 +378,7 @@ export default function StatsPage() {
                 </motion.div>
               )}
 
-              {/* Quick Stats Grid */}
+              {/* Activity Stats Grid */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -471,10 +387,14 @@ export default function StatsPage() {
               >
                 {[
                   { label: 'Quiz Q&As', value: stats?.stats.quiz_questions_answered || 0, emoji: '🧠' },
-                  { label: 'Dates Done', value: stats?.stats.dates_completed || 0, emoji: '💑' },
-                  { label: 'Gratitude Notes', value: stats?.stats.gratitude_notes_sent || 0, emoji: '💝' },
+                  { label: 'Mysteries Solved', value: stats?.stats.mysteries_completed || 0, emoji: '🔍' },
+                  { label: 'Prompts Answered', value: stats?.stats.prompts_answered || 0, emoji: '💬' },
+                  { label: 'Story Sentences', value: stats?.stats.book_sentences || 0, emoji: '📖' },
+                  { label: 'Media Finished', value: stats?.stats.media_completed || 0, emoji: '🎬' },
                   { label: 'Memories', value: stats?.stats.memories_created || 0, emoji: '📸' },
-                ].map((stat, index) => (
+                  { label: 'Gratitude Notes', value: stats?.stats.gratitude_notes_sent || 0, emoji: '💝' },
+                  { label: 'Places Visited', value: stats?.stats.places_visited || 0, emoji: '🗺️' },
+                ].map((stat) => (
                   <div
                     key={stat.label}
                     className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow text-center"
@@ -494,12 +414,12 @@ export default function StatsPage() {
               exit={{ opacity: 0, x: -20 }}
               className="space-y-6"
             >
-              {/* Points Summary */}
+              {/* Team Points Summary */}
               <div className="bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl p-6 text-white text-center">
                 <div className="text-4xl font-bold">{achievements?.total_points || 0}</div>
-                <div className="opacity-90">Total Points</div>
+                <div className="opacity-90">Team Points</div>
                 <div className="mt-2 text-sm opacity-70">
-                  {achievements?.unlocked_count || 0} of {achievements?.total_count || 0} achievements unlocked
+                  {achievements?.unlocked_count || 0} of {achievements?.total_count || 0} achievements unlocked together
                 </div>
               </div>
 
