@@ -61,9 +61,11 @@ export default function Countdown() {
       const { data, error } = await supabase.rpc('get_important_dates');
       if (error) throw error;
 
-      // Separate upcoming and past non-recurring events
+      // Separate upcoming events and recently passed events (for memory saving)
       const upcoming: ImportantDate[] = [];
       const past: PastEvent[] = [];
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
       for (const date of (data || [])) {
         if (date.days_until < 0 && !date.is_recurring) {
@@ -72,6 +74,28 @@ export default function Countdown() {
             ...date,
             actual_date: date.event_date,
           });
+        } else if (date.is_recurring) {
+          // For recurring events, check if this year's occurrence just passed
+          const eventDate = new Date(date.event_date);
+          const thisYearOccurrence = new Date(today.getFullYear(), eventDate.getMonth(), eventDate.getDate());
+
+          // If this year's date hasn't happened yet, it's in the future
+          if (thisYearOccurrence > today) {
+            upcoming.push(date);
+          } else {
+            // This year's date has passed - check if it was within last 14 days
+            const daysSincePassed = Math.floor((today.getTime() - thisYearOccurrence.getTime()) / (1000 * 60 * 60 * 24));
+
+            if (daysSincePassed <= 14) {
+              // Recently passed recurring event - prompt to save as memory
+              past.push({
+                ...date,
+                actual_date: thisYearOccurrence.toISOString().split('T')[0],
+              });
+            }
+            // Always show recurring events in upcoming (for next occurrence)
+            upcoming.push(date);
+          }
         } else {
           upcoming.push(date);
         }
@@ -206,8 +230,10 @@ export default function Countdown() {
         }
       }
 
-      // Delete the countdown event
-      await supabase.rpc('delete_important_date', { p_id: savingEvent.id });
+      // Delete the countdown event only if it's not recurring
+      if (!savingEvent.is_recurring) {
+        await supabase.rpc('delete_important_date', { p_id: savingEvent.id });
+      }
 
       // Clean up
       photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
@@ -227,10 +253,15 @@ export default function Countdown() {
     }
   };
 
-  const dismissPastEvent = async (id: string) => {
-    if (!confirm('Remove this without saving to memories?')) return;
-    await supabase.rpc('delete_important_date', { p_id: id });
-    fetchDates();
+  const dismissPastEvent = async (event: PastEvent) => {
+    if (event.is_recurring) {
+      // For recurring events, just hide from the past list (don't delete)
+      setPastEvents(pastEvents.filter((e) => e.id !== event.id));
+    } else {
+      if (!confirm('Remove this without saving to memories?')) return;
+      await supabase.rpc('delete_important_date', { p_id: event.id });
+      fetchDates();
+    }
   };
 
   const selectUser = (user: 'daniel' | 'huaiyao') => {
@@ -490,7 +521,9 @@ export default function Countdown() {
                     </div>
                   </div>
                   <p className="text-sm text-amber-700 dark:text-amber-300 mb-3">
-                    This event has passed! Would you like to save it as a memory?
+                    {event.is_recurring
+                      ? "This year's event has passed! Would you like to save it as a memory?"
+                      : "This event has passed! Would you like to save it as a memory?"}
                   </p>
                   <div className="flex gap-2">
                     <button
@@ -501,11 +534,11 @@ export default function Countdown() {
                       <span>📸</span> Save to Memories
                     </button>
                     <button
-                      onClick={() => dismissPastEvent(event.id)}
+                      onClick={() => dismissPastEvent(event)}
                       className="px-4 py-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300
                                  transition-colors"
                     >
-                      Dismiss
+                      {event.is_recurring ? 'Not this time' : 'Dismiss'}
                     </button>
                   </div>
                 </motion.div>
