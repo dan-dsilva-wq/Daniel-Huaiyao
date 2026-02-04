@@ -157,7 +157,7 @@ async function sendNotificationToDaniel(summary: string) {
       title: 'Feedback from Huaiyao',
       body: truncatedSummary,
       icon: '/icons/icon-192.png',
-      url: '/',
+      url: '/feedback',
       tag: 'huaiyao-feedback',
     });
 
