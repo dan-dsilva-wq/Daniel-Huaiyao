@@ -196,6 +196,14 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     href: '/hive',
     gradient: 'from-yellow-500 to-amber-600',
   },
+  // Together games
+  {
+    title: 'Two Truths & a Lie',
+    description: 'Write two truths and one lie - spot the lie!',
+    icon: '🤥',
+    href: '/two-truths',
+    gradient: 'from-violet-500 to-purple-600',
+  },
   // Stats
   {
     title: 'Stats',

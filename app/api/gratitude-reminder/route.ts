@@ -2,15 +2,21 @@ import { NextResponse } from 'next/server';
 import webpush from 'web-push';
 import { createClient } from '@supabase/supabase-js';
 
-// Configure web-push with VAPID keys
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY!;
+let vapidConfigured = false;
 
-webpush.setVapidDetails(
-  'mailto:notifications@daniel-huaiyao.vercel.app',
-  VAPID_PUBLIC_KEY,
-  VAPID_PRIVATE_KEY
-);
+function ensureVapidConfigured() {
+  if (vapidConfigured) return;
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  if (publicKey && privateKey) {
+    webpush.setVapidDetails(
+      'mailto:notifications@daniel-huaiyao.vercel.app',
+      publicKey,
+      privateKey
+    );
+    vapidConfigured = true;
+  }
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,6 +25,7 @@ const supabase = createClient(
 
 // This endpoint is called by a cron job at 8 PM Eastern
 export async function GET(request: Request) {
+  ensureVapidConfigured();
   // Verify cron secret to prevent unauthorized calls
   const authHeader = request.headers.get('authorization');
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
