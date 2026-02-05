@@ -35,7 +35,12 @@ function formatTimestamp(timestamp: string): string {
 
 export default function StoryBookPage() {
   useMarkAppViewed('book');
-  const [currentUser, setCurrentUser] = useState<Writer | null>(null);
+  const [currentUser, setCurrentUser] = useState<Writer | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('currentUser') as Writer | null;
+    }
+    return null;
+  });
   const [sentences, setSentences] = useState<Sentence[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,11 +50,7 @@ export default function StoryBookPage() {
   const [partnerTyping, setPartnerTyping] = useState(false);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Get current user
-  useEffect(() => {
-    const user = localStorage.getItem('currentUser') as Writer | null;
-    setCurrentUser(user);
-  }, []);
+  // currentUser is initialized from localStorage via useState initializer
 
   // Calculate current turn
   const currentTurn: Writer = sentences.length === 0
@@ -68,28 +69,27 @@ export default function StoryBookPage() {
   const currentPageSentences = pages[currentPage - 1] || [];
 
   // Fetch sentences
-  const fetchSentences = useCallback(async () => {
-    if (!isSupabaseConfigured) {
-      setIsLoading(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from('book_sentences')
-      .select('*')
-      .order('created_at', { ascending: true });
-
-    if (!error && data) {
-      setSentences(data);
-      const lastPage = Math.ceil(data.length / SENTENCES_PER_PAGE) || 1;
-      setCurrentPage(lastPage);
-    }
-    setIsLoading(false);
-  }, []);
-
   useEffect(() => {
+    async function fetchSentences() {
+      if (!isSupabaseConfigured) {
+        setIsLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('book_sentences')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (!error && data) {
+        setSentences(data);
+        const lastPage = Math.ceil(data.length / SENTENCES_PER_PAGE) || 1;
+        setCurrentPage(lastPage);
+      }
+      setIsLoading(false);
+    }
     fetchSentences();
-  }, [fetchSentences]);
+  }, []);
 
   // Update typing status
   const updateTypingStatus = useCallback(async (isTyping: boolean) => {
