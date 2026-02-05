@@ -408,8 +408,8 @@ function Invoke-QualityGates {
 function Get-ChangedFiles {
     Push-Location $PROJECT_ROOT
     try {
-        $files = git diff --name-only 2>&1
-        return $files -split "`n" | Where-Object { $_ -ne "" }
+        $files = git diff --name-only 2>$null
+        return $files -split "`n" | Where-Object { $_ -and $_.Trim() -ne "" -and $_ -notmatch "^warning:" }
     } finally {
         Pop-Location
     }
@@ -436,7 +436,7 @@ function Invoke-SmartStaging {
         foreach ($file in $changedFiles) {
             if (Test-FileAllowed $file $config) {
                 if ($stagedFiles.Count -lt $maxFiles) {
-                    git add $file 2>&1 | Out-Null
+                    git add $file 2>$null | Out-Null
                     $stagedFiles += $file
                     Write-Log "Staged: $file" "Green"
                 } else {
@@ -474,11 +474,12 @@ function Invoke-Commit {
     param([string]$message)
     Push-Location $PROJECT_ROOT
     try {
-        git commit -m $message 2>&1 | Out-Null
+        $output = git commit -m $message 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Log "Committed: $message" "Green"
             return $true
         }
+        Write-Log "Commit failed (nothing staged?): $("$output".Substring(0, [Math]::Min(100, "$output".Length)))" "Yellow"
         return $false
     } finally {
         Pop-Location
@@ -490,8 +491,8 @@ function Get-CommitCount {
     Push-Location $PROJECT_ROOT
     try {
         $mainBranch = $config.git.mainBranch
-        $count = git rev-list --count "${mainBranch}..HEAD" 2>&1
-        if ($count -match '^\d+$') { return [int]$count }
+        $count = git rev-list --count "${mainBranch}..HEAD" 2>$null
+        if ($count -and "$count".Trim() -match '^\d+$') { return [int]"$count".Trim() }
         return 0
     } finally {
         Pop-Location
@@ -506,7 +507,7 @@ function Generate-CodebaseManifest {
     Push-Location $PROJECT_ROOT
     try {
         # Compact file tree grouped by directory
-        $files = git ls-files -- 'src/' 2>&1
+        $files = git ls-files -- 'src/' 2>$null
         if (-not $files) { return "" }
 
         $lines = @()
@@ -554,7 +555,7 @@ function Get-RecentChangesContext {
     param([int]$MaxCommits = 8)
     Push-Location $PROJECT_ROOT
     try {
-        $logs = git log --oneline -$MaxCommits 2>&1
+        $logs = git log --oneline -$MaxCommits 2>$null
         if (-not $logs) { return "" }
 
         $lines = @()
@@ -564,7 +565,7 @@ function Get-RecentChangesContext {
         }
 
         # Also show what files were changed recently
-        $recentFiles = git diff --name-only "HEAD~$MaxCommits" HEAD 2>&1
+        $recentFiles = git diff --name-only "HEAD~$MaxCommits" HEAD 2>$null
         if ($recentFiles) {
             $lines += ""
             $lines += "FILES ALREADY MODIFIED RECENTLY:"
@@ -597,7 +598,7 @@ function Get-CommonErrorPatterns {
 function Get-CurrentHead {
     Push-Location $PROJECT_ROOT
     try {
-        $hash = git rev-parse HEAD 2>&1
+        $hash = git rev-parse HEAD 2>$null
         return "$hash".Trim()
     } finally {
         Pop-Location
@@ -608,7 +609,7 @@ function Get-CommitsSince {
     param([string]$SinceHash)
     Push-Location $PROJECT_ROOT
     try {
-        $logs = @(git log --oneline "${SinceHash}..HEAD" 2>&1)
+        $logs = @(git log --oneline "${SinceHash}..HEAD" 2>$null)
         return @($logs | Where-Object { $_ -and "$_".Trim() -ne "" } | ForEach-Object { "$_".Trim() })
     } finally {
         Pop-Location
@@ -619,7 +620,7 @@ function Get-FilesSince {
     param([string]$SinceHash)
     Push-Location $PROJECT_ROOT
     try {
-        $files = @(git diff --name-only "${SinceHash}..HEAD" 2>&1)
+        $files = @(git diff --name-only "${SinceHash}..HEAD" 2>$null)
         return @($files | Where-Object { $_ -and "$_".Trim() -ne "" } | ForEach-Object { "$_".Trim() })
     } finally {
         Pop-Location
@@ -648,13 +649,18 @@ function Write-LoopCompletion {
 
     # Show what Claude committed
     if ($Commits.Count -gt 0) {
+        # Separate feature commits from progress commits
+        $featureCommits = @($Commits | Where-Object { $_ -notmatch "overnight: Progress" })
+        $progressCommits = @($Commits | Where-Object { $_ -match "overnight: Progress" })
+
         Write-Host ""
-        Write-Host "  Commits:" -ForegroundColor White
-        foreach ($c in $Commits) {
-            # Skip the "overnight: Progress" commits - show the feature commits
-            if ($c -notmatch "overnight: Progress") {
+        if ($featureCommits.Count -gt 0) {
+            Write-Host "  Commits:" -ForegroundColor White
+            foreach ($c in $featureCommits) {
                 Write-Host "    $c" -ForegroundColor Cyan
             }
+        } elseif ($progressCommits.Count -gt 0) {
+            Write-Host "  Commits: $($progressCommits.Count) progress commit(s)" -ForegroundColor DarkGray
         }
     }
 
@@ -1341,7 +1347,7 @@ function Get-RunAnalysis {
 
     return @{
         date = (Get-Date -Format "yyyy-MM-dd")
-        branch = (git rev-parse --abbrev-ref HEAD 2>&1).Trim()
+        branch = (git rev-parse --abbrev-ref HEAD 2>$null).Trim()
         loops = $totalLoops
         commits = $State.totalCommits
         successRate = $successRate
@@ -2122,7 +2128,7 @@ function Start-OvernightExperiment {
                 # Extract what Claude was trying to do from the commit message
                 $lastCommitMsg = ""
                 Push-Location $PROJECT_ROOT
-                try { $lastCommitMsg = (git log -1 --format="%s" 2>&1).Trim() } catch {} finally { Pop-Location }
+                try { $lastCommitMsg = (git log -1 --format="%s" 2>$null).Trim() } catch {} finally { Pop-Location }
 
                 # Enter fix sub-loop (1.1, 1.2, 1.3... up to 1.20)
                 $fixResult = Invoke-FixLoop -MainLoop $i -ErrorMessage $gateResult.error -Config $config -MaxSubLoops 20 -AttemptedChange "The main AI was trying to: $lastCommitMsg"
@@ -2171,6 +2177,9 @@ function Start-OvernightExperiment {
                     $state.completedTasks += $currentTaskId
                 }
                 Write-SpinnerDone "Loop $i complete!" $true
+            } else {
+                Write-SpinnerDone "Commit failed (nothing actually staged)" $false
+                Invoke-Revert
             }
         } else {
             Write-SpinnerDone "DRY RUN: Would commit" $true
@@ -2218,8 +2227,7 @@ function Start-OvernightExperiment {
 
         Write-LoopCompletion -Loop $i -Commits $commitsSince -Files $filesSince -Observation $loopObs -ElapsedSeconds $loopElapsed
 
-        $commitCount = Get-CommitCount $config
-        Write-Host "  Running totals: $commitCount commits | $($state.completedTasks.Count) loops done" -ForegroundColor DarkGray
+        Write-Host "  Running totals: $($state.totalCommits) commits | $i loops done" -ForegroundColor DarkGray
         Write-Host ""
 
         Write-Log "Pausing ${pauseSeconds}s before next loop..." "DarkGray"
