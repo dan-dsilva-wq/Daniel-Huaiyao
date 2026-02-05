@@ -1,9 +1,7 @@
 // Grasshopper Movement - Jumps in straight line over at least one piece
 import { HexCoord, PlacedPiece } from '../types';
 import {
-  getNeighbors,
   coordKey,
-  HEX_DIRECTIONS,
   getNeighbor,
   getOccupiedCoords,
 } from '../hexUtils';

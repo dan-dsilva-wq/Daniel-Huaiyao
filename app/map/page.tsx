@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useEffect, useCallback, memo, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ComposableMap, Geographies, Geography, ZoomableGroup, Marker } from 'react-simple-maps';
+import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import StatsPanel from './components/StatsPanel';
 import { PhotoGallery } from './components/PhotoGallery';
 import { TripPlanner } from './components/TripPlanner';
 import { ThemeToggle } from '../components/ThemeToggle';
+import Link from 'next/link';
 import dynamic from 'next/dynamic';
 
 // Dynamically import Leaflet to avoid SSR issues
@@ -157,7 +158,12 @@ export default function MapPage() {
   const [regions, setRegions] = useState<Region[]>([]);
   const [zoomedRegion, setZoomedRegion] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
+  const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
+    }
+    return null;
+  });
   const [clickedLocation, setClickedLocation] = useState<{ name: string; key: string; isState: boolean } | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [showTripPlanner, setShowTripPlanner] = useState(false);
@@ -241,8 +247,7 @@ export default function MapPage() {
   }, []);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
-    setCurrentUser(savedUser);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   }, [fetchData]);
 
@@ -307,6 +312,7 @@ export default function MapPage() {
     fetchData();
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const markAsVisited = async (place: Place) => {
     const { error } = await supabase.rpc('toggle_map_place_status', {
       p_place_id: place.id,
@@ -325,6 +331,7 @@ export default function MapPage() {
     setClickedLocation(null);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const removePlace = async (place: Place) => {
     const { error } = await supabase.rpc('delete_map_place', {
       p_place_id: place.id,
@@ -445,11 +452,11 @@ export default function MapPage() {
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => selectUser('daniel')}
               className="px-8 py-4 rounded-xl bg-blue-500 text-white font-medium shadow-lg hover:bg-blue-600 transition-colors">
-              I'm Daniel
+              I&apos;m Daniel
             </motion.button>
             <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => selectUser('huaiyao')}
               className="px-8 py-4 rounded-xl bg-rose-500 text-white font-medium shadow-lg hover:bg-rose-600 transition-colors">
-              I'm Huaiyao
+              I&apos;m Huaiyao
             </motion.button>
           </div>
         </motion.div>
@@ -480,9 +487,9 @@ export default function MapPage() {
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-6 sm:mb-8">
           <div className="flex items-center justify-between mb-4">
-            <a href="/" className="px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 active:text-gray-800 transition-colors touch-manipulation">
+            <Link href="/" className="px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 active:text-gray-800 transition-colors touch-manipulation">
               ← Home
-            </a>
+            </Link>
             <ThemeToggle />
           </div>
           <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 dark:text-white mb-2">Our Travel Map</h1>

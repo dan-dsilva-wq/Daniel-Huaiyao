@@ -3,7 +3,6 @@ import { HexCoord, PlacedPiece, PlayerColor, Piece, GameState } from './types';
 import {
   coordKey,
   getNeighbors,
-  getOccupiedCoords,
   getTopPieceAt,
 } from './hexUtils';
 import { getEmptyAdjacentSpaces } from './hiveRules';
@@ -34,7 +33,8 @@ export function canMovePieces(gameState: GameState, color: PlayerColor): boolean
 export function getValidPlacementPositions(
   board: PlacedPiece[],
   color: PlayerColor,
-  turnNumber: number
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _turnNumber: number
 ): HexCoord[] {
   // First turn: place at origin
   if (board.length === 0) {
@@ -48,7 +48,6 @@ export function getValidPlacementPositions(
 
   // After first turn per player: must place touching only own color
   const emptySpaces = getEmptyAdjacentSpaces(board);
-  const occupied = getOccupiedCoords(board);
 
   return emptySpaces.filter((space) => {
     const neighbors = getNeighbors(space);

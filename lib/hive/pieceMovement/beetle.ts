@@ -1,7 +1,7 @@
 // Beetle Movement - Moves 1 space, can climb on top of other pieces
 import { HexCoord, PlacedPiece } from '../types';
 import { getNeighbors, coordKey, getPiecesAt } from '../hexUtils';
-import { canClimb, canSlide, getValidSlideDestinations } from '../freedomToMove';
+import { canClimb, canSlide } from '../freedomToMove';
 import { wouldBreakHive, isAdjacentToHive } from '../hiveRules';
 
 export function getBeetleMoves(

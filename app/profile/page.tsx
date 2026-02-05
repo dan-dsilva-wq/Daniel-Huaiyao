@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
 
@@ -21,21 +22,19 @@ interface Profile {
 const EMOJI_OPTIONS = ['🦊', '🐰', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🐔', '🐧', '🐦', '🦋', '🌸', '🌺', '🌻', '⭐', '🌙', '❤️', '💜', '💙', '💚', '🧡'];
 
 export default function ProfilePage() {
-  const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
+    }
+    return null;
+  });
   const [myProfile, setMyProfile] = useState<Profile | null>(null);
   const [partnerProfile, setPartnerProfile] = useState<Profile | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Profile>>({});
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-
-  useEffect(() => {
-    const user = localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
-    setCurrentUser(user);
-    if (user) {
-      fetchProfiles(user);
-    }
-  }, []);
 
   const fetchProfiles = async (user: 'daniel' | 'huaiyao') => {
     if (!isSupabaseConfigured) return;
@@ -52,6 +51,13 @@ export default function ProfilePage() {
       if (mine) setEditForm(mine);
     }
   };
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchProfiles(currentUser);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const saveProfile = async () => {
     if (!currentUser || !isSupabaseConfigured) return;
@@ -90,7 +96,7 @@ export default function ProfilePage() {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-slate-900 dark:to-zinc-900 flex items-center justify-center p-4">
         <div className="text-center">
           <p className="text-gray-500 dark:text-gray-400">Please select who you are on the home page first.</p>
-          <a href="/" className="text-pink-500 hover:text-pink-600 mt-2 inline-block">← Go Home</a>
+          <Link href="/" className="text-pink-500 hover:text-pink-600 mt-2 inline-block">← Go Home</Link>
         </div>
       </div>
     );
@@ -103,9 +109,9 @@ export default function ProfilePage() {
       <main className="max-w-2xl mx-auto px-4 py-6 pb-24">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
-          <a href="/" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+          <Link href="/" className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
             ← Home
-          </a>
+          </Link>
           <ThemeToggle />
         </div>
 
@@ -335,7 +341,7 @@ export default function ProfilePage() {
           transition={{ delay: 0.1 }}
           className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6"
         >
-          <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">{partnerName}'s Profile</h2>
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">{partnerName}&apos;s Profile</h2>
 
           <div className="space-y-4">
             <div className="flex items-center gap-4">
@@ -387,7 +393,7 @@ export default function ProfilePage() {
 
             {!partnerProfile?.bio && !partnerProfile?.favorite_color && !partnerProfile?.birthday && (
               <p className="text-gray-400 dark:text-gray-500 text-sm text-center py-4">
-                {partnerName} hasn't filled out their profile yet
+                {partnerName} hasn&apos;t filled out their profile yet
               </p>
             )}
           </div>

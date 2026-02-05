@@ -16,6 +16,15 @@ export default function StorySummary({ sentences, onComplete }: StorySummaryProp
   const [phase, setPhase] = useState<'loading' | 'showing' | 'fading'>('loading');
   const [showButton, setShowButton] = useState(false);
 
+  const [particleData] = useState(() =>
+    [...Array(20)].map(() => ({
+      x: Math.random() * 1000,
+      y: Math.random() * 800,
+      duration: 5 + Math.random() * 5,
+      delay: Math.random() * 5,
+    }))
+  );
+
   useEffect(() => {
     async function fetchSummary() {
       // Only fetch if there are sentences to summarize
@@ -97,22 +106,22 @@ export default function StorySummary({ sentences, onComplete }: StorySummaryProp
               transition={{ duration: 10, repeat: Infinity }}
             />
             {/* Subtle particles/dust effect */}
-            {[...Array(20)].map((_, i) => (
+            {particleData.map((particle, i) => (
               <motion.div
                 key={i}
                 className="absolute w-1 h-1 bg-white/20 rounded-full"
                 initial={{
-                  x: Math.random() * (typeof window !== 'undefined' ? window.innerWidth : 1000),
-                  y: Math.random() * (typeof window !== 'undefined' ? window.innerHeight : 800),
+                  x: particle.x,
+                  y: particle.y,
                 }}
                 animate={{
                   y: [null, -100],
                   opacity: [0, 0.5, 0],
                 }}
                 transition={{
-                  duration: 5 + Math.random() * 5,
+                  duration: particle.duration,
                   repeat: Infinity,
-                  delay: Math.random() * 5,
+                  delay: particle.delay,
                 }}
               />
             ))}

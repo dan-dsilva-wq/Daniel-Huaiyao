@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
+import Link from 'next/link';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 type Player = 'daniel' | 'huaiyao';
@@ -63,6 +64,7 @@ export default function TwoTruthsPage() {
   // Pick a random prompt for inspiration
   useEffect(() => {
     if (phase === 'writing') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPrompt(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
     }
   }, [phase]);
@@ -145,12 +147,12 @@ export default function TwoTruthsPage() {
             className="text-center mb-6 sm:mb-8"
           >
             <div className="flex items-center justify-between mb-4">
-              <a
+              <Link
                 href="/"
                 className="px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 active:text-gray-800 transition-colors touch-manipulation"
               >
                 ← Home
-              </a>
+              </Link>
               <ThemeToggle />
             </div>
             <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 dark:text-gray-100 mb-2">
@@ -254,10 +256,10 @@ export default function TwoTruthsPage() {
                     currentWriter === 'daniel' ? 'bg-blue-500' : 'bg-rose-500'
                   } text-white rounded-full font-medium shadow-md`}
                 >
-                  {getPlayerName(currentWriter)}'s turn to write
+                  {getPlayerName(currentWriter)}&apos;s turn to write
                 </motion.div>
                 <p className="text-sm text-gray-400 mt-2">
-                  Don't let {getPlayerName(guesser)} see!
+                  Don&apos;t let {getPlayerName(guesser)} see!
                 </p>
               </div>
 
@@ -388,7 +390,7 @@ export default function TwoTruthsPage() {
                       : 'bg-rose-500 hover:bg-rose-600'
                   } text-white rounded-xl font-medium shadow-lg transition-colors`}
                 >
-                  I'm {getPlayerName(guesser)}, ready!
+                  I&apos;m {getPlayerName(guesser)}, ready!
                 </motion.button>
               </div>
             </motion.div>
@@ -411,7 +413,7 @@ export default function TwoTruthsPage() {
                     guesser === 'daniel' ? 'bg-blue-500' : 'bg-rose-500'
                   } text-white rounded-full font-medium shadow-md`}
                 >
-                  {getPlayerName(guesser)}'s turn to guess
+                  {getPlayerName(guesser)}&apos;s turn to guess
                 </motion.div>
               </div>
 
@@ -547,7 +549,7 @@ export default function TwoTruthsPage() {
                       : 'bg-gradient-to-r from-blue-500 to-indigo-500'
                   }`}
                 >
-                  {getPlayerName(getPartner(currentWriter))}'s turn to write
+                  {getPlayerName(getPartner(currentWriter))}&apos;s turn to write
                 </motion.button>
                 <button
                   onClick={() => setPhase('idle')}

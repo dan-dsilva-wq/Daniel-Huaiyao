@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import type { Player, MysteryGameState, MysteryVote } from '@/lib/supabase';
+import type { Player, MysteryGameState } from '@/lib/supabase';
 import TypewriterText from '../components/TypewriterText';
 import ChoiceButton from '../components/ChoiceButton';
 import AgreementCelebration from '../components/AgreementCelebration';
@@ -12,6 +12,7 @@ import PartnerStatus from '../components/PartnerStatus';
 import { PuzzleRenderer, MiniGameContainer } from '../components/puzzles';
 import AIStoryMode from '../components/AIStoryMode';
 import { BranchVisualization } from '../components/BranchVisualization';
+import Link from 'next/link';
 
 export default function MysterySessionPage() {
   const params = useParams();
@@ -481,7 +482,7 @@ export default function MysterySessionPage() {
           animate={{ opacity: 1 }}
           className="flex items-center gap-4 mb-4"
         >
-          <a
+          <Link
             href="/"
             onClick={(e) => handleNavigation(e, '/')}
             className="flex items-center gap-1 text-purple-300 hover:text-white transition-colors text-sm"
@@ -490,8 +491,8 @@ export default function MysterySessionPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
             </svg>
             Home
-          </a>
-          <a
+          </Link>
+          <Link
             href="/mystery"
             onClick={(e) => handleNavigation(e, '/mystery')}
             className="flex items-center gap-1 text-purple-300 hover:text-white transition-colors text-sm"
@@ -500,7 +501,7 @@ export default function MysterySessionPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
             Episodes
-          </a>
+          </Link>
         </motion.div>
 
         {/* Header */}

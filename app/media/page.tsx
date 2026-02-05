@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
+import Link from 'next/link';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 interface MediaItem {
@@ -196,7 +197,7 @@ export default function MediaPage() {
               onClick={() => selectUser('daniel')}
               className="px-8 py-4 rounded-xl bg-blue-500 text-white font-medium shadow-lg hover:bg-blue-600 transition-colors"
             >
-              I'm Daniel
+              I&apos;m Daniel
             </motion.button>
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -204,7 +205,7 @@ export default function MediaPage() {
               onClick={() => selectUser('huaiyao')}
               className="px-8 py-4 rounded-xl bg-rose-500 text-white font-medium shadow-lg hover:bg-rose-600 transition-colors"
             >
-              I'm Huaiyao
+              I&apos;m Huaiyao
             </motion.button>
           </div>
         </motion.div>
@@ -248,12 +249,12 @@ export default function MediaPage() {
           className="text-center mb-6 sm:mb-8"
         >
           <div className="flex items-center justify-between mb-4">
-            <a
+            <Link
               href="/"
               className="px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 active:text-gray-800 transition-colors touch-manipulation"
             >
               ← Home
-            </a>
+            </Link>
             <ThemeToggle />
           </div>
           <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 dark:text-gray-100 mb-2">

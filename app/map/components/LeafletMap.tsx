@@ -80,6 +80,7 @@ export default function LeafletMap({
     });
 
     mapInstanceRef.current = map;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoaded(true);
 
     // Cleanup

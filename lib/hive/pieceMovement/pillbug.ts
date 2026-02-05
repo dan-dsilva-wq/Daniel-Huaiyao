@@ -5,7 +5,6 @@ import {
   coordKey,
   getOccupiedCoords,
   getTopPieceAt,
-  areNeighbors,
 } from '../hexUtils';
 import { wouldBreakHive, isAdjacentToHive } from '../hiveRules';
 import { getValidSlideDestinations, isPinned } from '../freedomToMove';

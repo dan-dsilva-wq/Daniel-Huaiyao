@@ -32,7 +32,7 @@ export default function VoiceReader({ text }: VoiceReaderProps) {
     if (hasStartedRef.current || paragraphs.length === 0) return;
     hasStartedRef.current = true;
 
-    const currentIndex = 0;
+    const _currentIndex = 0; // eslint-disable-line @typescript-eslint/no-unused-vars
     let stopped = false;
 
     const readParagraph = async (index: number) => {

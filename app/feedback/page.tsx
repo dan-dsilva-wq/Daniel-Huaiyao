@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
 interface FeedbackRequest {
@@ -15,23 +16,13 @@ interface FeedbackRequest {
 export default function FeedbackPage() {
   const [feedbackItems, setFeedbackItems] = useState<FeedbackRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
-
-  useEffect(() => {
-    const user = localStorage.getItem('currentUser');
-    setCurrentUser(user);
-    fetchFeedback();
-  }, []);
-
-  // Mark unread items as read when Daniel views the page
-  useEffect(() => {
-    if (currentUser === 'daniel' && feedbackItems.length > 0) {
-      const unreadIds = feedbackItems.filter(f => !f.is_read).map(f => f.id);
-      if (unreadIds.length > 0) {
-        markAsRead(unreadIds);
-      }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [currentUser, setCurrentUser] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('currentUser');
     }
-  }, [currentUser, feedbackItems]);
+    return null;
+  });
 
   const fetchFeedback = async () => {
     if (!isSupabaseConfigured) {
@@ -61,6 +52,22 @@ export default function FeedbackPage() {
     );
   };
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchFeedback();
+  }, []);
+
+  // Mark unread items as read when Daniel views the page
+  useEffect(() => {
+    if (currentUser === 'daniel' && feedbackItems.length > 0) {
+      const unreadIds = feedbackItems.filter(f => !f.is_read).map(f => f.id);
+      if (unreadIds.length > 0) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        markAsRead(unreadIds);
+      }
+    }
+  }, [currentUser, feedbackItems]);
+
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     const now = new Date();
@@ -86,14 +93,14 @@ export default function FeedbackPage() {
       <main className="max-w-2xl mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
-          <a
+          <Link
             href="/"
             className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-          </a>
+          </Link>
           <div>
             <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
               Feedback from Huaiyao

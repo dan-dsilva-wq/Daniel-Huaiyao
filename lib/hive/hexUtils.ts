@@ -180,8 +180,6 @@ export function getHexesWithinRange(center: HexCoord, range: number): HexCoord[]
 
 // Find a straight line path from one hex to another (for grasshopper)
 export function getStraightLinePath(from: HexCoord, to: HexCoord): HexCoord[] | null {
-  const direction = getDirection(from, { q: from.q + Math.sign(to.q - from.q), r: from.r + Math.sign(to.r - from.r) });
-
   // Check if they're aligned in one of the six directions
   const dq = to.q - from.q;
   const dr = to.r - from.r;

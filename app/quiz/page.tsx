@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
+import Link from 'next/link';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { TimedChallenge } from './components/TimedChallenge';
 
@@ -760,6 +761,7 @@ export default function QuizPage() {
   const answeredQuestions = quizData?.questions_to_answer.filter((q) => q.answer) || [];
   const totalScore = answeredQuestions.reduce((sum, q) => sum + calculateQuestionScore(q), 0);
   const totalAnswered = answeredQuestions.length;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const percentage = totalAnswered > 0 ? Math.round((totalScore / totalAnswered) * 100) : 0;
 
   // User selection screen
@@ -779,7 +781,7 @@ export default function QuizPage() {
             🧠
           </motion.div>
           <h1 className="text-3xl font-serif font-bold text-gray-800 dark:text-white mb-4">Who are you?</h1>
-          <p className="text-gray-500 dark:text-gray-400 mb-8">Let's see how well you know each other!</p>
+          <p className="text-gray-500 dark:text-gray-400 mb-8">Let&apos;s see how well you know each other!</p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -787,7 +789,7 @@ export default function QuizPage() {
               onClick={() => selectUser('daniel')}
               className="px-8 py-4 rounded-xl bg-blue-500 text-white font-medium shadow-lg hover:bg-blue-600 transition-colors"
             >
-              I'm Daniel
+              I&apos;m Daniel
             </motion.button>
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -795,7 +797,7 @@ export default function QuizPage() {
               onClick={() => selectUser('huaiyao')}
               className="px-8 py-4 rounded-xl bg-rose-500 text-white font-medium shadow-lg hover:bg-rose-600 transition-colors"
             >
-              I'm Huaiyao
+              I&apos;m Huaiyao
             </motion.button>
           </div>
         </motion.div>
@@ -822,6 +824,7 @@ export default function QuizPage() {
   const filteredQuestionsToAnswer = filterCategory
     ? questionsToAnswer.filter((q) => q.category === filterCategory)
     : questionsToAnswer;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const filteredMyQuestions = filterCategory
     ? myQuestions.filter((q) => q.category === filterCategory)
     : myQuestions;
@@ -853,12 +856,12 @@ export default function QuizPage() {
           className="text-center mb-6 sm:mb-8"
         >
           <div className="flex items-center justify-between mb-4">
-            <a
+            <Link
               href="/"
               className="px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 active:text-gray-800 transition-colors touch-manipulation"
             >
               ← Home
-            </a>
+            </Link>
             <ThemeToggle />
           </div>
           <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 dark:text-white mb-2">
@@ -1209,7 +1212,7 @@ export default function QuizPage() {
               {filteredQuestionsToAnswer.length === 0 ? (
                 <div className="text-center py-12 text-gray-400 dark:text-gray-500">
                   <div className="text-4xl mb-4">📝</div>
-                  <p>{partnerName} hasn't added any questions yet.</p>
+                  <p>{partnerName} hasn&apos;t added any questions yet.</p>
                   <p className="text-sm mt-2">Ask them to write some!</p>
                 </div>
               ) : (
@@ -1488,7 +1491,7 @@ export default function QuizPage() {
                     <div>
                       <span className="font-medium text-gray-800 dark:text-white">Two-way question</span>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {partnerName} will also answer this about themselves, and you'll guess their answer
+                        {partnerName} will also answer this about themselves, and you&apos;ll guess their answer
                       </p>
                     </div>
                   </label>
@@ -1573,7 +1576,7 @@ export default function QuizPage() {
                     >
                       <h3 className="font-medium text-gray-800 mb-2">Set up your answer</h3>
                       <p className="text-sm text-gray-500 mb-4">
-                        {partnerName} asked: "{setupQuestion.question_text}"
+                        {partnerName} asked: &quot;{setupQuestion.question_text}&quot;
                         <br />
                         <span className="text-indigo-500">Now fill in YOUR answer options:</span>
                         {setupQuestion.is_multiple_choice && (
@@ -1792,6 +1795,7 @@ function QuestionCard({
   onSelectAnswer,
   onSubmit,
   isSubmitting,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   lastResult,
 }: {
   question: QuizQuestion;
@@ -2079,7 +2083,7 @@ function MyQuestionCard({
             </div>
           ) : (
             <div className="mt-2 text-sm text-gray-400 dark:text-gray-500">
-              {partnerName} hasn't answered yet
+              {partnerName} hasn&apos;t answered yet
             </div>
           )}
         </div>

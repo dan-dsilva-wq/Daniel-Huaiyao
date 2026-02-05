@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // Run this script with: node scripts/generate-icons.js
 // Requires: npm install canvas
 
@@ -38,7 +39,7 @@ try {
   createSimplePNG(512, path.join(iconsDir, 'icon-512.png'));
   createSimplePNG(180, path.join(iconsDir, 'apple-touch-icon.png'));
   console.log('All icons generated successfully!');
-} catch (e) {
+} catch {
   console.log('Canvas not installed. Run: npm install canvas');
   console.log('Or manually create icons at public/icons/');
 }

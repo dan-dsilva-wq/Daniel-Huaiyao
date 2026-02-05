@@ -30,6 +30,7 @@ export function useNetworkStatus(): NetworkStatus {
     if (typeof window === 'undefined') return;
 
     // Initial status
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     updateNetworkStatus();
 
     // Listen for online/offline events

@@ -16,19 +16,19 @@ export default function ChatBubble() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
+    }
+    return null;
+  });
   const [unreadCount, setUnreadCount] = useState(0);
   const [isSending, setIsSending] = useState(false);
   const [partnerTyping, setPartnerTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Get current user
-  useEffect(() => {
-    const user = localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
-    setCurrentUser(user);
-  }, []);
 
   // Fetch messages
   const fetchMessages = async () => {
@@ -98,6 +98,7 @@ export default function ChatBubble() {
 
   // Initial fetch and realtime subscription
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchMessages();
 
     if (!isSupabaseConfigured) return;
@@ -166,6 +167,7 @@ export default function ChatBubble() {
   // Mark as read when opening chat
   useEffect(() => {
     if (isOpen && unreadCount > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       markAsRead();
     }
     if (isOpen) {

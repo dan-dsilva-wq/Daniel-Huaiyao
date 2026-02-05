@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 
 interface HistoryNode {
@@ -112,6 +112,7 @@ export function BranchVisualization({ sessionId, episodeId, onClose }: BranchVis
     ? Math.max(...episodeStats.scene_visits.map((s) => s.visit_count))
     : 0;
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const maxChosen = episodeStats?.choice_stats
     ? Math.max(...episodeStats.choice_stats.map((c) => c.times_chosen))
     : 0;

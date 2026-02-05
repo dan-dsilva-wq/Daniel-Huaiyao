@@ -217,9 +217,16 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
 export default function Home() {
   const [visitCounts, setVisitCounts] = useState<Record<string, number>>({});
   const [newCounts, setNewCounts] = useState<Record<string, number>>({});
-  const [mounted, setMounted] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [mounted, setMounted] = useState(() => typeof window !== 'undefined');
   const [showUnused, setShowUnused] = useState(false);
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [currentUser, setCurrentUser] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('currentUser');
+    }
+    return null;
+  });
   const [engagementData, setEngagementData] = useState<EngagementData | null>(null);
   const [showActivityFeed, setShowActivityFeed] = useState(false);
   const [showFeedbackChat, setShowFeedbackChat] = useState(false);
@@ -301,15 +308,13 @@ export default function Home() {
   };
 
   useEffect(() => {
-    setMounted(true);
-    const savedUser = localStorage.getItem('currentUser');
-    setCurrentUser(savedUser);
     fetchVisitCounts();
-    if (savedUser) {
-      fetchNewCounts(savedUser);
-      fetchEngagementData(savedUser);
-      recordCheckIn(savedUser);
+    if (currentUser) {
+      fetchNewCounts(currentUser);
+      fetchEngagementData(currentUser);
+      recordCheckIn(currentUser);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchEngagementData, recordCheckIn]);
 
   // Separate apps into used (visited in last 30 days) and unused - keep original order

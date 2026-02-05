@@ -24,6 +24,7 @@ export default function ParagraphReader({ text, className = '', autoStart = fals
     .map(p => p.trim())
     .filter(p => p.length > 0);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const speakParagraph = useCallback(async (index: number, paragraphText: string, continueAuto = false): Promise<boolean> => {
     // Stop any existing audio
     if (audioRef.current) {

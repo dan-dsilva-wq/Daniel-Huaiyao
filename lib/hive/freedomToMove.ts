@@ -3,7 +3,6 @@ import { HexCoord, PlacedPiece } from './types';
 import {
   coordKey,
   getNeighbors,
-  getDirection,
   areNeighbors,
   getOccupiedCoords,
   getPiecesAt,

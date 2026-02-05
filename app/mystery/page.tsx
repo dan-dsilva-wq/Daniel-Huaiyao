@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import type { Player, MysteryEpisode, MysterySession } from '@/lib/supabase';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -231,6 +232,7 @@ export default function MysteryPage() {
 
     setIsJoining(true);
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { data, error } = await supabase.rpc('join_mystery_session', {
         p_session_id: sessionId,
         p_player: currentUser,
@@ -273,7 +275,7 @@ export default function MysteryPage() {
               onClick={() => selectUser('daniel')}
               className="px-8 py-4 rounded-xl bg-blue-500 text-white font-medium shadow-lg hover:bg-blue-600 transition-colors"
             >
-              I'm Daniel
+              I&apos;m Daniel
             </motion.button>
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -281,7 +283,7 @@ export default function MysteryPage() {
               onClick={() => selectUser('huaiyao')}
               className="px-8 py-4 rounded-xl bg-rose-500 text-white font-medium shadow-lg hover:bg-rose-600 transition-colors"
             >
-              I'm Huaiyao
+              I&apos;m Huaiyao
             </motion.button>
           </div>
         </motion.div>
@@ -421,12 +423,12 @@ export default function MysteryPage() {
           className="text-center mb-8"
         >
           <div className="flex items-center justify-between mb-4">
-            <a
+            <Link
               href="/"
               className="px-4 py-2 -mx-4 text-purple-300 hover:text-white active:text-amber-400 transition-colors touch-manipulation"
             >
               ← Home
-            </a>
+            </Link>
             <ThemeToggle />
           </div>
           <motion.div
@@ -517,7 +519,7 @@ export default function MysteryPage() {
                     </motion.div>
                     <div className="flex-1">
                       <p className="text-amber-300 text-sm mb-1">
-                        Join {partnerName}'s game
+                        Join {partnerName}&apos;s game
                       </p>
                       <h3 className="text-xl font-serif font-semibold text-white">
                         {game.episode.title}

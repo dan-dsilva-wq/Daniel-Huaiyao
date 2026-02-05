@@ -94,6 +94,7 @@ export default function Book({ currentWriter, title = 'To be seen...' }: BookPro
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchSentences(true);
   }, [fetchSentences]);
 
@@ -109,6 +110,7 @@ export default function Book({ currentWriter, title = 'To be seen...' }: BookPro
   // When intro is skipped, navigate to target page
   useEffect(() => {
     if (!showTurnSplash && !showIntro && !showSummary && targetPage > 1) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentPage(targetPage);
     }
   }, [showTurnSplash, showIntro, showSummary, targetPage]);
@@ -123,6 +125,7 @@ export default function Book({ currentWriter, title = 'To be seen...' }: BookPro
     if (lastVisit !== today) {
       // New day! Show summary
       localStorage.setItem('storybook-last-visit', today);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowSummary(true);
     }
 

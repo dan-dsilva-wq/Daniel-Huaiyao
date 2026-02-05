@@ -44,6 +44,7 @@ export default function AchievementCelebration({ achievement, onClose }: Achieve
 
   useEffect(() => {
     if (achievement) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setConfettiSeed(prev => prev + 1);
       // Auto-close after 5 seconds
       const timer = setTimeout(onClose, 5000);

@@ -574,7 +574,7 @@ function LogicGridGame({
   onUpdateState: (shared: Record<string, unknown>, private_: Record<string, unknown>) => void;
 }) {
   const partnerName = currentPlayer === 'daniel' ? 'Huaiyao' : 'Daniel';
-  const gridSize = (gameState.grid_size as number) || 4;
+  const _gridSize = (gameState.grid_size as number) || 4; // eslint-disable-line @typescript-eslint/no-unused-vars
   const categories = (gameState.categories as string[][]) || [['A', 'B', 'C', 'D'], ['1', '2', '3', '4']];
 
   // Grid state: 'empty' | 'yes' | 'no' | 'partner_yes' | 'partner_no'
@@ -681,6 +681,7 @@ export default function MiniGameContainer({
   }, [sessionId, puzzle.id, currentPlayer]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchGameState();
 
     // Subscribe to minigame state changes

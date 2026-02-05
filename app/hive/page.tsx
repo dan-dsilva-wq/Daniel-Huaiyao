@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
+import Link from 'next/link';
 import {
   GameState,
   PlayerColor,
@@ -184,6 +185,7 @@ export default function HivePage() {
     source: 'hand' | 'board';
   } | null>(null);
   const [validMoves, setValidMoves] = useState<HexCoord[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [viewOffset, setViewOffset] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
 
@@ -215,12 +217,14 @@ export default function HivePage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     startNewGame();
   }, [startNewGame]);
 
   // Calculate valid moves when piece is selected
   useEffect(() => {
     if (!gameState || !selectedPiece) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setValidMoves([]);
       return;
     }
@@ -336,12 +340,12 @@ export default function HivePage() {
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-yellow-100 dark:from-stone-900 dark:to-amber-950">
       {/* Header */}
       <div className="flex items-center justify-between p-4">
-        <a
+        <Link
           href="/"
           className="text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100"
         >
           ← Home
-        </a>
+        </Link>
         <h1 className="text-2xl font-bold text-amber-800 dark:text-amber-200">
           🐝 Hive
         </h1>

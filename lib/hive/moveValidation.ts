@@ -1,5 +1,5 @@
 // Move Validation - Orchestrates all movement rules
-import { HexCoord, PlacedPiece, GameState, PlayerColor, Move } from './types';
+import { HexCoord, PlacedPiece, GameState, Move } from './types';
 import { coordKey } from './hexUtils';
 import {
   getQueenMoves,

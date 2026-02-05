@@ -1,6 +1,6 @@
 // Mosquito Movement - Copies movement ability of any adjacent piece
 import { HexCoord, PlacedPiece, PieceType } from '../types';
-import { getNeighbors, coordKey, getTopPieceAt, getPiecesAt } from '../hexUtils';
+import { getNeighbors, coordKey, getTopPieceAt } from '../hexUtils';
 import { wouldBreakHive } from '../hiveRules';
 import { getQueenMoves } from './queen';
 import { getBeetleMoves } from './beetle';
