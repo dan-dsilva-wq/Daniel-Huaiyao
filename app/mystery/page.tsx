@@ -61,6 +61,7 @@ export default function MysteryPage() {
 
       if (sessionsError) throw sessionsError;
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const games: WaitingGame[] = (sessionsData || []).map((s: any) => ({
         session: s,
         episode: s.mystery_episodes,
@@ -75,6 +76,7 @@ export default function MysteryPage() {
         .eq('status', 'active')
         .eq(currentUserJoinedFieldActive, true);
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const active: ActiveGame[] = (activeData || []).map((s: any) => ({
         session: s,
         episode: s.mystery_episodes,

@@ -32,7 +32,7 @@ export default function VoiceReader({ text }: VoiceReaderProps) {
     if (hasStartedRef.current || paragraphs.length === 0) return;
     hasStartedRef.current = true;
 
-    let currentIndex = 0;
+    const currentIndex = 0;
     let stopped = false;
 
     const readParagraph = async (index: number) => {

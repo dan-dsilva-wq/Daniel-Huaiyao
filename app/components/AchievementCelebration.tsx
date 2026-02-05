@@ -1,7 +1,7 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 interface Achievement {
   title: string;
@@ -15,30 +15,43 @@ interface AchievementCelebrationProps {
   onClose: () => void;
 }
 
-// Generate confetti particles
-const generateConfetti = (count: number) => {
+// Simple seeded pseudo-random for deterministic confetti
+function seededRandom(seed: number) {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+
+// Generate confetti particles deterministically
+const generateConfetti = (count: number, seed: number) => {
   const colors = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8'];
-  return Array.from({ length: count }, (_, i) => ({
-    id: i,
-    x: Math.random() * 100,
-    color: colors[Math.floor(Math.random() * colors.length)],
-    delay: Math.random() * 0.5,
-    rotation: Math.random() * 360,
-    size: Math.random() * 8 + 4,
-  }));
+  return Array.from({ length: count }, (_, i) => {
+    const s = seed + i;
+    return {
+      id: i,
+      x: seededRandom(s * 1) * 100,
+      color: colors[Math.floor(seededRandom(s * 2) * colors.length)],
+      delay: seededRandom(s * 3) * 0.5,
+      rotation: seededRandom(s * 4) * 360,
+      size: seededRandom(s * 5) * 8 + 4,
+      isCircle: seededRandom(s * 6) > 0.5,
+      duration: 3 + seededRandom(s * 7) * 2,
+    };
+  });
 };
 
 export default function AchievementCelebration({ achievement, onClose }: AchievementCelebrationProps) {
-  const [confetti, setConfetti] = useState<ReturnType<typeof generateConfetti>>([]);
+  const [confettiSeed, setConfettiSeed] = useState(0);
 
   useEffect(() => {
     if (achievement) {
-      setConfetti(generateConfetti(50));
+      setConfettiSeed(prev => prev + 1);
       // Auto-close after 5 seconds
       const timer = setTimeout(onClose, 5000);
       return () => clearTimeout(timer);
     }
   }, [achievement, onClose]);
+
+  const confetti = useMemo(() => confettiSeed > 0 && achievement ? generateConfetti(50, confettiSeed) : [], [confettiSeed, achievement]);
 
   return (
     <AnimatePresence>
@@ -67,7 +80,7 @@ export default function AchievementCelebration({ achievement, onClose }: Achieve
                   opacity: [1, 1, 0],
                 }}
                 transition={{
-                  duration: 3 + Math.random() * 2,
+                  duration: particle.duration,
                   delay: particle.delay,
                   ease: 'easeIn',
                 }}
@@ -76,7 +89,7 @@ export default function AchievementCelebration({ achievement, onClose }: Achieve
                   width: particle.size,
                   height: particle.size,
                   backgroundColor: particle.color,
-                  borderRadius: Math.random() > 0.5 ? '50%' : '2px',
+                  borderRadius: particle.isCircle ? '50%' : '2px',
                 }}
               />
             ))}

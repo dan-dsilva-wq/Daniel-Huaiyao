@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { playPageFlip, playSubmit, playNotification } from '@/lib/bookSounds';
@@ -42,7 +43,7 @@ export default function StoryBookPage() {
   const [content, setContent] = useState('');
   const [expandedSentence, setExpandedSentence] = useState<string | null>(null);
   const [partnerTyping, setPartnerTyping] = useState(false);
-  const typingTimeoutRef = useCallback(() => ({ current: null as NodeJS.Timeout | null }), [])();
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Get current user
   useEffect(() => {
@@ -106,7 +107,7 @@ export default function StoryBookPage() {
   }, [currentUser]);
 
   // Handle typing indicator
-  const handleTyping = useCallback(() => {
+  const handleTyping = () => {
     updateTypingStatus(true);
 
     // Clear existing timeout
@@ -118,7 +119,7 @@ export default function StoryBookPage() {
     typingTimeoutRef.current = setTimeout(() => {
       updateTypingStatus(false);
     }, 2000);
-  }, [updateTypingStatus, typingTimeoutRef]);
+  };
 
   // Realtime subscription
   useEffect(() => {
@@ -250,9 +251,9 @@ export default function StoryBookPage() {
       {/* Header */}
       <div className="max-w-4xl mx-auto mb-6">
         <div className="flex items-center justify-between">
-          <a href="/" className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200">
+          <Link href="/" className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200">
             ← Home
-          </a>
+          </Link>
           <ThemeToggle />
         </div>
       </div>
