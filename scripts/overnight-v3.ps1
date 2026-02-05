@@ -607,12 +607,8 @@ function Get-CommitsSince {
     param([string]$SinceHash)
     Push-Location $PROJECT_ROOT
     try {
-        $logs = git log --oneline "${SinceHash}..HEAD" 2>&1
-        if ($logs -and $logs -ne "") {
-            $lines = "$logs" -split "`n" | Where-Object { $_.Trim() -ne "" }
-            return @($lines)
-        }
-        return @()
+        $logs = @(git log --oneline "${SinceHash}..HEAD" 2>&1)
+        return @($logs | Where-Object { $_ -and "$_".Trim() -ne "" } | ForEach-Object { "$_".Trim() })
     } finally {
         Pop-Location
     }
@@ -622,12 +618,8 @@ function Get-FilesSince {
     param([string]$SinceHash)
     Push-Location $PROJECT_ROOT
     try {
-        $files = git diff --name-only "${SinceHash}..HEAD" 2>&1
-        if ($files -and $files -ne "") {
-            $lines = "$files" -split "`n" | Where-Object { $_.Trim() -ne "" }
-            return @($lines)
-        }
-        return @()
+        $files = @(git diff --name-only "${SinceHash}..HEAD" 2>&1)
+        return @($files | Where-Object { $_ -and "$_".Trim() -ne "" } | ForEach-Object { "$_".Trim() })
     } finally {
         Pop-Location
     }
