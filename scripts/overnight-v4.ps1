@@ -2179,6 +2179,13 @@ function Start-OvernightExperiment {
         Save-State $state
         } # end if (-not $claudeCommittedDirectly)
 
+        # Clean up any remaining unstaged changes (v4: prevent accumulation between loops)
+        $remainingChanges = @(Get-ChangedFiles)
+        if ($remainingChanges.Count -gt 0) {
+            Write-Log "  Reverting $($remainingChanges.Count) unstaged file(s) (exceeded staging limit)" "Yellow"
+            Invoke-Revert
+        }
+
         # Detailed completion output
         $loopElapsed = [math]::Round(((Get-Date) - $loopStartTime).TotalSeconds)
         $commitsSince = Get-CommitsSince $headBefore
