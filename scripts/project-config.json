@@ -22,14 +22,14 @@
     "maxConsecutiveFailures": 3,
     "maxConsecutiveNoOps": 3,
     "blockedPatterns": [
-      "\.env",
-      "package-lock\.json",
-      "yarn\.lock",
-      "pnpm-lock\.yaml",
-      "\.prisma",
-      "schema\.prisma",
+      "\\.env",
+      "package-lock\\.json",
+      "yarn\\.lock",
+      "pnpm-lock\\.yaml",
+      "\\.prisma",
+      "schema\\.prisma",
       "migrations/",
-      "\.secret",
+      "\\.secret",
       "credentials",
       "node_modules/"
     ]
