@@ -1,0 +1,96 @@
+## Project Vision
+
+### What This Is
+A private couples website for Daniel & Huaiyao - a collection of interactive mini-apps designed to keep their relationship playful, connected, and full of shared moments, whether they're together or apart.
+
+### Why It Exists
+It's nice to always have something to do when we're together or apart. This app creates little rituals and shared experiences:
+- A gratitude wall to appreciate each other daily
+- A collaborative story they write together, one sentence at a time
+- A map of places they've been and want to go
+- Mystery games they solve as a team
+- A quiz to see how well they know each other
+- Memories to look back on together
+
+We're still missing more features to use when we're actually together.
+
+It's not about productivity or metrics - it's about creating small moments of joy and connection.
+
+### Design Philosophy
+
+**1. Feel Alive, Not Static**
+The app should feel like the other person is "there" even when they're not. This means:
+- Real-time updates when your partner does something
+- Typing indicators so you know they're present
+- Push notifications that create anticipation
+- "On this day" flashbacks to resurface shared memories
+- Partner status showing what they're up to
+
+**2. Low Friction, High Delight**
+Every interaction should be effortless:
+- No login/passwords - just pick who you are
+- One-tap actions where possible
+- Beautiful animations that feel responsive
+- Mobile-first design (it's a PWA they use on their phones)
+
+**3. Together, Not Competitive**
+Features should bring them together, not pit them against each other:
+- Joint achievements they unlock as a team
+- Shared streaks (both need to participate)
+- Collaborative features (story, mystery) over solo ones
+- Stats show "us" not "me vs you"
+
+**4. Gentle Nudges, Not Nagging**
+Notifications should feel like a loving tap on the shoulder:
+- "Huaiyao left you a note" (not "You haven't opened the app in 3 days!")
+- Evening gratitude reminders only if neither has written
+- Red dots for new content, not guilt-inducing streaks
+
+**5. Personal and Evolving**
+This is THEIR app, built for their specific relationship:
+- Features based on what they actually enjoy
+- Huaiyao can suggest changes via the feedback chat
+- Inside jokes and personal touches welcome
+- No need for generic "couple app" features they won't use
+
+### Current Apps
+
+| App | Purpose |
+|-----|---------|
+| **Gratitude Wall** | Daily notes of appreciation to each other |
+| **Story Book** | Collaborative story, one sentence at a time |
+| **Quiz** | Questions about each other to test how well they know one another |
+| **Memories** | Photo-rich timeline of moments together |
+| **Map** | Places visited and bucket list destinations |
+| **Mystery** | AI-driven story games they solve together |
+| **Countdown** | Events they're looking forward to |
+| **Dates** | Date ideas to try together |
+| **Media** | Shows/movies to watch together |
+| **Hive** | Board game to play against each other |
+| **Prompts** | Daily questions to spark conversation |
+| **Stats** | Overview of their shared activity |
+
+### Future Direction
+
+**More "Alive" Features**
+- Memory flashbacks on the home page ("3 years ago today...")
+- Activity feed showing partner's recent actions
+- Partner presence indicator
+
+**Deeper Connection Features**
+- Voice/video messages in chat
+- Dream journal they can share
+- Letters for future dates (time capsule)
+
+**Quality of Life**
+- Better photo management in memories
+- Search across all content
+- Export/backup of their data
+- Anniversary and milestone celebrations
+
+### What NOT to Build
+- Social features (this is private, just for them)
+- Gamification that creates pressure or guilt
+- Features that feel like chores
+- Anything that requires daily obligation
+- Generic features they won't actually use

@@ -1,0 +1,41 @@
+{
+  "project": {
+    "name": "D&H",
+    "description": "A private couples website for Daniel & Huaiyao - a collection of interactive mini-apps",
+    "techStack": "Next.js + Supabase + TypeScript",
+    "visionFile": "product-vision.txt"
+  },
+  "qualityGates": {
+    "enabled": true,
+    "commands": {
+      "typecheck": "npx tsc --noEmit",
+      "lint": "npm run lint",
+      "build": "npm run build"
+    }
+  },
+  "git": {
+    "mainBranch": "main",
+    "branchPrefix": "experimental/overnight"
+  },
+  "safety": {
+    "maxFilesPerTask": 3,
+    "maxConsecutiveFailures": 3,
+    "maxConsecutiveNoOps": 3,
+    "blockedPatterns": [
+      "\.env",
+      "package-lock\.json",
+      "yarn\.lock",
+      "pnpm-lock\.yaml",
+      "\.prisma",
+      "schema\.prisma",
+      "migrations/",
+      "\.secret",
+      "credentials",
+      "node_modules/"
+    ]
+  },
+  "timing": {
+    "pauseSeconds": 30,
+    "maxRetries": 3
+  }
+}
