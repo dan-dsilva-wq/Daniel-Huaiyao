@@ -3,6 +3,10 @@
     {
       "path": "/api/gratitude-reminder",
       "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/book-reminder",
+      "schedule": "0 1 * * *"
     }
   ]
 }
