@@ -1,0 +1,129 @@
+
+> daniel-huaiyao@0.1.0 lint
+> eslint
+
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\components\ChatBubble.tsx
+   19:23  warning  'setCurrentUser' is assigned a value but never used                                                                                                         @typescript-eslint/no-unused-vars
+  157:6   warning  React Hook useEffect has missing dependencies: 'fetchMessages', 'markAsRead', and 'updateTypingStatus'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  175:6   warning  React Hook useEffect has missing dependencies: 'markAsRead' and 'unreadCount'. Either include them or remove the dependency array                           react-hooks/exhaustive-deps
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\countdown\page.tsx
+  748:27  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\feedback\page.tsx
+  19:23  warning  'setCurrentUser' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\hive\page.tsx
+    4:18  warning  'AnimatePresence' is defined but never used         @typescript-eslint/no-unused-vars
+  188:22  warning  'setViewOffset' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\map\components\PhotoGallery.tsx
+  193:19  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\map\page.tsx
+    3:44  warning  'memo' is defined but never used                    @typescript-eslint/no-unused-vars
+    5:49  warning  'ZoomableGroup' is defined but never used           @typescript-eslint/no-unused-vars
+  315:9   warning  'markAsVisited' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  333:9   warning  'removePlace' is assigned a value but never used    @typescript-eslint/no-unused-vars
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\memories\page.tsx
+  636:23  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  799:31  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  927:27  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\mystery\[sessionId]\page.tsx
+  7:41  warning  'MysteryVote' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\mystery\components\AIStoryMode.tsx
+  116:6  warning  React Hook useCallback has missing dependencies: 'currentPlayer' and 'generateNextScene'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  338:6  warning  React Hook useEffect has a missing dependency: 'generateNextScene'. Either include it or remove the dependency array                          react-hooks/exhaustive-deps
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\mystery\components\BranchVisualization.tsx
+    4:18  warning  'AnimatePresence' is defined but never used     @typescript-eslint/no-unused-vars
+  115:9   warning  'maxChosen' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\mystery\components\ParagraphReader.tsx
+   27:83  warning  'continueAuto' is assigned a value but never used                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+  140:6   warning  React Hook useEffect has missing dependencies: 'autoReadAll' and 'onComplete'. Either include them or remove the dependency array. If 'onComplete' changes too often, find the parent component that defines it and wrap that definition in useCallback  react-hooks/exhaustive-deps
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\mystery\components\TypewriterText.tsx
+  75:6  warning  React Hook useEffect has a missing dependency: 'speakText'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\mystery\components\VoiceReader.tsx
+  35:11  warning  'currentIndex' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\mystery\components\puzzles\MiniGameContainer.tsx
+  577:9  warning  'gridSize' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\mystery\components\puzzles\PuzzleRenderer.tsx
+  347:17  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\mystery\page.tsx
+  235:15  warning  'data' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\page.tsx
+  220:19  warning  'setMounted' is assigned a value but never used                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+  222:23  warning  'setCurrentUser' is assigned a value but never used                                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+  457:25  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\profile\page.tsx
+  25:23  warning  'setCurrentUser' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\app\quiz\page.tsx
+   764:9  warning  'percentage' is assigned a value but never used           @typescript-eslint/no-unused-vars
+   826:9  warning  'filteredMyQuestions' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  1796:3  warning  'lastResult' is defined but never used                    @typescript-eslint/no-unused-vars
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\book\components\StorySummary.tsx
+  21:10  error  Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\book\components\StorySummary.tsx:21:10
+  19 |   const particleData = useMemo(() =>
+  20 |     [...Array(20)].map(() => ({
+> 21 |       x: Math.random() * 1000,
+     |          ^^^^^^^^^^^^^ Cannot call impure function
+  22 |       y: Math.random() * 800,
+  23 |       duration: 5 + Math.random() * 5,
+  24 |       delay: Math.random() * 5,  react-hooks/purity
+  22:10  error  Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\book\components\StorySummary.tsx:22:10
+  20 |     [...Array(20)].map(() => ({
+  21 |       x: Math.random() * 1000,
+> 22 |       y: Math.random() * 800,
+     |          ^^^^^^^^^^^^^ Cannot call impure function
+  23 |       duration: 5 + Math.random() * 5,
+  24 |       delay: Math.random() * 5,
+  25 |     })),                              react-hooks/purity
+  23:21  error  Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\book\components\StorySummary.tsx:23:21
+  21 |       x: Math.random() * 1000,
+  22 |       y: Math.random() * 800,
+> 23 |       duration: 5 + Math.random() * 5,
+     |                     ^^^^^^^^^^^^^ Cannot call impure function
+  24 |       delay: Math.random() * 5,
+  25 |     })),
+  26 |   []);                                            react-hooks/purity
+  24:14  error  Error: Cannot call impure function during render
+
+`Math.random` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+C:\Users\dan-d\Projects\Website\daniel-huaiyao\book\components\StorySummary.tsx:24:14
+  22 |       y: Math.random() * 800,
+  23 |       duration: 5 + Math.random() * 5,
+> 24 |       delay: Math.random() * 5,
+     |              ^^^^^^^^^^^^^ Cannot call impure function
+  25 |     })),
+  26 |   []);
+  27 |                                                                                  react-hooks/purity
+
+✖ 38 problems (4 errors, 34 warnings)
+

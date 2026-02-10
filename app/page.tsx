@@ -196,6 +196,13 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     href: '/hive',
     gradient: 'from-yellow-500 to-amber-600',
   },
+  {
+    title: 'Stratego',
+    description: 'Hidden army strategy game',
+    icon: '⚔️',
+    href: '/stratego',
+    gradient: 'from-red-500 to-blue-600',
+  },
   // Together games
   {
     title: 'Two Truths & a Lie',

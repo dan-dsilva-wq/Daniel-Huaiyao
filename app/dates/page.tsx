@@ -28,15 +28,11 @@ export default function DateIdeas() {
 
   // Wheel spin state
   const [showWheel, setShowWheel] = useState(false);
-  const [wheelPhase, setWheelPhase] = useState<'ready' | 'eliminating' | 'spinning' | 'done'>('ready');
+  const [isSpinning, setIsSpinning] = useState(false);
   const [wheelRotation, setWheelRotation] = useState(0);
   const [selectedIdea, setSelectedIdea] = useState<DateIdea | null>(null);
   const [wheelIdeas, setWheelIdeas] = useState<DateIdea[]>([]);
-  const [eliminatingId, setEliminatingId] = useState<string | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const currentWheelRef = useRef<DateIdea[]>([]);
-  const eliminationQueueRef = useRef<string[]>([]);
-  const rotationRef = useRef(0);
+  const spinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch data from Supabase using RPC
   const fetchData = useCallback(async () => {
@@ -175,7 +171,6 @@ export default function DateIdeas() {
     '#8B5CF6', '#F59E0B', '#EC4899', '#14B8A6',
     '#6366F1', '#F97316', '#06B6D4', '#EF4444',
   ];
-  const FINAL_COUNT = 6;
 
   const getIncompleteIdeas = () =>
     categories.flatMap((cat) => cat.ideas.filter((i) => !i.is_completed));
@@ -192,132 +187,43 @@ export default function DateIdeas() {
   const openWheel = () => {
     const incomplete = getIncompleteIdeas();
     if (incomplete.length === 0) return;
-    const shuffled = shuffleArray(incomplete);
-    setWheelIdeas(shuffled);
-    currentWheelRef.current = shuffled;
+    const picked = shuffleArray(incomplete).slice(0, 8);
+    setWheelIdeas(picked);
     setSelectedIdea(null);
-    setEliminatingId(null);
     setWheelRotation(0);
-    rotationRef.current = 0;
-    setWheelPhase('ready');
     setShowWheel(true);
   };
 
-  const startFinalSpin = (ideas: DateIdea[]) => {
-    setWheelPhase('spinning');
-    setEliminatingId(null);
+  const spinWheel = () => {
+    if (isSpinning || wheelIdeas.length === 0) return;
+    setIsSpinning(true);
+    setSelectedIdea(null);
 
-    const winnerIndex = Math.floor(Math.random() * ideas.length);
-    const segmentAngle = 360 / ideas.length;
+    const winnerIndex = Math.floor(Math.random() * wheelIdeas.length);
+    const segmentAngle = 360 / wheelIdeas.length;
+    // The pointer is at the top (12 o'clock). Segment 0 starts at 12 o'clock going clockwise.
+    // To land on winnerIndex, the center of that segment needs to align with the top.
     const segmentCenter = winnerIndex * segmentAngle + segmentAngle / 2;
+    // We rotate clockwise, so we need (360 - segmentCenter) to bring that segment to top
     const targetAngle = 360 - segmentCenter;
+    // Add multiple full rotations for dramatic effect
     const fullSpins = 5 + Math.floor(Math.random() * 3);
-    const currentRot = rotationRef.current;
-    const newRotation = currentRot + fullSpins * 360 + ((targetAngle - (currentRot % 360)) + 360) % 360;
+    const newRotation = wheelRotation + fullSpins * 360 + ((targetAngle - (wheelRotation % 360)) + 360) % 360;
 
-    rotationRef.current = newRotation;
     setWheelRotation(newRotation);
 
-    timeoutRef.current = setTimeout(() => {
-      setSelectedIdea(ideas[winnerIndex]);
-      setWheelPhase('done');
+    spinTimeoutRef.current = setTimeout(() => {
+      setSelectedIdea(wheelIdeas[winnerIndex]);
+      setIsSpinning(false);
     }, 4000);
   };
 
-  const runNextElimination = (index: number, total: number) => {
-    if (index >= eliminationQueueRef.current.length) {
-      setEliminatingId(null);
-      // Brief pause before final spin
-      timeoutRef.current = setTimeout(() => {
-        startFinalSpin(currentWheelRef.current);
-      }, 400);
-      return;
-    }
-
-    const idToEliminate = eliminationQueueRef.current[index];
-
-    // Flash the segment
-    setEliminatingId(idToEliminate);
-
-    // Accelerating pace: 350ms at start → 150ms at end
-    const progress = index / total;
-    const flashDuration = Math.round(280 - progress * 150);
-
-    timeoutRef.current = setTimeout(() => {
-      // Remove the idea from the wheel
-      currentWheelRef.current = currentWheelRef.current.filter(i => i.id !== idToEliminate);
-      setWheelIdeas([...currentWheelRef.current]);
-      setEliminatingId(null);
-
-      // Rotate the wheel a bit with each elimination (accelerating)
-      const rotationStep = 25 + progress * 35 + Math.random() * 20;
-      rotationRef.current += rotationStep;
-      setWheelRotation(rotationRef.current);
-
-      // Brief gap then next elimination
-      const gap = Math.round(120 - progress * 50);
-      timeoutRef.current = setTimeout(() => {
-        runNextElimination(index + 1, total);
-      }, gap);
-    }, flashDuration);
-  };
-
-  const startElimination = (ideas: DateIdea[]) => {
-    setWheelPhase('eliminating');
-
-    // Pick random survivors
-    const targetCount = Math.min(FINAL_COUNT, ideas.length);
-    const survivorIndices = new Set<number>();
-    while (survivorIndices.size < targetCount) {
-      survivorIndices.add(Math.floor(Math.random() * ideas.length));
-    }
-
-    // Build randomized elimination queue
-    const toEliminate = ideas
-      .map((idea, i) => ({ idea, i }))
-      .filter(({ i }) => !survivorIndices.has(i))
-      .sort(() => Math.random() - 0.5);
-
-    eliminationQueueRef.current = toEliminate.map(({ idea }) => idea.id);
-
-    runNextElimination(0, toEliminate.length);
-  };
-
-  const spinWheel = () => {
-    if (wheelPhase === 'eliminating' || wheelPhase === 'spinning') return;
-
-    // "Spin Again" — reset with all ideas
-    if (wheelPhase === 'done') {
-      const incomplete = getIncompleteIdeas();
-      const shuffled = shuffleArray(incomplete);
-      setWheelIdeas(shuffled);
-      currentWheelRef.current = shuffled;
-      setSelectedIdea(null);
-      setEliminatingId(null);
-      // Keep accumulated rotation for visual continuity
-
-      if (shuffled.length > FINAL_COUNT) {
-        startElimination(shuffled);
-      } else {
-        startFinalSpin(shuffled);
-      }
-      return;
-    }
-
-    // First spin
-    if (wheelIdeas.length > FINAL_COUNT) {
-      startElimination(wheelIdeas);
-    } else {
-      startFinalSpin(wheelIdeas);
-    }
-  };
-
   const closeWheel = () => {
-    if (wheelPhase === 'eliminating' || wheelPhase === 'spinning') return;
+    if (isSpinning) return;
     setShowWheel(false);
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
+    if (spinTimeoutRef.current) {
+      clearTimeout(spinTimeoutRef.current);
+      spinTimeoutRef.current = null;
     }
   };
 
@@ -748,29 +654,9 @@ export default function DateIdeas() {
               onClick={(e) => e.stopPropagation()}
               className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 max-w-sm w-full flex flex-col items-center gap-4"
             >
-              <div className="text-center">
-                <h2 className="text-xl font-serif font-bold text-gray-800 dark:text-gray-100">
-                  {wheelPhase === 'ready' && 'Spin the Wheel!'}
-                  {wheelPhase === 'eliminating' && 'Narrowing down...'}
-                  {wheelPhase === 'spinning' && 'And the winner is...'}
-                  {wheelPhase === 'done' && 'Date night sorted!'}
-                </h2>
-                {wheelPhase === 'ready' && (
-                  <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-                    {wheelIdeas.length} ideas loaded
-                  </p>
-                )}
-                {wheelPhase === 'eliminating' && (
-                  <motion.p
-                    key={wheelIdeas.length}
-                    initial={{ scale: 1.2, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="text-sm text-purple-500 dark:text-purple-400 mt-1 font-medium"
-                  >
-                    {wheelIdeas.length} remaining...
-                  </motion.p>
-                )}
-              </div>
+              <h2 className="text-xl font-serif font-bold text-gray-800 dark:text-gray-100">
+                Spin the Wheel!
+              </h2>
 
               {/* Wheel container */}
               <div className="relative w-72 h-72">
@@ -786,18 +672,15 @@ export default function DateIdeas() {
                   viewBox="0 0 200 200"
                   className="w-full h-full"
                   animate={{ rotate: wheelRotation }}
-                  transition={
-                    wheelPhase === 'spinning'
-                      ? { duration: 4, ease: [0.2, 0.8, 0.3, 1] }
-                      : wheelPhase === 'eliminating'
-                        ? { duration: 0.3, ease: 'easeOut' }
-                        : { duration: 0 }
-                  }
+                  transition={wheelRotation === 0 ? { duration: 0 } : {
+                    duration: 4,
+                    ease: [0.2, 0.8, 0.3, 1],
+                  }}
                 >
                   {wheelIdeas.map((idea, i) => {
                     const count = wheelIdeas.length;
                     const angle = 360 / count;
-                    const startAngle = i * angle - 90;
+                    const startAngle = i * angle - 90; // -90 so segment 0 starts at top
                     const endAngle = startAngle + angle;
                     const startRad = (startAngle * Math.PI) / 180;
                     const endRad = (endAngle * Math.PI) / 180;
@@ -807,46 +690,37 @@ export default function DateIdeas() {
                     const y2 = 100 + 95 * Math.sin(endRad);
                     const largeArc = angle > 180 ? 1 : 0;
 
-                    const isBeingEliminated = eliminatingId === idea.id;
-                    const segmentColor = isBeingEliminated
-                      ? '#FDE68A'
-                      : WHEEL_COLORS[i % WHEEL_COLORS.length];
-
-                    // Only show text when segments are large enough to read
-                    const showText = count <= 12;
+                    // Text position at midpoint of segment
                     const midAngle = ((startAngle + endAngle) / 2) * Math.PI / 180;
                     const textR = 62;
                     const tx = 100 + textR * Math.cos(midAngle);
                     const ty = 100 + textR * Math.sin(midAngle);
                     const textRotation = (startAngle + endAngle) / 2 + 90;
 
-                    const maxChars = count <= 4 ? 14 : count <= 8 ? 12 : 9;
-                    const label = idea.title.length > maxChars
-                      ? idea.title.slice(0, maxChars - 1) + '\u2026'
+                    const label = idea.title.length > 12
+                      ? idea.title.slice(0, 11) + '\u2026'
                       : idea.title;
 
                     return (
-                      <g key={idea.id} opacity={isBeingEliminated ? 0.85 : 1}>
+                      <g key={idea.id}>
                         <path
                           d={`M100,100 L${x1},${y1} A95,95 0 ${largeArc},1 ${x2},${y2} Z`}
-                          fill={segmentColor}
+                          fill={WHEEL_COLORS[i % WHEEL_COLORS.length]}
                           stroke="white"
                           strokeWidth="1"
                         />
-                        {showText && (
-                          <text
-                            x={tx}
-                            y={ty}
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                            transform={`rotate(${textRotation}, ${tx}, ${ty})`}
-                            fill={isBeingEliminated ? '#92400E' : 'white'}
-                            fontSize={count <= 4 ? "7" : count <= 8 ? "6" : "5"}
-                            fontWeight="600"
-                          >
-                            {label}
-                          </text>
-                        )}
+                        <text
+                          x={tx}
+                          y={ty}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                          transform={`rotate(${textRotation}, ${tx}, ${ty})`}
+                          fill="white"
+                          fontSize={count <= 4 ? "7" : "6"}
+                          fontWeight="600"
+                        >
+                          {label}
+                        </text>
                       </g>
                     );
                   })}
@@ -881,28 +755,18 @@ export default function DateIdeas() {
 
               {/* Buttons */}
               <div className="flex gap-3 w-full">
-                {wheelPhase === 'ready' && (
+                {!selectedIdea ? (
                   <motion.button
                     whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.97 }}
                     onClick={spinWheel}
+                    disabled={isSpinning}
                     className="flex-1 py-3 bg-gradient-to-r from-purple-500 to-amber-500 text-white font-semibold rounded-xl
-                               hover:from-purple-600 hover:to-amber-600 transition-all"
+                               hover:from-purple-600 hover:to-amber-600 disabled:opacity-60 transition-all"
                   >
-                    Spin!
+                    {isSpinning ? 'Spinning...' : 'Spin!'}
                   </motion.button>
-                )}
-                {wheelPhase === 'eliminating' && (
-                  <div className="flex-1 py-3 text-center text-purple-500 dark:text-purple-400 font-semibold animate-pulse">
-                    Eliminating...
-                  </div>
-                )}
-                {wheelPhase === 'spinning' && (
-                  <div className="flex-1 py-3 text-center text-amber-500 dark:text-amber-400 font-semibold animate-pulse">
-                    Spinning...
-                  </div>
-                )}
-                {wheelPhase === 'done' && (
+                ) : (
                   <>
                     <motion.button
                       whileHover={{ scale: 1.03 }}
