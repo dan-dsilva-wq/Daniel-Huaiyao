@@ -53,8 +53,13 @@ export default function StrategoPage() {
   const [creatingGame, setCreatingGame] = useState(false);
   const [gameHistory, setGameHistory] = useState<{ wins: number; losses: number }>({ wins: 0, losses: 0 });
   const subscriptionRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const matchModeRef = useRef<MatchMode>('online');
 
   useMarkAppViewed('Stratego');
+
+  useEffect(() => {
+    matchModeRef.current = matchMode;
+  }, [matchMode]);
 
   // Initialize
   useEffect(() => {
@@ -74,7 +79,10 @@ export default function StrategoPage() {
       return;
     }
 
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      setLoading(false);
+      return;
+    }
 
     loadActiveGame();
     loadHistory();
@@ -91,16 +99,19 @@ export default function StrategoPage() {
       });
 
       if (err) {
+        if (matchModeRef.current !== 'online') return;
         setError('Failed to load game state');
         return;
       }
 
       const state = data as GameState;
       if ('error' in state) {
+        if (matchModeRef.current !== 'online') return;
         setError((state as unknown as { error: string }).error);
         return;
       }
 
+      if (matchModeRef.current !== 'online') return;
       setGameState(state);
     },
     [currentUser, matchMode],
@@ -116,12 +127,14 @@ export default function StrategoPage() {
     });
 
     if (err) {
+      if (matchModeRef.current !== 'online') return;
       setError('Failed to load game');
       setLoading(false);
       return;
     }
 
     const result = data as { game_id: string | null };
+    if (matchModeRef.current !== 'online') return;
     if (result.game_id) {
       setGameId(result.game_id);
       await fetchGameState(result.game_id);
@@ -514,7 +527,10 @@ export default function StrategoPage() {
             <button
               onClick={() => {
                 setMatchMode('online');
+                setError(null);
                 setAwaitingComputerMove(false);
+                setGameState(null);
+                setLoading(true);
               }}
               disabled={!canSwitchMode}
               className={`px-3 py-1.5 text-sm rounded-lg font-semibold transition ${
@@ -531,6 +547,7 @@ export default function StrategoPage() {
                 setError(null);
                 setCombatAnimation(null);
                 setAwaitingComputerMove(false);
+                setLoading(false);
                 if (!localGameState || localGameState.status !== 'playing') {
                   setLocalGameState(createComputerGameState());
                   setGameState(null);
