@@ -267,7 +267,16 @@ export default function StrategoPage() {
     });
 
     if (err) {
+      if (matchModeRef.current !== 'online') {
+        setCreatingGame(false);
+        return;
+      }
       setError('Failed to create game');
+      setCreatingGame(false);
+      return;
+    }
+
+    if (matchModeRef.current !== 'online') {
       setCreatingGame(false);
       return;
     }
@@ -321,7 +330,16 @@ export default function StrategoPage() {
     });
 
     if (err) {
+      if (matchModeRef.current !== 'online') {
+        setIsSubmittingSetup(false);
+        return;
+      }
       setError('Failed to submit setup');
+      setIsSubmittingSetup(false);
+      return;
+    }
+
+    if (matchModeRef.current !== 'online') {
       setIsSubmittingSetup(false);
       return;
     }
@@ -369,6 +387,7 @@ export default function StrategoPage() {
     }
 
     if (!currentUser || !gameId) return;
+    const attackerColor = gameState?.my_color ?? 'red';
     setIsMoving(true);
 
     const { data, error: err } = await supabase.rpc('make_stratego_move', {
@@ -380,7 +399,16 @@ export default function StrategoPage() {
     });
 
     if (err) {
+      if (matchModeRef.current !== 'online') {
+        setIsMoving(false);
+        return;
+      }
       setError('Failed to make move');
+      setIsMoving(false);
+      return;
+    }
+
+    if (matchModeRef.current !== 'online') {
       setIsMoving(false);
       return;
     }
@@ -398,7 +426,7 @@ export default function StrategoPage() {
         attacker_rank: result.attacker_rank,
         defender_rank: result.defender_rank,
         result: result.combat_result,
-        attacker_color: gameState!.my_color,
+        attacker_color: attackerColor,
       });
     }
 
@@ -446,6 +474,8 @@ export default function StrategoPage() {
       p_game_id: gameId,
       p_user: currentUser,
     });
+
+    if (matchModeRef.current !== 'online') return;
 
     if (err || (data as { error?: string }).error) {
       setError('Failed to resign');

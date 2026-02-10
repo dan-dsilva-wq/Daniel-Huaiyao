@@ -36,17 +36,32 @@ export const PIECE_DEFINITIONS: PieceDefinition[] = [
 ];
 
 export function getPieceDefinition(rank: PieceRank): PieceDefinition {
-  return PIECE_DEFINITIONS.find(p => p.rank === rank)!;
+  const piece = PIECE_DEFINITIONS.find(p => p.rank === rank);
+  if (!piece) {
+    throw new Error(`Unknown Stratego piece rank: ${rank}`);
+  }
+  return piece;
 }
 
-export function getPieceName(rank: PieceRank | -1): string {
-  if (rank === -1) return '?';
-  return getPieceDefinition(rank as PieceRank).name;
+function toValidPieceRank(rank: PieceRank | -1 | number | string): PieceRank | -1 {
+  if (rank === -1) return -1;
+  const numericRank = typeof rank === 'string' ? Number(rank) : rank;
+  if (Number.isInteger(numericRank) && numericRank >= 0 && numericRank <= 11) {
+    return numericRank as PieceRank;
+  }
+  return -1;
 }
 
-export function getPieceShortName(rank: PieceRank | -1): string {
-  if (rank === -1) return '?';
-  return getPieceDefinition(rank as PieceRank).shortName;
+export function getPieceName(rank: PieceRank | -1 | number | string): string {
+  const safeRank = toValidPieceRank(rank);
+  if (safeRank === -1) return '?';
+  return getPieceDefinition(safeRank).name;
+}
+
+export function getPieceShortName(rank: PieceRank | -1 | number | string): string {
+  const safeRank = toValidPieceRank(rank);
+  if (safeRank === -1) return '?';
+  return getPieceDefinition(safeRank).shortName;
 }
 
 // Colors for piece display

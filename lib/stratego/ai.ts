@@ -109,6 +109,8 @@ const DIFFICULTY_CONFIG: Record<ComputerDifficulty, SearchConfig> = {
   },
 };
 
+const ALL_PIECE_RANKS: PieceRank[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+
 const DIRECTIONS: ReadonlyArray<readonly [number, number]> = [
   [-1, 0],
   [1, 0],
@@ -758,7 +760,6 @@ function generateComputerSetup(difficulty: ComputerDifficulty): Piece[] {
     return normalizeGeneratedSetup(generateRandomSetup('blue'));
   }
 
-  const piecesByRank: PieceRank[] = [];
   const counts: Record<PieceRank, number> = {
     0: 1,
     1: 1,
@@ -773,12 +774,6 @@ function generateComputerSetup(difficulty: ComputerDifficulty): Piece[] {
     10: 1,
     11: 6,
   };
-
-  (Object.keys(counts) as unknown as PieceRank[]).forEach((rank) => {
-    for (let index = 0; index < counts[rank]; index += 1) {
-      piecesByRank.push(rank);
-    }
-  });
 
   const positions = createBlueSetupPositions();
   const assignment = new Map<string, PieceRank>();
@@ -909,7 +904,7 @@ function setRankAt(
 
 function buildRemainingRanks(counts: Record<PieceRank, number>): PieceRank[] {
   const remaining: PieceRank[] = [];
-  (Object.keys(counts) as unknown as PieceRank[]).forEach((rank) => {
+  ALL_PIECE_RANKS.forEach((rank) => {
     for (let index = 0; index < counts[rank]; index += 1) {
       remaining.push(rank);
     }
