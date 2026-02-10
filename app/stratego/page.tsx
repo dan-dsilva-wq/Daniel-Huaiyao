@@ -69,13 +69,11 @@ export default function StrategoPage() {
 
     if (matchMode === 'computer') {
       setLoading(false);
-      setGameId(null);
       setGameState(null);
       setLocalGameState((prev) => prev ?? createComputerGameState());
       return;
     }
 
-    setLocalGameState(null);
     if (!isSupabaseConfigured) return;
 
     loadActiveGame();
@@ -287,7 +285,6 @@ export default function StrategoPage() {
     setCombatAnimation(null);
     setAwaitingComputerMove(false);
     setIsMoving(false);
-    setGameId(null);
     setLocalGameState(createComputerGameState());
   };
 
@@ -471,7 +468,7 @@ export default function StrategoPage() {
       : 'Daniel';
 
   const isComputerTurn = matchMode === 'computer' && !!gameState && gameState.current_turn === 'blue';
-  const canSwitchMode = !gameState || gameState.status !== 'playing';
+  const canSwitchMode = !isSubmittingSetup && !isMoving && !creatingGame;
   const canChangeDifficulty = matchMode === 'computer' && (!gameState || gameState.status !== 'playing');
 
   return (
@@ -516,10 +513,8 @@ export default function StrategoPage() {
           <div className="flex items-center justify-center gap-2 p-1 rounded-xl bg-gray-100 dark:bg-gray-800/70">
             <button
               onClick={() => {
-                if (!canSwitchMode) return;
                 setMatchMode('online');
                 setAwaitingComputerMove(false);
-                setLocalGameState(null);
               }}
               disabled={!canSwitchMode}
               className={`px-3 py-1.5 text-sm rounded-lg font-semibold transition ${
@@ -532,7 +527,6 @@ export default function StrategoPage() {
             </button>
             <button
               onClick={() => {
-                if (!canSwitchMode) return;
                 setMatchMode('computer');
                 setError(null);
                 setCombatAnimation(null);
@@ -540,7 +534,6 @@ export default function StrategoPage() {
                 if (!localGameState || localGameState.status !== 'playing') {
                   setLocalGameState(createComputerGameState());
                   setGameState(null);
-                  setGameId(null);
                 }
               }}
               disabled={!canSwitchMode}
