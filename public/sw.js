@@ -1,5 +1,5 @@
 // Service Worker for Daniel & Huaiyao PWA
-const CACHE_NAME = 'dh-cache-v6'; // Force refresh 2026-02-04
+const CACHE_NAME = 'dh-cache-v7'; // Force refresh 2026-02-10 dates overhaul
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
