@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { EventDetailModal } from './components/EventDetailModal';
 
 interface ImportantDate {
   id: string;
@@ -43,6 +44,7 @@ export default function Countdown() {
   const [memoryPhotos, setMemoryPhotos] = useState<File[]>([]);
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState<string[]>([]);
   const [savingMemory, setSavingMemory] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<ImportantDate | null>(null);
   const [newDate, setNewDate] = useState({
     title: '',
     event_date: '',
@@ -380,7 +382,8 @@ export default function Countdown() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="mb-8 p-6 sm:p-8 bg-gradient-to-br from-amber-500 to-rose-500 rounded-2xl text-white shadow-xl"
+            onClick={() => setSelectedEvent(heroDate)}
+            className="mb-8 p-6 sm:p-8 bg-gradient-to-br from-amber-500 to-rose-500 rounded-2xl text-white shadow-xl cursor-pointer"
           >
             <div className="text-center">
               <motion.div
@@ -435,8 +438,9 @@ export default function Countdown() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
+              onClick={() => setSelectedEvent(date)}
               className="group p-4 bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-xl shadow-sm
-                         hover:shadow-md transition-shadow"
+                         hover:shadow-md transition-shadow cursor-pointer"
             >
               <div className="flex items-center gap-4">
                 <span className="text-3xl">{date.emoji}</span>
@@ -461,7 +465,7 @@ export default function Countdown() {
                   </div>
                 </div>
                 <button
-                  onClick={() => deleteDate(date.id, date.title)}
+                  onClick={(e) => { e.stopPropagation(); deleteDate(date.id, date.title); }}
                   className="opacity-0 group-hover:opacity-100 p-2 text-gray-400 hover:text-red-500
                              transition-all touch-manipulation"
                 >
@@ -788,6 +792,19 @@ export default function Countdown() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Event Detail Modal */}
+      <AnimatePresence>
+        {selectedEvent && (
+          <EventDetailModal
+            event={selectedEvent}
+            currentUser={currentUser}
+            onClose={() => setSelectedEvent(null)}
+            onDelete={(id, title) => { deleteDate(id, title); setSelectedEvent(null); }}
+            onNotify={sendNotification}
+          />
         )}
       </AnimatePresence>
     </div>

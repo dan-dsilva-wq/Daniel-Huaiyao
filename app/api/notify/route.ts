@@ -34,7 +34,7 @@ function isWithinAllowedHours(): boolean {
   return hour >= QUIET_HOURS_END && hour < QUIET_HOURS_START;
 }
 
-type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed' | 'memory_added' | 'gratitude_sent' | 'chat_message' | 'book_sentence' | 'date_added' | 'date_removed' | 'prompt_answered' | 'media_added' | 'stratego_new_game' | 'stratego_move' | 'date_idea_edited';
+type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed' | 'memory_added' | 'gratitude_sent' | 'chat_message' | 'book_sentence' | 'date_added' | 'date_removed' | 'prompt_answered' | 'media_added' | 'stratego_new_game' | 'stratego_move' | 'date_idea_edited' | 'event_plan_updated';
 
 const ACTION_MESSAGES: Record<ActionType, string> = {
   added: 'added a new date idea',
@@ -59,6 +59,7 @@ const ACTION_MESSAGES: Record<ActionType, string> = {
   stratego_new_game: 'started a Stratego game',
   stratego_move: 'made a move in Stratego',
   date_idea_edited: 'edited a date idea',
+  event_plan_updated: 'updated plans for',
 };
 
 const ACTION_URLS: Record<string, string> = {
@@ -84,6 +85,7 @@ const ACTION_URLS: Record<string, string> = {
   stratego_new_game: '/stratego',
   stratego_move: '/stratego',
   date_idea_edited: '/dates',
+  event_plan_updated: '/countdown',
 };
 
 const ACTION_APP_NAMES: Record<string, string> = {
@@ -109,6 +111,7 @@ const ACTION_APP_NAMES: Record<string, string> = {
   stratego_new_game: 'stratego',
   stratego_move: 'stratego',
   date_idea_edited: 'dates',
+  event_plan_updated: 'countdown',
 };
 
 export async function POST(request: Request) {
