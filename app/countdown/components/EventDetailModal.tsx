@@ -115,12 +115,17 @@ export function EventDetailModal({ event, currentUser, onClose, onDelete, onNoti
   };
 
   const formatTime = (timeStr: string) => {
-    // timeStr is like "17:00:00" from the DB
     const [hours, minutes] = timeStr.split(':');
     const h = parseInt(hours);
     const ampm = h >= 12 ? 'PM' : 'AM';
     const displayH = h % 12 || 12;
     return `${displayH}:${minutes} ${ampm}`;
+  };
+
+  // Convert DB time "HH:MM:SS" to input value "HH:MM"
+  const timeToInputValue = (timeStr: string) => {
+    const parts = timeStr.split(':');
+    return `${parts[0]}:${parts[1]}`;
   };
 
   const formatTimeAgo = (dateStr: string) => {
@@ -161,6 +166,22 @@ export function EventDetailModal({ event, currentUser, onClose, onDelete, onNoti
       console.error('Error adding timeline item:', error);
     } finally {
       setAddingTimeline(false);
+    }
+  };
+
+  const updateTimelineItem = async (itemId: string, timeSlot: string, title: string, description: string, location: string) => {
+    try {
+      const { error } = await supabase.rpc('update_timeline_item', {
+        p_item_id: itemId,
+        p_time_slot: timeSlot,
+        p_title: title.trim(),
+        p_description: description.trim() || null,
+        p_location: location.trim() || null,
+      });
+      if (error) throw error;
+      fetchPlan();
+    } catch (error) {
+      console.error('Error updating timeline item:', error);
     }
   };
 
@@ -208,6 +229,19 @@ export function EventDetailModal({ event, currentUser, onClose, onDelete, onNoti
     }
   };
 
+  const updateChecklistItem = async (itemId: string, title: string) => {
+    try {
+      const { error } = await supabase.rpc('update_checklist_item', {
+        p_item_id: itemId,
+        p_title: title.trim(),
+      });
+      if (error) throw error;
+      fetchPlan();
+    } catch (error) {
+      console.error('Error updating checklist item:', error);
+    }
+  };
+
   const deleteChecklistItem = async (itemId: string) => {
     try {
       const { error } = await supabase.rpc('delete_checklist_item', { p_item_id: itemId });
@@ -236,14 +270,12 @@ export function EventDetailModal({ event, currentUser, onClose, onDelete, onNoti
         });
         if (error) throw error;
         setNotesSaveStatus('saved');
-        // Update local plan state
         setPlan((prev) => prev ? {
           ...prev,
           notes: value,
           notes_updated_by: currentUser,
           notes_updated_at: new Date().toISOString(),
         } : prev);
-        // Reset status after 2s
         setTimeout(() => setNotesSaveStatus('idle'), 2000);
       } catch (error) {
         console.error('Error saving notes:', error);
@@ -379,8 +411,10 @@ export function EventDetailModal({ event, currentUser, onClose, onDelete, onNoti
                     onNewLocation={setNewTimeLocation}
                     adding={addingTimeline}
                     onAdd={addTimelineItem}
+                    onUpdate={updateTimelineItem}
                     onDelete={deleteTimelineItem}
                     formatTime={formatTime}
+                    timeToInputValue={timeToInputValue}
                   />
                 </motion.div>
               )}
@@ -399,6 +433,7 @@ export function EventDetailModal({ event, currentUser, onClose, onDelete, onNoti
                     adding={addingChecklist}
                     onAdd={addChecklistItem}
                     onToggle={toggleChecklistItem}
+                    onUpdate={updateChecklistItem}
                     onDelete={deleteChecklistItem}
                   />
                 </motion.div>
@@ -429,6 +464,82 @@ export function EventDetailModal({ event, currentUser, onClose, onDelete, onNoti
   );
 }
 
+// ─── Shared inline form for timeline items ───────────────
+
+const inputClass = `w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg
+                    bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 text-sm
+                    focus:outline-none focus:ring-2 focus:ring-amber-300`;
+
+function TimelineItemForm({
+  timeSlot,
+  onTimeSlot,
+  title,
+  onTitle,
+  description,
+  onDescription,
+  location,
+  onLocation,
+  saving,
+  onSave,
+  onCancel,
+  saveLabel,
+  savingLabel,
+}: {
+  timeSlot: string;
+  onTimeSlot: (v: string) => void;
+  title: string;
+  onTitle: (v: string) => void;
+  description: string;
+  onDescription: (v: string) => void;
+  location: string;
+  onLocation: (v: string) => void;
+  saving: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+  saveLabel: string;
+  savingLabel: string;
+}) {
+  return (
+    <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Time</label>
+          <input type="time" value={timeSlot} onChange={(e) => onTimeSlot(e.target.value)} className={inputClass} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Title</label>
+          <input type="text" value={title} onChange={(e) => onTitle(e.target.value)} placeholder="e.g., Dinner" className={inputClass} />
+        </div>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Description (optional)</label>
+        <input type="text" value={description} onChange={(e) => onDescription(e.target.value)} placeholder="e.g., Try the omakase" className={inputClass} />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Location (optional)</label>
+        <input type="text" value={location} onChange={(e) => onLocation(e.target.value)} placeholder="e.g., Sakura Restaurant" className={inputClass} />
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={onCancel}
+          className="flex-1 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800
+                     dark:hover:text-gray-200 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onSave}
+          disabled={!timeSlot || !title.trim() || saving}
+          className="flex-1 px-3 py-2 text-sm bg-amber-500 text-white rounded-lg font-medium
+                     hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {saving ? savingLabel : saveLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Timeline Tab ────────────────────────────────────────
 
 function TimelineTab({
@@ -445,8 +556,10 @@ function TimelineTab({
   onNewLocation,
   adding,
   onAdd,
+  onUpdate,
   onDelete,
   formatTime,
+  timeToInputValue,
 }: {
   items: TimelineItem[];
   showAdd: boolean;
@@ -461,9 +574,36 @@ function TimelineTab({
   onNewLocation: (v: string) => void;
   adding: boolean;
   onAdd: () => void;
+  onUpdate: (id: string, timeSlot: string, title: string, description: string, location: string) => Promise<void>;
   onDelete: (id: string) => void;
   formatTime: (t: string) => string;
+  timeToInputValue: (t: string) => string;
 }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTime, setEditTime] = useState('');
+  const [editTitle, setEditTitle] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editLoc, setEditLoc] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const startEdit = (item: TimelineItem) => {
+    setEditingId(item.id);
+    setEditTime(timeToInputValue(item.time_slot));
+    setEditTitle(item.title);
+    setEditDesc(item.description ?? '');
+    setEditLoc(item.location ?? '');
+  };
+
+  const cancelEdit = () => setEditingId(null);
+
+  const saveEdit = async () => {
+    if (!editingId || !editTime || !editTitle.trim()) return;
+    setSaving(true);
+    await onUpdate(editingId, editTime, editTitle, editDesc, editLoc);
+    setEditingId(null);
+    setSaving(false);
+  };
+
   return (
     <div>
       {items.length === 0 && !showAdd && (
@@ -479,37 +619,61 @@ function TimelineTab({
           {items.map((item) => (
             <div key={item.id} className="relative group">
               {/* Dot */}
-              <div className="absolute -left-[31px] top-1 w-4 h-4 rounded-full bg-amber-400 dark:bg-amber-500
-                              border-2 border-white dark:border-gray-900" />
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-semibold text-amber-600 dark:text-amber-400 mb-0.5">
-                    {formatTime(item.time_slot)}
-                  </div>
-                  <div className="font-medium text-gray-800 dark:text-gray-100">
-                    {item.title}
-                  </div>
-                  {item.description && (
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                      {item.description}
-                    </p>
-                  )}
-                  {item.location && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 flex items-center gap-1">
-                      <span>📍</span> {item.location}
-                    </p>
-                  )}
-                </div>
-                <button
-                  onClick={() => onDelete(item.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500
-                             transition-all touch-manipulation flex-shrink-0 ml-2"
+              <div className={`absolute -left-[31px] top-1 w-4 h-4 rounded-full border-2 border-white dark:border-gray-900 ${
+                editingId === item.id ? 'bg-blue-400' : 'bg-amber-400 dark:bg-amber-500'
+              }`} />
+
+              {editingId === item.id ? (
+                <TimelineItemForm
+                  timeSlot={editTime}
+                  onTimeSlot={setEditTime}
+                  title={editTitle}
+                  onTitle={setEditTitle}
+                  description={editDesc}
+                  onDescription={setEditDesc}
+                  location={editLoc}
+                  onLocation={setEditLoc}
+                  saving={saving}
+                  onSave={saveEdit}
+                  onCancel={cancelEdit}
+                  saveLabel="Save"
+                  savingLabel="Saving..."
+                />
+              ) : (
+                <div
+                  className="flex items-start justify-between cursor-pointer rounded-lg p-1 -m-1
+                             hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                  onClick={() => startEdit(item)}
                 >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-semibold text-amber-600 dark:text-amber-400 mb-0.5">
+                      {formatTime(item.time_slot)}
+                    </div>
+                    <div className="font-medium text-gray-800 dark:text-gray-100">
+                      {item.title}
+                    </div>
+                    {item.description && (
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                        {item.description}
+                      </p>
+                    )}
+                    {item.location && (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 flex items-center gap-1">
+                        <span>📍</span> {item.location}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDelete(item.id); }}
+                    className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500
+                               transition-all touch-manipulation flex-shrink-0 ml-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -522,76 +686,23 @@ function TimelineTab({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden"
+            className="overflow-hidden mb-3"
           >
-            <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl space-y-3 mb-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Time</label>
-                  <input
-                    type="time"
-                    value={newTimeSlot}
-                    onChange={(e) => onNewTimeSlot(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg
-                               bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 text-sm
-                               focus:outline-none focus:ring-2 focus:ring-amber-300"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Title</label>
-                  <input
-                    type="text"
-                    value={newTitle}
-                    onChange={(e) => onNewTitle(e.target.value)}
-                    placeholder="e.g., Dinner"
-                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg
-                               bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 text-sm
-                               focus:outline-none focus:ring-2 focus:ring-amber-300"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Description (optional)</label>
-                <input
-                  type="text"
-                  value={newDescription}
-                  onChange={(e) => onNewDescription(e.target.value)}
-                  placeholder="e.g., Try the omakase"
-                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg
-                             bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-amber-300"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Location (optional)</label>
-                <input
-                  type="text"
-                  value={newLocation}
-                  onChange={(e) => onNewLocation(e.target.value)}
-                  placeholder="e.g., Sakura Restaurant"
-                  className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg
-                             bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-amber-300"
-                />
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onShowAdd(false)}
-                  className="flex-1 px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800
-                             dark:hover:text-gray-200 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={onAdd}
-                  disabled={!newTimeSlot || !newTitle.trim() || adding}
-                  className="flex-1 px-3 py-2 text-sm bg-amber-500 text-white rounded-lg font-medium
-                             hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {adding ? 'Adding...' : 'Add'}
-                </button>
-              </div>
-            </div>
+            <TimelineItemForm
+              timeSlot={newTimeSlot}
+              onTimeSlot={onNewTimeSlot}
+              title={newTitle}
+              onTitle={onNewTitle}
+              description={newDescription}
+              onDescription={onNewDescription}
+              location={newLocation}
+              onLocation={onNewLocation}
+              saving={adding}
+              onSave={onAdd}
+              onCancel={() => onShowAdd(false)}
+              saveLabel="Add"
+              savingLabel="Adding..."
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -619,6 +730,7 @@ function ChecklistTab({
   adding,
   onAdd,
   onToggle,
+  onUpdate,
   onDelete,
 }: {
   items: ChecklistItem[];
@@ -627,9 +739,39 @@ function ChecklistTab({
   adding: boolean;
   onAdd: () => void;
   onToggle: (id: string) => void;
+  onUpdate: (id: string, title: string) => Promise<void>;
   onDelete: (id: string) => void;
 }) {
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  const startEdit = (item: ChecklistItem) => {
+    setEditingId(item.id);
+    setEditTitle(item.title);
+  };
+
+  const saveEdit = async () => {
+    if (!editingId || !editTitle.trim()) return;
+    await onUpdate(editingId, editTitle);
+    setEditingId(null);
+  };
+
+  const cancelEdit = () => setEditingId(null);
+
+  // Focus the edit input when it appears
+  useEffect(() => {
+    if (editingId && editInputRef.current) {
+      editInputRef.current.focus();
+    }
+  }, [editingId]);
+
+  const handleEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') saveEdit();
+    if (e.key === 'Escape') cancelEdit();
+  };
+
+  const handleAddKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && newTitle.trim()) {
       onAdd();
     }
@@ -667,13 +809,30 @@ function ChecklistTab({
               )}
             </button>
             <div className="flex-1 min-w-0">
-              <span className={`text-sm ${
-                item.is_checked
-                  ? 'line-through text-gray-400 dark:text-gray-500'
-                  : 'text-gray-800 dark:text-gray-100'
-              }`}>
-                {item.title}
-              </span>
+              {editingId === item.id ? (
+                <input
+                  ref={editInputRef}
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onKeyDown={handleEditKeyDown}
+                  onBlur={saveEdit}
+                  className="w-full px-2 py-0.5 -mx-2 text-sm border border-amber-300 dark:border-amber-600 rounded
+                             bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100
+                             focus:outline-none focus:ring-2 focus:ring-amber-300"
+                />
+              ) : (
+                <span
+                  onClick={() => startEdit(item)}
+                  className={`text-sm cursor-pointer rounded px-1 -mx-1 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${
+                    item.is_checked
+                      ? 'line-through text-gray-400 dark:text-gray-500'
+                      : 'text-gray-800 dark:text-gray-100'
+                  }`}
+                >
+                  {item.title}
+                </span>
+              )}
               <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                 <span className={item.created_by === 'daniel' ? 'text-blue-400' : 'text-rose-400'}>
                   {item.created_by === 'daniel' ? 'Daniel' : 'Huaiyao'}
@@ -707,7 +866,7 @@ function ChecklistTab({
           type="text"
           value={newTitle}
           onChange={(e) => onNewTitle(e.target.value)}
-          onKeyDown={handleKeyDown}
+          onKeyDown={handleAddKeyDown}
           placeholder="Add a checklist item..."
           className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-600 rounded-xl
                      bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-sm
