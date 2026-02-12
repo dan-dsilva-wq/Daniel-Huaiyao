@@ -1,4 +1,5 @@
 import { generateRandomSetup, isLake } from './constants';
+import { blendHeuristicWithModel } from './ml';
 import {
   CombatResult,
   GameState,
@@ -56,6 +57,7 @@ interface SearchConfig {
   timeBudgetMs: number;
   exploreTopMoves: number;
   explorationChance: number;
+  determinizationSamples: number;
 }
 
 interface SearchContext {
@@ -88,6 +90,7 @@ const DIFFICULTY_CONFIG: Record<ComputerDifficulty, SearchConfig> = {
     timeBudgetMs: 180,
     exploreTopMoves: 4,
     explorationChance: 0.3,
+    determinizationSamples: 1,
   },
   hard: {
     depth: 2,
@@ -97,6 +100,7 @@ const DIFFICULTY_CONFIG: Record<ComputerDifficulty, SearchConfig> = {
     timeBudgetMs: 650,
     exploreTopMoves: 3,
     explorationChance: 0.1,
+    determinizationSamples: 2,
   },
   extreme: {
     depth: 3,
@@ -106,10 +110,25 @@ const DIFFICULTY_CONFIG: Record<ComputerDifficulty, SearchConfig> = {
     timeBudgetMs: 1500,
     exploreTopMoves: 1,
     explorationChance: 0,
+    determinizationSamples: 3,
   },
 };
 
 const ALL_PIECE_RANKS: PieceRank[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const PIECE_TOTAL_COUNTS: Record<PieceRank, number> = {
+  0: 1,
+  1: 1,
+  2: 8,
+  3: 5,
+  4: 4,
+  5: 4,
+  6: 4,
+  7: 3,
+  8: 2,
+  9: 1,
+  10: 1,
+  11: 6,
+};
 
 const DIRECTIONS: ReadonlyArray<readonly [number, number]> = [
   [-1, 0],
@@ -202,36 +221,53 @@ export function chooseComputerMove(
   state: LocalStrategoState,
   difficulty: ComputerDifficulty,
 ): StrategicMove | null {
-  if (state.status !== 'playing' || state.currentTurn !== 'blue') return null;
+  return chooseStrategoMoveForColor(state, 'blue', difficulty);
+}
 
-  const allMoves = generateMovesForColor(state, 'blue');
-  if (allMoves.length === 0) return null;
+export function chooseStrategoMoveForColor(
+  state: LocalStrategoState,
+  color: TeamColor,
+  difficulty: ComputerDifficulty,
+): StrategicMove | null {
+  if (state.status !== 'playing' || state.currentTurn !== color) return null;
 
   const config = DIFFICULTY_CONFIG[difficulty];
+  const searchStates = createDeterminizedSearchStates(state, color, config.determinizationSamples);
+  if (searchStates.length === 0) return null;
+
+  const templateState = searchStates[0];
+  const allMoves = generateMovesForColor(templateState, color);
+  if (allMoves.length === 0) return null;
+
   const context: SearchContext = {
     config,
     startedAtMs: Date.now(),
     nodesEvaluated: 0,
   };
 
-  const orderedMoves = orderMoves(state, allMoves, 'blue', 'blue')
+  const orderedMoves = orderMoves(templateState, allMoves, color, color)
     .slice(0, config.rootBeamWidth);
 
   const scoredMoves = orderedMoves.map((move) => {
-    const result = applyStrategoMoveInternal(state, 'blue', move, false);
-    const minimaxScore = minimax(
-      result.state,
-      config.depth - 1,
-      'red',
-      'blue',
-      Number.NEGATIVE_INFINITY,
-      Number.POSITIVE_INFINITY,
-      context,
-    );
+    let accumulatedScore = 0;
+
+    for (const searchState of searchStates) {
+      const result = applyStrategoMoveInternal(searchState, color, move, false);
+      const minimaxScore = minimax(
+        result.state,
+        config.depth - 1,
+        flipColor(color),
+        color,
+        Number.NEGATIVE_INFINITY,
+        Number.POSITIVE_INFINITY,
+        context,
+      );
+      accumulatedScore += minimaxScore;
+    }
 
     return {
       move,
-      score: minimaxScore,
+      score: accumulatedScore / searchStates.length,
     };
   });
 
@@ -283,6 +319,75 @@ export function applyStrategoMove(
 
 export function hasAnyMoves(state: LocalStrategoState, color: TeamColor): boolean {
   return generateMovesForColor(state, color).length > 0;
+}
+
+export function createDeterminizedPerspectiveState(
+  state: LocalStrategoState,
+  perspective: TeamColor,
+): LocalStrategoState {
+  const opponentColor = flipColor(perspective);
+  const clonedState = cloneLocalState(state);
+  const opponentPieces = getPieces(clonedState, opponentColor);
+  const unknownPieces = opponentPieces.filter((piece) => !piece.revealed);
+
+  if (unknownPieces.length === 0) return clonedState;
+
+  const capturedOpponent = opponentColor === 'red'
+    ? clonedState.redCaptured
+    : clonedState.blueCaptured;
+
+  const remainingCounts = { ...PIECE_TOTAL_COUNTS };
+
+  for (const piece of capturedOpponent) {
+    remainingCounts[piece.rank] = Math.max(0, remainingCounts[piece.rank] - 1);
+  }
+
+  for (const piece of opponentPieces) {
+    if (!piece.revealed) continue;
+    remainingCounts[piece.rank] = Math.max(0, remainingCounts[piece.rank] - 1);
+  }
+
+  const sampledRankPool: PieceRank[] = [];
+  for (const rank of ALL_PIECE_RANKS) {
+    const count = remainingCounts[rank];
+    for (let index = 0; index < count; index += 1) {
+      sampledRankPool.push(rank);
+    }
+  }
+  shuffleInPlace(sampledRankPool);
+
+  let poolIndex = 0;
+  for (const piece of opponentPieces) {
+    if (piece.revealed) continue;
+    const sampledRank = sampledRankPool[poolIndex];
+    if (sampledRank === undefined) {
+      piece.rank = ALL_PIECE_RANKS[Math.floor(Math.random() * ALL_PIECE_RANKS.length)];
+    } else {
+      piece.rank = sampledRank;
+      poolIndex += 1;
+    }
+  }
+
+  return clonedState;
+}
+
+function createDeterminizedSearchStates(
+  state: LocalStrategoState,
+  perspective: TeamColor,
+  requestedSamples: number,
+): LocalStrategoState[] {
+  const opponentPieces = getPieces(state, flipColor(perspective));
+  const unknownCount = opponentPieces.filter((piece) => !piece.revealed).length;
+  if (unknownCount === 0) {
+    return [cloneLocalState(state)];
+  }
+
+  const sampleCount = Math.max(1, requestedSamples);
+  const samples: LocalStrategoState[] = [];
+  for (let index = 0; index < sampleCount; index += 1) {
+    samples.push(createDeterminizedPerspectiveState(state, perspective));
+  }
+  return samples;
 }
 
 function minimax(
@@ -346,6 +451,11 @@ function shouldCutSearch(context: SearchContext): boolean {
 }
 
 function evaluateState(state: LocalStrategoState, perspective: TeamColor): number {
+  const heuristicScore = evaluateStateHeuristic(state, perspective);
+  return blendHeuristicWithModel(state, perspective, heuristicScore);
+}
+
+function evaluateStateHeuristic(state: LocalStrategoState, perspective: TeamColor): number {
   const myPieces = getPieces(state, perspective);
   const oppPieces = getPieces(state, flipColor(perspective));
 
@@ -586,7 +696,7 @@ function generateMovesForColor(state: LocalStrategoState, color: TeamColor): Str
             toRow: row,
             toCol: col,
             attackerRank: piece.rank,
-            defenderRank: defender?.rank ?? null,
+            defenderRank: defender && defender.revealed ? defender.rank : null,
             isAttack: !!defender,
           });
 
@@ -611,7 +721,7 @@ function generateMovesForColor(state: LocalStrategoState, color: TeamColor): Str
           toRow: row,
           toCol: col,
           attackerRank: piece.rank,
-          defenderRank: defender?.rank ?? null,
+          defenderRank: defender && defender.revealed ? defender.rank : null,
           isAttack: !!defender,
         });
       }
@@ -924,6 +1034,17 @@ function createBlueSetupPositions(): Array<[number, number]> {
 
 function adjacentBlueCells(row: number, col: number): Array<[number, number]> {
   return DIRECTIONS.map(([dr, dc]) => [row + dr, col + dc]);
+}
+
+function cloneLocalState(state: LocalStrategoState): LocalStrategoState {
+  return {
+    ...state,
+    redPieces: state.redPieces.map((piece) => ({ ...piece })),
+    bluePieces: state.bluePieces.map((piece) => ({ ...piece })),
+    redCaptured: state.redCaptured.map((piece) => ({ ...piece })),
+    blueCaptured: state.blueCaptured.map((piece) => ({ ...piece })),
+    moveHistory: state.moveHistory.map((entry) => ({ ...entry })),
+  };
 }
 
 function resolveCombat(attackerRank: PieceRank, defenderRank: PieceRank): CombatResult {

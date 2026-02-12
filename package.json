@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "stratego:train": "tsx scripts/stratego/train-model.ts",
+    "stratego:train:quick": "tsx scripts/stratego/train-model.ts --games 40 --epochs 6 --max-turns 180 --workers 1",
+    "stratego:train:parallel": "tsx scripts/stratego/train-model.ts --games 240 --epochs 12 --difficulty extreme --workers 8 --verbose",
+    "stratego:train:deep": "tsx scripts/stratego/train-deep.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.93.3",
@@ -32,6 +36,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

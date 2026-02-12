@@ -528,12 +528,20 @@ export default function StrategoPage() {
         <h1 className="text-xl font-bold bg-gradient-to-r from-red-500 to-blue-600 bg-clip-text text-transparent">
           Stratego
         </h1>
-        <button
-          onClick={() => setShowRules(true)}
-          className="text-gray-400 dark:text-gray-500 hover:text-gray-600 text-sm font-medium"
-        >
-          Rules
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/stratego/training"
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 text-sm font-medium"
+          >
+            Training
+          </Link>
+          <button
+            onClick={() => setShowRules(true)}
+            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 text-sm font-medium"
+          >
+            Rules
+          </button>
+        </div>
       </div>
 
       <div className="px-4 pb-8 max-w-lg mx-auto">

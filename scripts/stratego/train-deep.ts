@@ -1,0 +1,364 @@
+import { spawn } from 'node:child_process';
+import { cpus } from 'node:os';
+import path from 'node:path';
+import { rmSync } from 'node:fs';
+import type { ComputerDifficulty } from '../../lib/stratego/ai';
+
+interface DeepTrainOptions {
+  games: number;
+  difficulty: ComputerDifficulty;
+  maxTurns: number;
+  workers: number;
+  verbose: boolean;
+  traceTurns: boolean;
+  progressEvery: number;
+  epochs: number;
+  batchSize: number;
+  learningRate: number;
+  weightDecay: number;
+  hidden: string;
+  keepDataset: boolean;
+  datasetOut: string | null;
+  checkpointPath: string;
+  resume: boolean;
+  warmStart: boolean;
+  saveEvery: number;
+}
+
+const DEFAULT_OPTIONS: DeepTrainOptions = {
+  games: 240,
+  difficulty: 'hard',
+  maxTurns: 500,
+  workers: Math.max(1, cpus().length - 1),
+  verbose: true,
+  traceTurns: false,
+  progressEvery: 20,
+  epochs: 24,
+  batchSize: 1024,
+  learningRate: 0.0015,
+  weightDecay: 0.0001,
+  hidden: '96,48',
+  keepDataset: false,
+  datasetOut: null,
+  checkpointPath: '.stratego-cache/deep-training.ckpt',
+  resume: true,
+  warmStart: true,
+  saveEvery: 1,
+};
+
+async function main(): Promise<void> {
+  const options = parseOptions(process.argv.slice(2));
+  const startedAt = Date.now();
+  const datasetPath = options.datasetOut
+    ? path.resolve(process.cwd(), options.datasetOut)
+    : path.resolve(process.cwd(), '.stratego-cache', `deep-dataset-${Date.now()}.json`);
+
+  logStage('setup', `Deep training pipeline | games=${options.games} difficulty=${options.difficulty} workers=${options.workers} epochs=${options.epochs}`);
+  logStage('self-play', 'Generating dataset with multi-process self-play...');
+
+  const trainModelScript = path.resolve(process.cwd(), 'scripts/stratego/train-model.ts');
+  const selfPlayArgs = [
+    '--import',
+    'tsx',
+    trainModelScript,
+    '--games',
+    String(options.games),
+    '--difficulty',
+    options.difficulty,
+    '--max-turns',
+    String(options.maxTurns),
+    '--workers',
+    String(options.workers),
+    '--progress-every',
+    String(options.progressEvery),
+    '--dataset-out',
+    datasetPath,
+    '--skip-fit',
+  ];
+  if (options.verbose) selfPlayArgs.push('--verbose');
+  if (options.traceTurns) selfPlayArgs.push('--trace-turns');
+
+  await runCommand(process.execPath, selfPlayArgs);
+
+  logStage('deep-train', 'Training deep neural net (PyTorch, CUDA if available)...');
+  const deepScriptPath = path.resolve(process.cwd(), 'scripts/stratego/train-model-deep.py');
+  const pythonArgs = [
+    deepScriptPath,
+    '--dataset',
+    datasetPath,
+    '--out',
+    path.resolve(process.cwd(), 'lib/stratego/trained-model.json'),
+    '--epochs',
+    String(options.epochs),
+    '--batch-size',
+    String(options.batchSize),
+    '--lr',
+    String(options.learningRate),
+    '--weight-decay',
+    String(options.weightDecay),
+    '--hidden',
+    options.hidden,
+    '--checkpoint',
+    path.resolve(process.cwd(), options.checkpointPath),
+    '--save-every',
+    String(options.saveEvery),
+  ];
+  pythonArgs.push(options.resume ? '--resume' : '--no-resume');
+  pythonArgs.push(options.warmStart ? '--warm-start' : '--no-warm-start');
+
+  await runPythonWithFallback(pythonArgs);
+
+  if (!options.keepDataset) {
+    rmSync(datasetPath, { force: true });
+  }
+
+  const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+  logStage('done', `Deep model training complete in ${elapsedSeconds}s`);
+  logStage('done', 'Restart `npm run dev` (or rebuild) so the app picks up the new model.');
+}
+
+async function runPythonWithFallback(args: string[]): Promise<void> {
+  const attempts: Array<{ command: string; commandArgs: string[]; label: string }> = [
+    { command: 'python', commandArgs: args, label: 'python' },
+    { command: 'py', commandArgs: ['-3', ...args], label: 'py -3' },
+  ];
+
+  let lastError: Error | null = null;
+  for (const attempt of attempts) {
+    try {
+      logStage('deep-train', `Launching ${attempt.label}...`);
+      await runCommand(attempt.command, attempt.commandArgs);
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+
+  throw new Error(
+    `Unable to start Python trainer. Ensure Python and PyTorch are installed. Last error: ${lastError?.message ?? 'unknown'}`,
+  );
+}
+
+function runCommand(command: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: process.cwd(),
+      stdio: 'inherit',
+      shell: false,
+    });
+
+    let finished = false;
+    const onInterrupt = () => {
+      if (finished) return;
+      if (child.exitCode === null) {
+        child.kill('SIGINT');
+      }
+    };
+    const onTerminate = () => {
+      if (finished) return;
+      if (child.exitCode === null) {
+        child.kill('SIGTERM');
+      }
+    };
+
+    const cleanup = () => {
+      process.off('SIGINT', onInterrupt);
+      process.off('SIGTERM', onTerminate);
+    };
+
+    process.on('SIGINT', onInterrupt);
+    process.on('SIGTERM', onTerminate);
+
+    child.on('error', (error) => {
+      finished = true;
+      cleanup();
+      reject(error);
+    });
+
+    child.on('close', (code, signal) => {
+      finished = true;
+      cleanup();
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      if (signal) {
+        reject(new Error(`${command} terminated by signal ${signal}`));
+        return;
+      }
+      reject(new Error(`${command} exited with code ${code}`));
+    });
+  });
+}
+
+function parseOptions(argv: string[]): DeepTrainOptions {
+  if (argv.includes('--help') || argv.includes('-h')) {
+    printUsageAndExit();
+  }
+
+  const options: DeepTrainOptions = { ...DEFAULT_OPTIONS };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = argv[index + 1];
+
+    switch (arg) {
+      case '--games':
+        options.games = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--difficulty':
+        options.difficulty = parseDifficulty(next);
+        index += 1;
+        break;
+      case '--max-turns':
+        options.maxTurns = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--workers':
+        options.workers = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--progress-every':
+        options.progressEvery = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--epochs':
+        options.epochs = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--batch-size':
+        options.batchSize = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--lr':
+        options.learningRate = parsePositiveFloat(next, arg);
+        index += 1;
+        break;
+      case '--weight-decay':
+        options.weightDecay = parsePositiveFloat(next, arg);
+        index += 1;
+        break;
+      case '--hidden':
+        if (!next) throw new Error('Missing value for --hidden');
+        options.hidden = next;
+        index += 1;
+        break;
+      case '--dataset-out':
+        if (!next) throw new Error('Missing value for --dataset-out');
+        options.datasetOut = next;
+        index += 1;
+        break;
+      case '--checkpoint':
+        if (!next) throw new Error('Missing value for --checkpoint');
+        options.checkpointPath = next;
+        index += 1;
+        break;
+      case '--keep-dataset':
+        options.keepDataset = true;
+        break;
+      case '--no-resume':
+        options.resume = false;
+        break;
+      case '--resume':
+        options.resume = true;
+        break;
+      case '--no-warm-start':
+        options.warmStart = false;
+        break;
+      case '--warm-start':
+        options.warmStart = true;
+        break;
+      case '--save-every':
+        options.saveEvery = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--verbose':
+      case '-v':
+        options.verbose = true;
+        break;
+      case '--trace-turns':
+        options.traceTurns = true;
+        options.verbose = true;
+        break;
+      default:
+        throw new Error(`Unknown argument: ${arg}. Use --help for usage.`);
+    }
+  }
+
+  if (options.workers > options.games) {
+    options.workers = options.games;
+  }
+
+  return options;
+}
+
+function parseDifficulty(value: string | undefined): ComputerDifficulty {
+  if (value === 'medium' || value === 'hard' || value === 'extreme') {
+    return value;
+  }
+  throw new Error(`Invalid --difficulty value: ${value}`);
+}
+
+function parsePositiveInt(value: string | undefined, flag: string): number {
+  if (!value) throw new Error(`Missing value for ${flag}`);
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Invalid value for ${flag}: ${value}`);
+  }
+  return parsed;
+}
+
+function parsePositiveFloat(value: string | undefined, flag: string): number {
+  if (!value) throw new Error(`Missing value for ${flag}`);
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Invalid value for ${flag}: ${value}`);
+  }
+  return parsed;
+}
+
+function printUsageAndExit(): never {
+  console.log('Usage: npm run stratego:train:deep -- [options]');
+  console.log('');
+  console.log('Self-play options:');
+  console.log('  --games <n>           Self-play game count (default: 240)');
+  console.log('  --difficulty <d>      medium|hard|extreme (default: hard)');
+  console.log('  --max-turns <n>       Max turns per game (default: 500)');
+  console.log('  --workers <n>         Worker processes (default: CPU cores - 1)');
+  console.log('  --progress-every <n>  Self-play progress interval (default: 20)');
+  console.log('  --verbose, -v         Verbose self-play logging');
+  console.log('  --trace-turns         Turn-by-turn trace logging');
+  console.log('');
+  console.log('Deep model options:');
+  console.log('  --epochs <n>          Deep training epochs (default: 24)');
+  console.log('  --batch-size <n>      Batch size (default: 1024)');
+  console.log('  --lr <n>              Learning rate (default: 0.0015)');
+  console.log('  --weight-decay <n>    Weight decay (default: 0.0001)');
+  console.log('  --hidden <csv>        Hidden layers, e.g. "128,64" (default: 96,48)');
+  console.log('  --checkpoint <path>   Checkpoint file for resume (default: .stratego-cache/deep-training.ckpt)');
+  console.log('  --resume              Resume from checkpoint if present (default)');
+  console.log('  --no-resume           Ignore checkpoint and start fresh');
+  console.log('  --warm-start          Warm start from existing output model (default)');
+  console.log('  --no-warm-start       Disable warm start from existing output model');
+  console.log('  --save-every <n>      Save checkpoint every N epochs (default: 1)');
+  console.log('');
+  console.log('Dataset options:');
+  console.log('  --dataset-out <path>  Persist dataset at this path');
+  console.log('  --keep-dataset        Do not delete dataset file after training');
+  process.exit(0);
+}
+
+function logStage(
+  stage: 'setup' | 'self-play' | 'deep-train' | 'done',
+  message: string,
+): void {
+  const clock = new Date().toISOString().slice(11, 19);
+  console.log(`[${clock}] [${stage}] ${message}`);
+}
+
+void main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[error] ${message}`);
+  process.exit(1);
+});
