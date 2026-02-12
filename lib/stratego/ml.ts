@@ -116,7 +116,7 @@ const PIECE_VALUES: Record<PieceRank, number> = {
 
 const PIECE_RANKS: PieceRank[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 
-const MAX_MATERIAL_PER_SIDE = PIECE_RANKS.reduce(
+const MAX_MATERIAL_PER_SIDE = PIECE_RANKS.reduce<number>(
   (sum, rank) => sum + PIECE_VALUES[rank] * PIECE_COUNTS_BY_RANK[rank],
   0,
 );
@@ -325,7 +325,7 @@ function parseMlpModel(candidate: Record<string, unknown>): StrategoMlpModel | n
   }
 
   const layers: StrategoMlpLayer[] = [];
-  let expectedInputSize = STRATEGO_FEATURE_NAMES.length;
+  let expectedInputSize: number = STRATEGO_FEATURE_NAMES.length;
 
   for (const rawLayer of candidate.layers) {
     if (!rawLayer || typeof rawLayer !== 'object') return null;
