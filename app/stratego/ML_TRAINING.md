@@ -64,6 +64,22 @@ Checkpoint every epoch so `Ctrl+C` can resume:
 npm run stratego:train:deep -- --games 300 --difficulty hard --workers 8 --epochs 30 --save-every 1 --checkpoint .stratego-cache/deep-training.ckpt
 ```
 
+Deep training now uses a rolling replay buffer by default, so each run trains on recent runs too (not just the latest run):
+
+```bash
+npm run stratego:train:deep -- --games 300 --difficulty extreme --workers 8 --epochs 20 --replay-max-runs 6 --replay-max-samples 400000
+```
+
+Replay controls:
+
+```bash
+--replay                 # default on
+--no-replay              # train only on current run dataset
+--replay-path <path>     # default: .stratego-cache/deep-replay-buffer.json
+--replay-max-runs <n>    # keep latest N runs
+--replay-max-samples <n> # cap total replay samples for speed/stability
+```
+
 What this does:
 
 1. Runs self-play locally using the same Stratego engine as gameplay.

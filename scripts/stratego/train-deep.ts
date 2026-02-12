@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { cpus } from 'node:os';
 import path from 'node:path';
-import { rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { ComputerDifficulty } from '../../lib/stratego/ai';
 
 interface DeepTrainOptions {
@@ -23,6 +23,46 @@ interface DeepTrainOptions {
   resume: boolean;
   warmStart: boolean;
   saveEvery: number;
+  replayEnabled: boolean;
+  replayPath: string;
+  replayMaxRuns: number;
+  replayMaxSamples: number;
+}
+
+interface TrainingSampleRecord {
+  features: number[];
+  target: number;
+}
+
+interface ReplayRunSummary {
+  id: string;
+  createdAt: string;
+  sampleCount: number;
+  source: 'self-play';
+  games?: number;
+  difficulty?: ComputerDifficulty;
+  maxTurns?: number;
+  workers?: number;
+  trimmedHead?: number;
+}
+
+interface DatasetPayload {
+  version: number;
+  featureNames: string[];
+  samples: TrainingSampleRecord[];
+  meta?: Record<string, unknown>;
+  replay?: {
+    updatedAt: string;
+    runs: ReplayRunSummary[];
+  };
+}
+
+interface ReplayMergeResult {
+  trainingDatasetPath: string;
+  runCount: number;
+  sampleCount: number;
+  newSamples: number;
+  droppedSamples: number;
 }
 
 const DEFAULT_OPTIONS: DeepTrainOptions = {
@@ -44,16 +84,23 @@ const DEFAULT_OPTIONS: DeepTrainOptions = {
   resume: true,
   warmStart: true,
   saveEvery: 1,
+  replayEnabled: true,
+  replayPath: '.stratego-cache/deep-replay-buffer.json',
+  replayMaxRuns: 6,
+  replayMaxSamples: 400000,
 };
 
 async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
   const startedAt = Date.now();
-  const datasetPath = options.datasetOut
+  const rawDatasetPath = options.datasetOut
     ? path.resolve(process.cwd(), options.datasetOut)
     : path.resolve(process.cwd(), '.stratego-cache', `deep-dataset-${Date.now()}.json`);
 
   logStage('setup', `Deep training pipeline | games=${options.games} difficulty=${options.difficulty} workers=${options.workers} epochs=${options.epochs}`);
+  if (options.replayEnabled) {
+    logStage('setup', `Replay buffer enabled | path=${options.replayPath} maxRuns=${options.replayMaxRuns} maxSamples=${options.replayMaxSamples}`);
+  }
   logStage('self-play', 'Generating dataset with multi-process self-play...');
 
   const trainModelScript = path.resolve(process.cwd(), 'scripts/stratego/train-model.ts');
@@ -72,7 +119,7 @@ async function main(): Promise<void> {
     '--progress-every',
     String(options.progressEvery),
     '--dataset-out',
-    datasetPath,
+    rawDatasetPath,
     '--skip-fit',
   ];
   if (options.verbose) selfPlayArgs.push('--verbose');
@@ -80,12 +127,26 @@ async function main(): Promise<void> {
 
   await runCommand(process.execPath, selfPlayArgs);
 
+  let datasetForTrainingPath = rawDatasetPath;
+  if (options.replayEnabled) {
+    const replayMerge = mergeIntoReplayBuffer({
+      replayPath: path.resolve(process.cwd(), options.replayPath),
+      incomingDatasetPath: rawDatasetPath,
+      options,
+    });
+    datasetForTrainingPath = replayMerge.trainingDatasetPath;
+    logStage(
+      'dataset',
+      `Replay buffer ready | runs=${replayMerge.runCount} samples=${replayMerge.sampleCount} (+${replayMerge.newSamples}, dropped=${replayMerge.droppedSamples})`,
+    );
+  }
+
   logStage('deep-train', 'Training deep neural net (PyTorch, CUDA if available)...');
   const deepScriptPath = path.resolve(process.cwd(), 'scripts/stratego/train-model-deep.py');
   const pythonArgs = [
     deepScriptPath,
     '--dataset',
-    datasetPath,
+    datasetForTrainingPath,
     '--out',
     path.resolve(process.cwd(), 'lib/stratego/trained-model.json'),
     '--epochs',
@@ -108,13 +169,242 @@ async function main(): Promise<void> {
 
   await runPythonWithFallback(pythonArgs);
 
-  if (!options.keepDataset) {
-    rmSync(datasetPath, { force: true });
+  if (!options.keepDataset && rawDatasetPath !== datasetForTrainingPath) {
+    rmSync(rawDatasetPath, { force: true });
+  } else if (!options.keepDataset && !options.replayEnabled) {
+    rmSync(rawDatasetPath, { force: true });
   }
 
   const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
   logStage('done', `Deep model training complete in ${elapsedSeconds}s`);
   logStage('done', 'Restart `npm run dev` (or rebuild) so the app picks up the new model.');
+}
+
+function mergeIntoReplayBuffer(input: {
+  replayPath: string;
+  incomingDatasetPath: string;
+  options: DeepTrainOptions;
+}): ReplayMergeResult {
+  const incoming = readDatasetPayload(input.incomingDatasetPath);
+  const existing = readDatasetPayloadIfPresent(input.replayPath);
+  const nowIso = new Date().toISOString();
+
+  let replayRuns: ReplayRunSummary[] = [];
+  let replaySamples: TrainingSampleRecord[] = [];
+
+  if (existing) {
+    if (!featureNamesMatch(existing.featureNames, incoming.featureNames)) {
+      logStage('dataset', 'Replay feature schema changed; starting a new replay buffer.');
+    } else {
+      replayRuns = normalizeReplayRuns(existing.replay?.runs, existing.samples.length, existing.meta);
+      replaySamples = existing.samples;
+    }
+  }
+
+  const incomingRun: ReplayRunSummary = {
+    id: `run-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    createdAt: nowIso,
+    sampleCount: incoming.samples.length,
+    source: 'self-play',
+    games: readOptionalPositiveInt(incoming.meta?.games),
+    difficulty: readOptionalDifficulty(incoming.meta?.difficulty),
+    maxTurns: readOptionalPositiveInt(incoming.meta?.maxTurns),
+    workers: readOptionalPositiveInt(incoming.meta?.workers),
+  };
+
+  let combinedRuns = [...replayRuns, incomingRun];
+  let combinedSamples = [...replaySamples, ...incoming.samples];
+  let droppedSamples = 0;
+
+  if (combinedRuns.length > input.options.replayMaxRuns) {
+    let runsToDrop = combinedRuns.length - input.options.replayMaxRuns;
+    while (runsToDrop > 0 && combinedRuns.length > 0) {
+      const droppedRun = combinedRuns.shift();
+      if (droppedRun) {
+        droppedSamples += droppedRun.sampleCount;
+      }
+      runsToDrop -= 1;
+    }
+  }
+
+  if (droppedSamples > 0) {
+    combinedSamples = combinedSamples.slice(droppedSamples);
+  }
+
+  if (combinedSamples.length > input.options.replayMaxSamples) {
+    const overflow = combinedSamples.length - input.options.replayMaxSamples;
+    combinedSamples = combinedSamples.slice(overflow);
+    combinedRuns = trimRunsFromHead(combinedRuns, overflow);
+    droppedSamples += overflow;
+  }
+
+  const replayPayload: DatasetPayload = {
+    version: incoming.version,
+    featureNames: [...incoming.featureNames],
+    samples: combinedSamples,
+    meta: {
+      generatedAt: nowIso,
+      replayEnabled: true,
+      replayRuns: combinedRuns.length,
+      replaySamples: combinedSamples.length,
+      replayMaxRuns: input.options.replayMaxRuns,
+      replayMaxSamples: input.options.replayMaxSamples,
+      latestRunSamples: incoming.samples.length,
+      latestRunGames: readOptionalPositiveInt(incoming.meta?.games),
+      latestRunDifficulty: readOptionalDifficulty(incoming.meta?.difficulty),
+      latestRunMaxTurns: readOptionalPositiveInt(incoming.meta?.maxTurns),
+      latestRunWorkers: readOptionalPositiveInt(incoming.meta?.workers),
+    },
+    replay: {
+      updatedAt: nowIso,
+      runs: combinedRuns,
+    },
+  };
+
+  writeDatasetPayload(input.replayPath, replayPayload);
+
+  return {
+    trainingDatasetPath: input.replayPath,
+    runCount: combinedRuns.length,
+    sampleCount: combinedSamples.length,
+    newSamples: incoming.samples.length,
+    droppedSamples,
+  };
+}
+
+function normalizeReplayRuns(
+  runs: ReplayRunSummary[] | undefined,
+  sampleCount: number,
+  meta: Record<string, unknown> | undefined,
+): ReplayRunSummary[] {
+  if (Array.isArray(runs) && runs.length > 0) {
+    return runs
+      .filter((run) => Number.isFinite(run.sampleCount) && run.sampleCount > 0)
+      .map((run) => ({
+        ...run,
+        sampleCount: Math.floor(run.sampleCount),
+        source: 'self-play',
+      }));
+  }
+
+  if (sampleCount <= 0) {
+    return [];
+  }
+
+  return [
+    {
+      id: 'legacy-replay',
+      createdAt: typeof meta?.generatedAt === 'string' ? meta.generatedAt : new Date().toISOString(),
+      sampleCount,
+      source: 'self-play',
+      games: readOptionalPositiveInt(meta?.games),
+      difficulty: readOptionalDifficulty(meta?.difficulty),
+      maxTurns: readOptionalPositiveInt(meta?.maxTurns),
+      workers: readOptionalPositiveInt(meta?.workers),
+    },
+  ];
+}
+
+function trimRunsFromHead(runs: ReplayRunSummary[], dropSamples: number): ReplayRunSummary[] {
+  let remainingToDrop = dropSamples;
+  const nextRuns: ReplayRunSummary[] = [];
+
+  for (const run of runs) {
+    if (remainingToDrop <= 0) {
+      nextRuns.push(run);
+      continue;
+    }
+    if (run.sampleCount <= remainingToDrop) {
+      remainingToDrop -= run.sampleCount;
+      continue;
+    }
+    nextRuns.push({
+      ...run,
+      sampleCount: run.sampleCount - remainingToDrop,
+      trimmedHead: (run.trimmedHead ?? 0) + remainingToDrop,
+    });
+    remainingToDrop = 0;
+  }
+
+  return nextRuns;
+}
+
+function readDatasetPayloadIfPresent(datasetPath: string): DatasetPayload | null {
+  if (!existsSync(datasetPath)) {
+    return null;
+  }
+  return readDatasetPayload(datasetPath);
+}
+
+function readDatasetPayload(datasetPath: string): DatasetPayload {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(datasetPath, 'utf8')) as unknown;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to read dataset ${datasetPath}: ${message}`);
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error(`Dataset ${datasetPath} is not a valid JSON object.`);
+  }
+
+  const payload = parsed as Partial<DatasetPayload>;
+  if (!Array.isArray(payload.featureNames) || payload.featureNames.length === 0) {
+    throw new Error(`Dataset ${datasetPath} is missing featureNames.`);
+  }
+  if (!Array.isArray(payload.samples) || payload.samples.length === 0) {
+    throw new Error(`Dataset ${datasetPath} contains no samples.`);
+  }
+
+  return {
+    version: typeof payload.version === 'number' ? payload.version : 1,
+    featureNames: payload.featureNames.map((name) => String(name)),
+    samples: payload.samples,
+    meta: payload.meta && typeof payload.meta === 'object' ? payload.meta : undefined,
+    replay:
+      payload.replay &&
+      typeof payload.replay === 'object' &&
+      Array.isArray((payload.replay as { runs?: unknown }).runs)
+        ? {
+            updatedAt:
+              typeof (payload.replay as { updatedAt?: unknown }).updatedAt === 'string'
+                ? String((payload.replay as { updatedAt?: unknown }).updatedAt)
+                : new Date().toISOString(),
+            runs: (payload.replay as { runs: ReplayRunSummary[] }).runs,
+          }
+        : undefined,
+  };
+}
+
+function writeDatasetPayload(datasetPath: string, payload: DatasetPayload): void {
+  mkdirSync(path.dirname(datasetPath), { recursive: true });
+  writeFileSync(datasetPath, `${JSON.stringify(payload)}\n`, 'utf8');
+}
+
+function featureNamesMatch(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function readOptionalPositiveInt(value: unknown): number | undefined {
+  if (typeof value !== 'number') return undefined;
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+  return Math.floor(value);
+}
+
+function readOptionalDifficulty(value: unknown): ComputerDifficulty | undefined {
+  if (value === 'medium' || value === 'hard' || value === 'extreme') {
+    return value;
+  }
+  return undefined;
 }
 
 async function runPythonWithFallback(args: string[]): Promise<void> {
@@ -273,6 +563,25 @@ function parseOptions(argv: string[]): DeepTrainOptions {
         options.saveEvery = parsePositiveInt(next, arg);
         index += 1;
         break;
+      case '--replay':
+        options.replayEnabled = true;
+        break;
+      case '--no-replay':
+        options.replayEnabled = false;
+        break;
+      case '--replay-path':
+        if (!next) throw new Error('Missing value for --replay-path');
+        options.replayPath = next;
+        index += 1;
+        break;
+      case '--replay-max-runs':
+        options.replayMaxRuns = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--replay-max-samples':
+        options.replayMaxSamples = parsePositiveInt(next, arg);
+        index += 1;
+        break;
       case '--verbose':
       case '-v':
         options.verbose = true;
@@ -346,11 +655,16 @@ function printUsageAndExit(): never {
   console.log('Dataset options:');
   console.log('  --dataset-out <path>  Persist dataset at this path');
   console.log('  --keep-dataset        Do not delete dataset file after training');
+  console.log('  --replay              Train on rolling replay buffer (default)');
+  console.log('  --no-replay           Train only on the current run dataset');
+  console.log('  --replay-path <path>  Replay buffer dataset path (default: .stratego-cache/deep-replay-buffer.json)');
+  console.log('  --replay-max-runs <n> Max recent runs to retain in replay (default: 6)');
+  console.log('  --replay-max-samples <n> Cap replay samples to keep training fast (default: 400000)');
   process.exit(0);
 }
 
 function logStage(
-  stage: 'setup' | 'self-play' | 'deep-train' | 'done',
+  stage: 'setup' | 'self-play' | 'dataset' | 'deep-train' | 'done',
   message: string,
 ): void {
   const clock = new Date().toISOString().slice(11, 19);

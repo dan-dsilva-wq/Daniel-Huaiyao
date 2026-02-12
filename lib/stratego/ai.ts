@@ -689,7 +689,7 @@ function generateMovesForColor(state: LocalStrategoState, color: TeamColor): Str
           if (myPositions.has(targetKey)) break;
 
           const defender = oppByPosition.get(targetKey);
-          moves.push({
+          const move: StrategicMove = {
             pieceId: piece.id,
             fromRow: piece.row,
             fromCol: piece.col,
@@ -698,7 +698,11 @@ function generateMovesForColor(state: LocalStrategoState, color: TeamColor): Str
             attackerRank: piece.rank,
             defenderRank: defender && defender.revealed ? defender.rank : null,
             isAttack: !!defender,
-          });
+          };
+          if (violatesTwoSquaresRule(state, color, move)) {
+            continue;
+          }
+          moves.push(move);
 
           if (defender) break;
         }
@@ -714,7 +718,7 @@ function generateMovesForColor(state: LocalStrategoState, color: TeamColor): Str
         if (myPositions.has(targetKey)) continue;
 
         const defender = oppByPosition.get(targetKey);
-        moves.push({
+        const move: StrategicMove = {
           pieceId: piece.id,
           fromRow: piece.row,
           fromCol: piece.col,
@@ -723,12 +727,59 @@ function generateMovesForColor(state: LocalStrategoState, color: TeamColor): Str
           attackerRank: piece.rank,
           defenderRank: defender && defender.revealed ? defender.rank : null,
           isAttack: !!defender,
-        });
+        };
+        if (violatesTwoSquaresRule(state, color, move)) {
+          continue;
+        }
+        moves.push(move);
       }
     }
   }
 
   return moves;
+}
+
+function violatesTwoSquaresRule(
+  state: LocalStrategoState,
+  color: TeamColor,
+  move: StrategicMove,
+): boolean {
+  if (move.isAttack) return false;
+
+  const recentPieceMoves: MoveHistoryEntry[] = [];
+  for (let index = state.moveHistory.length - 1; index >= 0 && recentPieceMoves.length < 3; index -= 1) {
+    const entry = state.moveHistory[index];
+    if (entry.color !== color || entry.piece_id !== move.pieceId) continue;
+
+    // Any combat breaks the oscillation chain for this piece.
+    if (entry.combat_result !== null) break;
+    recentPieceMoves.push(entry);
+  }
+
+  if (recentPieceMoves.length < 3) {
+    return false;
+  }
+
+  const [latest, previous, oldest] = recentPieceMoves;
+  if (!isReverseMove(latest, previous) || !isReverseMove(previous, oldest)) {
+    return false;
+  }
+
+  return (
+    move.fromRow === latest.to_row
+    && move.fromCol === latest.to_col
+    && move.toRow === latest.from_row
+    && move.toCol === latest.from_col
+  );
+}
+
+function isReverseMove(left: MoveHistoryEntry, right: MoveHistoryEntry): boolean {
+  return (
+    left.from_row === right.to_row
+    && left.from_col === right.to_col
+    && left.to_row === right.from_row
+    && left.to_col === right.from_col
+  );
 }
 
 function applyStrategoMoveInternal(
