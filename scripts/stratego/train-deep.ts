@@ -24,6 +24,9 @@ interface DeepTrainOptions {
   resume: boolean;
   warmStart: boolean;
   saveEvery: number;
+  earlyStopPatience: number;
+  earlyStopMinDelta: number;
+  earlyStopMinEpochs: number;
   replayEnabled: boolean;
   replayPath: string;
   replayMaxRuns: number;
@@ -75,7 +78,7 @@ const DEFAULT_OPTIONS: DeepTrainOptions = {
   verbose: true,
   traceTurns: false,
   progressEvery: 20,
-  epochs: 24,
+  epochs: 60,
   batchSize: 1024,
   learningRate: 0.0015,
   weightDecay: 0.0001,
@@ -86,6 +89,9 @@ const DEFAULT_OPTIONS: DeepTrainOptions = {
   resume: true,
   warmStart: true,
   saveEvery: 1,
+  earlyStopPatience: 6,
+  earlyStopMinDelta: 0.002,
+  earlyStopMinEpochs: 10,
   replayEnabled: true,
   replayPath: '.stratego-cache/deep-replay-buffer.json',
   replayMaxRuns: 6,
@@ -101,6 +107,10 @@ async function main(): Promise<void> {
 
   logStage('setup', `Deep training pipeline | games=${options.games} difficulty=${options.difficulty} workers=${options.workers} epochs=${options.epochs}`);
   logStage('setup', `Self-play limits | maxTurns=${options.maxTurns} noCaptureDraw=${options.noCaptureDrawMoves}`);
+  logStage(
+    'setup',
+    `Early stop | patience=${options.earlyStopPatience} minDelta=${options.earlyStopMinDelta} minEpochs=${options.earlyStopMinEpochs}`,
+  );
   if (options.replayEnabled) {
     logStage('setup', `Replay buffer enabled | path=${options.replayPath} maxRuns=${options.replayMaxRuns} maxSamples=${options.replayMaxSamples}`);
   }
@@ -168,6 +178,12 @@ async function main(): Promise<void> {
     path.resolve(process.cwd(), options.checkpointPath),
     '--save-every',
     String(options.saveEvery),
+    '--early-stop-patience',
+    String(options.earlyStopPatience),
+    '--early-stop-min-delta',
+    String(options.earlyStopMinDelta),
+    '--early-stop-min-epochs',
+    String(options.earlyStopMinEpochs),
   ];
   pythonArgs.push(options.resume ? '--resume' : '--no-resume');
   pythonArgs.push(options.warmStart ? '--warm-start' : '--no-warm-start');
@@ -572,6 +588,18 @@ function parseOptions(argv: string[]): DeepTrainOptions {
         options.saveEvery = parsePositiveInt(next, arg);
         index += 1;
         break;
+      case '--early-stop-patience':
+        options.earlyStopPatience = parseNonNegativeInt(next, arg);
+        index += 1;
+        break;
+      case '--early-stop-min-delta':
+        options.earlyStopMinDelta = parseNonNegativeFloat(next, arg);
+        index += 1;
+        break;
+      case '--early-stop-min-epochs':
+        options.earlyStopMinEpochs = parseNonNegativeInt(next, arg);
+        index += 1;
+        break;
       case '--replay':
         options.replayEnabled = true;
         break;
@@ -636,6 +664,15 @@ function parsePositiveFloat(value: string | undefined, flag: string): number {
   return parsed;
 }
 
+function parseNonNegativeFloat(value: string | undefined, flag: string): number {
+  if (!value) throw new Error(`Missing value for ${flag}`);
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid value for ${flag}: ${value}`);
+  }
+  return parsed;
+}
+
 function parseNonNegativeInt(value: string | undefined, flag: string): number {
   if (!value) throw new Error(`Missing value for ${flag}`);
   const parsed = Number.parseInt(value, 10);
@@ -659,7 +696,7 @@ function printUsageAndExit(): never {
   console.log('  --trace-turns         Turn-by-turn trace logging');
   console.log('');
   console.log('Deep model options:');
-  console.log('  --epochs <n>          Deep training epochs (default: 24)');
+  console.log('  --epochs <n>          Deep training epochs (default: 60)');
   console.log('  --batch-size <n>      Batch size (default: 1024)');
   console.log('  --lr <n>              Learning rate (default: 0.0015)');
   console.log('  --weight-decay <n>    Weight decay (default: 0.0001)');
@@ -670,6 +707,9 @@ function printUsageAndExit(): never {
   console.log('  --warm-start          Warm start from existing output model (default)');
   console.log('  --no-warm-start       Disable warm start from existing output model');
   console.log('  --save-every <n>      Save checkpoint every N epochs (default: 1)');
+  console.log('  --early-stop-patience <n>  Stop after N non-improving epochs (default: 6, 0 disables)');
+  console.log('  --early-stop-min-delta <n> Min val_mse improvement to reset patience (default: 0.002)');
+  console.log('  --early-stop-min-epochs <n> Earliest epoch eligible for early stop (default: 10)');
   console.log('');
   console.log('Dataset options:');
   console.log('  --dataset-out <path>  Persist dataset at this path');

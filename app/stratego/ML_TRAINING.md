@@ -55,19 +55,19 @@ pip install torch
 Run deep training end-to-end (self-play dataset + MLP training):
 
 ```bash
-npm run stratego:train:deep -- --games 300 --difficulty extreme --workers 8 --epochs 30
+npm run stratego:train:deep -- --games 300 --difficulty extreme --workers 8 --epochs 60 --early-stop-patience 6 --early-stop-min-delta 0.002 --early-stop-min-epochs 10
 ```
 
 Current project default (`npm run stratego:train:deep`) already includes:
 
 ```bash
---games 300 --difficulty extreme --workers 8 --epochs 30 --save-every 1 --resume --warm-start --replay-max-runs 6 --replay-max-samples 400000 --no-capture-draw 160 --verbose
+--games 300 --difficulty extreme --workers 8 --epochs 60 --save-every 1 --resume --warm-start --replay-max-runs 6 --replay-max-samples 400000 --no-capture-draw 160 --early-stop-patience 6 --early-stop-min-delta 0.002 --early-stop-min-epochs 10 --verbose
 ```
 
 Use no-capture auto-draw to cut long stalemate games:
 
 ```bash
-npm run stratego:train:deep -- --games 300 --difficulty extreme --workers 8 --epochs 30 --no-capture-draw 160
+npm run stratego:train:deep -- --games 300 --difficulty extreme --workers 8 --epochs 60 --no-capture-draw 160
 ```
 
 Continue training across runs (no reset):
@@ -80,6 +80,14 @@ Checkpoint every epoch so `Ctrl+C` can resume:
 
 ```bash
 npm run stratego:train:deep -- --games 300 --difficulty hard --workers 8 --epochs 30 --save-every 1 --checkpoint .stratego-cache/deep-training.ckpt
+```
+
+Early stopping (default on in current setup):
+
+```bash
+--early-stop-patience 6      # stop after 6 non-improving epochs
+--early-stop-min-delta 0.002 # minimum val_mse gain to count as improvement
+--early-stop-min-epochs 10   # don't early-stop too early
 ```
 
 Deep training now uses a rolling replay buffer by default, so each run trains on recent runs too (not just the latest run):

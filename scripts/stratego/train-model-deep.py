@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train Stratego deep value model (PyTorch)")
     parser.add_argument("--dataset", required=True, help="Path to JSON dataset from train-model.ts --dataset-out")
     parser.add_argument("--out", default="lib/stratego/trained-model.json", help="Output model JSON path")
-    parser.add_argument("--epochs", type=int, default=24, help="Epoch count")
+    parser.add_argument("--epochs", type=int, default=60, help="Epoch count")
     parser.add_argument("--batch-size", type=int, default=1024, help="Batch size")
     parser.add_argument("--lr", type=float, default=0.0015, help="Learning rate")
     parser.add_argument("--weight-decay", type=float, default=0.0001, help="AdamW weight decay")
@@ -75,6 +75,24 @@ def parse_args() -> argparse.Namespace:
         help="Disable warm start from existing --out model",
     )
     parser.add_argument("--save-every", type=int, default=1, help="Save checkpoint every N completed epochs")
+    parser.add_argument(
+        "--early-stop-patience",
+        type=int,
+        default=6,
+        help="Stop after N epochs without sufficient validation improvement (0 disables)",
+    )
+    parser.add_argument(
+        "--early-stop-min-delta",
+        type=float,
+        default=0.002,
+        help="Minimum val_mse improvement required to reset early-stop patience",
+    )
+    parser.add_argument(
+        "--early-stop-min-epochs",
+        type=int,
+        default=10,
+        help="Do not trigger early stopping before this epoch",
+    )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.set_defaults(resume=True, warm_start=True)
     return parser.parse_args()
@@ -161,6 +179,10 @@ def append_metrics_log(
 
 def linear_layers(model: StrategoValueNet) -> List[nn.Linear]:
     return [module for module in model.net if isinstance(module, nn.Linear)]
+
+
+def clone_model_state(model: nn.Module) -> Dict[str, torch.Tensor]:
+    return {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
 
 
 def build_output_payload(
@@ -388,6 +410,12 @@ def main() -> None:
     args = parse_args()
     if args.save_every <= 0:
         raise ValueError("--save-every must be a positive integer")
+    if args.early_stop_patience < 0:
+        raise ValueError("--early-stop-patience must be >= 0")
+    if args.early_stop_min_delta < 0:
+        raise ValueError("--early-stop-min-delta must be >= 0")
+    if args.early_stop_min_epochs < 0:
+        raise ValueError("--early-stop-min-epochs must be >= 0")
 
     run_id = f"deep-{int(time.time() * 1000)}-{os.getpid()}"
     hidden_layers = parse_hidden_layers(args.hidden)
@@ -471,7 +499,9 @@ def main() -> None:
             f"[deep:setup] device={device.type} samples={sample_count} train={x_train.shape[0]} "
             f"val={x_val.shape[0]} hidden={hidden_layers} epochs={args.epochs} start_epoch={start_epoch} "
             f"resume={'on' if args.resume else 'off'} warm_start={'on' if args.warm_start else 'off'} "
-            f"loaded_checkpoint={'yes' if resumed_from_checkpoint else 'no'} loaded_weights={'yes' if warm_started else 'no'}"
+            f"loaded_checkpoint={'yes' if resumed_from_checkpoint else 'no'} loaded_weights={'yes' if warm_started else 'no'} "
+            f"early_stop_patience={args.early_stop_patience} early_stop_min_delta={args.early_stop_min_delta} "
+            f"early_stop_min_epochs={args.early_stop_min_epochs}"
         ),
         flush=True,
     )
@@ -493,6 +523,9 @@ def main() -> None:
                 "resume": bool(args.resume),
                 "warmStart": bool(args.warm_start),
                 "checkpoint": checkpoint_path,
+                "earlyStopPatience": int(args.early_stop_patience),
+                "earlyStopMinDelta": float(args.early_stop_min_delta),
+                "earlyStopMinEpochs": int(args.early_stop_min_epochs),
             },
             "device": device.type,
             "sampleCount": int(sample_count),
@@ -505,6 +538,11 @@ def main() -> None:
     train_started_at = time.time()
     last_completed_epoch = start_epoch - 1
     last_epoch_with_updates = start_epoch - 1
+    best_val_mse = float("inf")
+    best_epoch = 0
+    best_model_state: Optional[Dict[str, torch.Tensor]] = None
+    early_stop_wait = 0
+    early_stopped = False
 
     for epoch in range(start_epoch, args.epochs + 1):
         if interrupted:
@@ -571,13 +609,26 @@ def main() -> None:
 
         train_mse, train_mae, train_acc = compute_metrics(model, x_train, y_train, device)
         val_mse, val_mae, val_acc = compute_metrics(model, x_val, y_val, device)
+        improved = best_epoch == 0 or (best_val_mse - val_mse) >= args.early_stop_min_delta
+        if improved:
+            best_val_mse = val_mse
+            best_epoch = epoch
+            best_model_state = clone_model_state(model)
+            early_stop_wait = 0
+        else:
+            early_stop_wait += 1
 
         elapsed = time.time() - train_started_at
         eta = 0.0 if epoch == args.epochs else (elapsed / epoch) * (args.epochs - epoch)
         avg_loss = running_loss / max(1, batch_count)
 
         print(
-            f"[deep] epoch {epoch}/{args.epochs} loss={avg_loss:.4f} train_mse={train_mse:.4f} val_mse={val_mse:.4f} val_acc={val_acc * 100:.1f}% elapsed={format_duration(elapsed)} eta={format_duration(eta)}",
+            (
+                f"[deep] epoch {epoch}/{args.epochs} loss={avg_loss:.4f} train_mse={train_mse:.4f} "
+                f"val_mse={val_mse:.4f} val_acc={val_acc * 100:.1f}% best_val_mse={best_val_mse:.4f} "
+                f"best_epoch={best_epoch} es_wait={early_stop_wait}/{args.early_stop_patience} "
+                f"elapsed={format_duration(elapsed)} eta={format_duration(eta)}"
+            ),
             flush=True,
         )
         append_metrics_log(
@@ -597,6 +648,10 @@ def main() -> None:
                 "elapsedSeconds": float(round(elapsed, 3)),
                 "etaSeconds": float(round(eta, 3)),
                 "sampleCount": int(sample_count),
+                "bestValMse": float(best_val_mse),
+                "bestEpoch": int(best_epoch),
+                "earlyStopWait": int(early_stop_wait),
+                "earlyStopPatience": int(args.early_stop_patience),
             },
         )
         last_completed_epoch = epoch
@@ -613,7 +668,32 @@ def main() -> None:
             )
             print(f"[deep:checkpoint] epoch={epoch} saved={checkpoint_path}", flush=True)
 
+        if (
+            args.early_stop_patience > 0
+            and epoch >= args.early_stop_min_epochs
+            and early_stop_wait >= args.early_stop_patience
+        ):
+            early_stopped = True
+            print(
+                (
+                    f"[deep:early-stop] epoch={epoch} no val_mse improvement >= {args.early_stop_min_delta} "
+                    f"for {args.early_stop_patience} epochs; best_epoch={best_epoch} best_val_mse={best_val_mse:.4f}"
+                ),
+                flush=True,
+            )
+            break
+
     final_epoch_for_metadata = max(last_completed_epoch, 0)
+    selected_model_epoch = final_epoch_for_metadata
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        selected_model_epoch = best_epoch
+        if early_stopped:
+            print(
+                f"[deep:early-stop] restored best epoch {best_epoch} weights before export",
+                flush=True,
+            )
+
     write_exported_model(
         out_path=output_path,
         model=model,
@@ -621,7 +701,7 @@ def main() -> None:
         hidden_layers=hidden_layers,
         meta=meta,
         sample_count=sample_count,
-        epochs_completed=final_epoch_for_metadata,
+        epochs_completed=selected_model_epoch,
         args=args,
         device=device,
     )
@@ -634,7 +714,11 @@ def main() -> None:
     val_mse, val_mae, val_acc = compute_metrics(model, x_val, y_val, device)
 
     print(
-        f"[deep:done] saved={output_path} train_mse={train_mse:.4f} train_mae={train_mae:.4f} train_acc={train_acc * 100:.1f}% val_mse={val_mse:.4f} val_mae={val_mae:.4f} val_acc={val_acc * 100:.1f}%",
+        (
+            f"[deep:done] saved={output_path} selected_epoch={selected_model_epoch} "
+            f"completed_epochs={final_epoch_for_metadata} train_mse={train_mse:.4f} train_mae={train_mae:.4f} "
+            f"train_acc={train_acc * 100:.1f}% val_mse={val_mse:.4f} val_mae={val_mae:.4f} val_acc={val_acc * 100:.1f}%"
+        ),
         flush=True,
     )
     append_metrics_log(
@@ -642,8 +726,9 @@ def main() -> None:
         run_id=run_id,
         event_type="run_end",
         payload={
-            "status": "completed",
+            "status": "early_stopped" if early_stopped else "completed",
             "epochsCompleted": int(final_epoch_for_metadata),
+            "selectedEpoch": int(selected_model_epoch),
             "sampleCount": int(sample_count),
             "trainMse": float(train_mse),
             "trainMae": float(train_mae),
@@ -651,6 +736,12 @@ def main() -> None:
             "valMse": float(val_mse),
             "valMae": float(val_mae),
             "valAcc": float(val_acc),
+            "bestValMse": float(best_val_mse if best_epoch > 0 else val_mse),
+            "bestEpoch": int(best_epoch if best_epoch > 0 else selected_model_epoch),
+            "earlyStopPatience": int(args.early_stop_patience),
+            "earlyStopMinDelta": float(args.early_stop_min_delta),
+            "earlyStopMinEpochs": int(args.early_stop_min_epochs),
+            "earlyStopped": bool(early_stopped),
         },
     )
 
