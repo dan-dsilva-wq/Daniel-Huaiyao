@@ -247,12 +247,7 @@ async function syncGenerationOutputs(
 
   let deployed = false;
   if (options.deploy) {
-    const deployParts = tokenizeCommand(options.deployCommand);
-    if (deployParts.length === 0) {
-      throw new Error('Invalid --deploy-command (empty command)');
-    }
-    const [deployBinary, ...deployArgs] = deployParts;
-    await runCommand(deployBinary, deployArgs, { stdio: 'inherit' });
+    await runDeployCommand(options.deployCommand);
     deployed = true;
   }
 
@@ -388,6 +383,25 @@ async function sleepInterruptible(ms: number): Promise<void> {
 
 function resolveScriptPath(relativePath: string): string {
   return path.resolve(process.cwd(), relativePath);
+}
+
+async function runDeployCommand(rawCommand: string): Promise<void> {
+  const trimmed = rawCommand.trim();
+  if (trimmed.length === 0) {
+    throw new Error('Invalid --deploy-command (empty command)');
+  }
+
+  if (process.platform === 'win32') {
+    await runCommand('cmd.exe', ['/d', '/s', '/c', trimmed], { stdio: 'inherit' });
+    return;
+  }
+
+  const deployParts = tokenizeCommand(trimmed);
+  if (deployParts.length === 0) {
+    throw new Error('Invalid --deploy-command (empty command)');
+  }
+  const [deployBinary, ...deployArgs] = deployParts;
+  await runCommand(deployBinary, deployArgs, { stdio: 'inherit' });
 }
 
 function createDefaultDeepTrainArgs(): string[] {
