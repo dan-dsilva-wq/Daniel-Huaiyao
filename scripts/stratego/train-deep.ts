@@ -8,6 +8,7 @@ interface DeepTrainOptions {
   games: number;
   difficulty: ComputerDifficulty;
   maxTurns: number;
+  noCaptureDrawMoves: number;
   workers: number;
   verbose: boolean;
   traceTurns: boolean;
@@ -69,6 +70,7 @@ const DEFAULT_OPTIONS: DeepTrainOptions = {
   games: 240,
   difficulty: 'hard',
   maxTurns: 500,
+  noCaptureDrawMoves: 160,
   workers: Math.max(1, cpus().length - 1),
   verbose: true,
   traceTurns: false,
@@ -98,6 +100,7 @@ async function main(): Promise<void> {
     : path.resolve(process.cwd(), '.stratego-cache', `deep-dataset-${Date.now()}.json`);
 
   logStage('setup', `Deep training pipeline | games=${options.games} difficulty=${options.difficulty} workers=${options.workers} epochs=${options.epochs}`);
+  logStage('setup', `Self-play limits | maxTurns=${options.maxTurns} noCaptureDraw=${options.noCaptureDrawMoves}`);
   if (options.replayEnabled) {
     logStage('setup', `Replay buffer enabled | path=${options.replayPath} maxRuns=${options.replayMaxRuns} maxSamples=${options.replayMaxSamples}`);
   }
@@ -114,6 +117,8 @@ async function main(): Promise<void> {
     options.difficulty,
     '--max-turns',
     String(options.maxTurns),
+    '--no-capture-draw',
+    String(options.noCaptureDrawMoves),
     '--workers',
     String(options.workers),
     '--progress-every',
@@ -505,6 +510,10 @@ function parseOptions(argv: string[]): DeepTrainOptions {
         options.maxTurns = parsePositiveInt(next, arg);
         index += 1;
         break;
+      case '--no-capture-draw':
+        options.noCaptureDrawMoves = parseNonNegativeInt(next, arg);
+        index += 1;
+        break;
       case '--workers':
         options.workers = parsePositiveInt(next, arg);
         index += 1;
@@ -627,6 +636,15 @@ function parsePositiveFloat(value: string | undefined, flag: string): number {
   return parsed;
 }
 
+function parseNonNegativeInt(value: string | undefined, flag: string): number {
+  if (!value) throw new Error(`Missing value for ${flag}`);
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid value for ${flag}: ${value}`);
+  }
+  return parsed;
+}
+
 function printUsageAndExit(): never {
   console.log('Usage: npm run stratego:train:deep -- [options]');
   console.log('');
@@ -634,6 +652,7 @@ function printUsageAndExit(): never {
   console.log('  --games <n>           Self-play game count (default: 240)');
   console.log('  --difficulty <d>      medium|hard|extreme (default: hard)');
   console.log('  --max-turns <n>       Max turns per game (default: 500)');
+  console.log('  --no-capture-draw <n> Draw when no capture occurs for N moves (default: 160, 0 disables)');
   console.log('  --workers <n>         Worker processes (default: CPU cores - 1)');
   console.log('  --progress-every <n>  Self-play progress interval (default: 20)');
   console.log('  --verbose, -v         Verbose self-play logging');

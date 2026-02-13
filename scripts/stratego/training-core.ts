@@ -23,16 +23,22 @@ interface PendingSample {
 export interface SelfPlayOptions {
   difficulty: ComputerDifficulty;
   maxTurns: number;
+  noCaptureDrawMoves: number;
   traceTurns: boolean;
   traceLog?: (line: string) => void;
 }
+
+export type SelfPlayTerminalReason = WinReason | 'max_turns' | 'no_capture_streak';
 
 export interface SelfPlayGameSummary {
   gameIndex: number;
   turnsPlayed: number;
   winner: TeamColor | null;
   winReason: WinReason | null;
+  terminalReason: SelfPlayTerminalReason;
   samplesAdded: number;
+  captureCount: number;
+  longestNoCaptureStreak: number;
   durationMs: number;
 }
 
@@ -90,6 +96,10 @@ export function runSelfPlayGame(
   const startedAt = performance.now();
   let state = createSelfPlayState(gameIndex);
   const pending: PendingSample[] = [];
+  let captureCount = 0;
+  let noCaptureStreak = 0;
+  let longestNoCaptureStreak = 0;
+  let terminalReason: SelfPlayTerminalReason = 'max_turns';
 
   while (state.status === 'playing' && state.turnNumber <= options.maxTurns) {
     const redPerspectiveState = createDeterminizedPerspectiveState(state, 'red');
@@ -112,6 +122,7 @@ export function runSelfPlayGame(
         options.traceLog?.(`game=${gameIndex} turn=${state.turnNumber} ${activeColor} has no legal moves`);
       }
       state = finishNoMovesState(state, activeColor);
+      terminalReason = 'no_moves';
       break;
     }
 
@@ -131,6 +142,35 @@ export function runSelfPlayGame(
     });
     state = result.state;
 
+    if (result.combatResult) {
+      captureCount += 1;
+      noCaptureStreak = 0;
+    } else {
+      noCaptureStreak += 1;
+      longestNoCaptureStreak = Math.max(longestNoCaptureStreak, noCaptureStreak);
+    }
+
+    if (options.noCaptureDrawMoves > 0 && noCaptureStreak >= options.noCaptureDrawMoves) {
+      terminalReason = 'no_capture_streak';
+      if (options.traceTurns) {
+        options.traceLog?.(
+          `game=${gameIndex} reached no-capture draw threshold (${options.noCaptureDrawMoves}) -> draw`,
+        );
+      }
+      state = {
+        ...state,
+        status: 'finished',
+        winner: null,
+        winReason: null,
+        updatedAt: new Date().toISOString(),
+      };
+      break;
+    }
+
+    if (result.state.status === 'finished') {
+      terminalReason = result.state.winReason ?? 'max_turns';
+    }
+
     if (options.traceTurns && result.state.status === 'finished') {
       options.traceLog?.(
         `game=${gameIndex} finished winner=${result.state.winner ?? 'draw'} reason=${result.state.winReason ?? 'draw'}`,
@@ -139,6 +179,7 @@ export function runSelfPlayGame(
   }
 
   if (state.status === 'playing') {
+    terminalReason = 'max_turns';
     if (options.traceTurns) {
       options.traceLog?.(`game=${gameIndex} reached max turns (${options.maxTurns}) -> draw`);
     }
@@ -162,7 +203,10 @@ export function runSelfPlayGame(
     turnsPlayed: state.moveHistory.length,
     winner: state.winner,
     winReason: state.winReason,
+    terminalReason,
     samplesAdded: samples.length,
+    captureCount,
+    longestNoCaptureStreak,
     durationMs: performance.now() - startedAt,
   };
 

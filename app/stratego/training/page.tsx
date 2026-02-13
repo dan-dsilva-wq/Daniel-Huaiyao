@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 type MetricEvent = {
   ts?: string;
-  source?: 'linear' | 'deep';
+  source?: 'linear' | 'deep' | 'eval';
   runId?: string;
   eventType?: string;
   [key: string]: unknown;
@@ -47,6 +47,24 @@ type CrossRunPoint = {
   valAcc: number | null;
 };
 
+type BenchmarkPoint = {
+  runId: string;
+  ts: string | null;
+  games: number;
+  difficulty: string | null;
+  candidateWins: number | null;
+  baselineWins: number | null;
+  draws: number | null;
+  candidateScore: number | null;
+  winRate: number | null;
+  drawRate: number | null;
+  lossRate: number | null;
+  avgTurns: number | null;
+  maxTurnsDraws: number | null;
+  noCaptureDraws: number | null;
+  baselineSource: string | null;
+};
+
 const DEFAULT_METRICS_LOG_PATH = '.stratego-cache/metrics/training-metrics.jsonl';
 
 export default function StrategoTrainingPage() {
@@ -56,6 +74,7 @@ export default function StrategoTrainingPage() {
   const deepRuns = runs.filter((run) => run.source === 'deep');
   const linearRuns = runs.filter((run) => run.source === 'linear');
   const crossRunPoints = buildCrossRunPoints(runs);
+  const benchmarkPoints = buildBenchmarkPoints(events);
 
   const latestDeep = deepRuns[0] ?? null;
   const latestLinear = linearRuns[0] ?? null;
@@ -83,7 +102,10 @@ export default function StrategoTrainingPage() {
           <p><span className="font-semibold">Events loaded:</span> {events.length}</p>
           <p><span className="font-semibold">Runs tracked:</span> {runs.length}</p>
           <p><span className="font-semibold">Runs with validation metrics:</span> {crossRunPoints.length}</p>
+          <p><span className="font-semibold">Benchmark eval runs:</span> {benchmarkPoints.length}</p>
         </div>
+
+        <BenchmarkSection points={benchmarkPoints} />
 
         <CrossRunSection points={crossRunPoints} />
 
@@ -260,6 +282,104 @@ function CrossRunSection({ points }: { points: CrossRunPoint[] }) {
                 <td className="py-2 pr-3">{formatPercent(point.valAcc)}</td>
               </tr>
             ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function BenchmarkSection({ points }: { points: BenchmarkPoint[] }) {
+  if (points.length === 0) {
+    return (
+      <EmptyCard label="No benchmark eval data yet. Run `npm run stratego:eval -- --games 60 --difficulty extreme` to add fixed-opponent progress points." />
+    );
+  }
+
+  const scoreSeries = points.map((point) => (
+    point.candidateScore === null ? null : point.candidateScore * 100
+  ));
+  const winRateSeries = points.map((point) => (
+    point.winRate === null ? null : point.winRate * 100
+  ));
+  const drawRateSeries = points.map((point) => (
+    point.drawRate === null ? null : point.drawRate * 100
+  ));
+  const lossRateSeries = points.map((point) => (
+    point.lossRate === null ? null : point.lossRate * 100
+  ));
+  const avgTurnsSeries = points.map((point) => point.avgTurns);
+
+  return (
+    <section className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">Fixed Benchmark Curves</h2>
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          Each point is one `stratego:eval` run against the same baseline policy.
+        </p>
+      </div>
+      <div className="grid md:grid-cols-2 gap-4">
+        <LineChart
+          title="Benchmark Score % Across Runs"
+          series={[
+            { label: 'candidate score %', color: '#16a34a', values: scoreSeries },
+            { label: 'win rate %', color: '#1d4ed8', values: winRateSeries },
+            { label: 'draw rate %', color: '#6b7280', values: drawRateSeries },
+            { label: 'loss rate %', color: '#dc2626', values: lossRateSeries },
+          ]}
+        />
+        <LineChart
+          title="Average Turns Across Runs"
+          series={[
+            { label: 'avg turns', color: '#7c3aed', values: avgTurnsSeries },
+          ]}
+        />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left border-b border-gray-200 dark:border-gray-700">
+              <th className="py-2 pr-3">Run</th>
+              <th className="py-2 pr-3">Started</th>
+              <th className="py-2 pr-3">Games</th>
+              <th className="py-2 pr-3">Difficulty</th>
+              <th className="py-2 pr-3">Score</th>
+              <th className="py-2 pr-3">W/D/L</th>
+              <th className="py-2 pr-3">Avg Turns</th>
+              <th className="py-2 pr-3">Draw Causes</th>
+              <th className="py-2 pr-3">Baseline</th>
+            </tr>
+          </thead>
+          <tbody>
+            {points.map((point, index) => {
+              const wins = point.candidateWins ?? (
+                point.winRate === null ? null : Math.round(point.winRate * point.games)
+              );
+              const draws = point.draws ?? (
+                point.drawRate === null ? null : Math.round(point.drawRate * point.games)
+              );
+              const losses = point.baselineWins ?? (
+                point.lossRate === null ? null : Math.round(point.lossRate * point.games)
+              );
+              const drawCause = [
+                `max-turns=${point.maxTurnsDraws ?? 0}`,
+                `no-capture=${point.noCaptureDraws ?? 0}`,
+              ].join(' ');
+
+              return (
+                <tr key={point.runId} className="border-b border-gray-100 dark:border-gray-800">
+                  <td className="py-2 pr-3">#{index + 1}</td>
+                  <td className="py-2 pr-3">{formatTimestamp(point.ts)}</td>
+                  <td className="py-2 pr-3">{point.games}</td>
+                  <td className="py-2 pr-3">{point.difficulty ?? '-'}</td>
+                  <td className="py-2 pr-3">{point.candidateScore === null ? '-' : `${(point.candidateScore * 100).toFixed(1)}%`}</td>
+                  <td className="py-2 pr-3">{wins === null || draws === null || losses === null ? '-' : `${wins}/${draws}/${losses}`}</td>
+                  <td className="py-2 pr-3">{point.avgTurns === null ? '-' : point.avgTurns.toFixed(1)}</td>
+                  <td className="py-2 pr-3">{drawCause}</td>
+                  <td className="py-2 pr-3">{point.baselineSource ?? '-'}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -478,6 +598,46 @@ function buildCrossRunPoints(runs: TrainingRun[]): CrossRunPoint[] {
     });
   }
 
+  return points;
+}
+
+function buildBenchmarkPoints(events: MetricEvent[]): BenchmarkPoint[] {
+  const points: BenchmarkPoint[] = [];
+
+  for (const event of events) {
+    if (event.source !== 'eval') continue;
+    if (event.eventType !== 'benchmark_result') continue;
+
+    const runId = typeof event.runId === 'string' ? event.runId : null;
+    if (!runId) continue;
+
+    const games = asNumber(event.games);
+    if (games === null || games <= 0) continue;
+
+    points.push({
+      runId,
+      ts: typeof event.ts === 'string' ? event.ts : null,
+      games,
+      difficulty: typeof event.difficulty === 'string' ? event.difficulty : null,
+      candidateWins: asNumber(event.candidateWins),
+      baselineWins: asNumber(event.baselineWins),
+      draws: asNumber(event.draws),
+      candidateScore: asNumber(event.candidateScore),
+      winRate: asNumber(event.winRate),
+      drawRate: asNumber(event.drawRate),
+      lossRate: asNumber(event.lossRate),
+      avgTurns: asNumber(event.avgTurns),
+      maxTurnsDraws: asNumber(event.maxTurnsDraws),
+      noCaptureDraws: asNumber(event.noCaptureDraws),
+      baselineSource: typeof event.baselineSource === 'string' ? event.baselineSource : null,
+    });
+  }
+
+  points.sort((left, right) => {
+    const leftTs = left.ts ? Date.parse(left.ts) : 0;
+    const rightTs = right.ts ? Date.parse(right.ts) : 0;
+    return leftTs - rightTs;
+  });
   return points;
 }
 

@@ -20,6 +20,12 @@ Useful overrides:
 npm run stratego:train -- --games 240 --epochs 16 --difficulty extreme --max-turns 240 --workers 8
 ```
 
+Stall-control override (draw after N moves with no capture):
+
+```bash
+npm run stratego:train -- --games 240 --epochs 16 --difficulty extreme --no-capture-draw 160
+```
+
 Verbose stage/game progress with ETA:
 
 ```bash
@@ -50,6 +56,18 @@ Run deep training end-to-end (self-play dataset + MLP training):
 
 ```bash
 npm run stratego:train:deep -- --games 300 --difficulty extreme --workers 8 --epochs 30
+```
+
+Current project default (`npm run stratego:train:deep`) already includes:
+
+```bash
+--games 300 --difficulty extreme --workers 8 --epochs 30 --save-every 1 --resume --warm-start --replay-max-runs 6 --replay-max-samples 400000 --no-capture-draw 160 --verbose
+```
+
+Use no-capture auto-draw to cut long stalemate games:
+
+```bash
+npm run stratego:train:deep -- --games 300 --difficulty extreme --workers 8 --epochs 30 --no-capture-draw 160
 ```
 
 Continue training across runs (no reset):
@@ -111,3 +129,30 @@ It shows:
 2. Validation/train accuracy over epochs.
 3. Self-play progression for each run.
 4. Overall cross-run validation trend (one point per run).
+5. Fixed benchmark trend from `stratego:eval` runs.
+
+## Fixed Benchmark Eval (recommended progress check)
+
+Run the current model against a fixed baseline (heuristic-only search):
+
+```bash
+npm run stratego:eval -- --games 60 --difficulty extreme --max-turns 500 --no-capture-draw 160
+```
+
+What this logs:
+
+1. Candidate score % (`win + 0.5 * draw`) against the fixed baseline.
+2. Win/draw/loss rates across runs.
+3. Average game length and draw causes (`max_turns` vs `no_capture_streak`).
+
+Optional custom baseline model:
+
+```bash
+npm run stratego:eval -- --games 60 --difficulty extreme --baseline-model .stratego-cache/baseline-model.json
+```
+
+Train + benchmark in one command:
+
+```bash
+npm run stratego:train:deep:eval
+```

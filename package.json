@@ -10,7 +10,9 @@
     "stratego:train": "tsx scripts/stratego/train-model.ts",
     "stratego:train:quick": "tsx scripts/stratego/train-model.ts --games 40 --epochs 6 --max-turns 180 --workers 1",
     "stratego:train:parallel": "tsx scripts/stratego/train-model.ts --games 240 --epochs 12 --difficulty extreme --workers 8 --verbose",
-    "stratego:train:deep": "tsx scripts/stratego/train-deep.ts"
+    "stratego:train:deep": "tsx scripts/stratego/train-deep.ts --games 300 --difficulty extreme --workers 8 --epochs 30 --save-every 1 --resume --warm-start --replay-max-runs 6 --replay-max-samples 400000 --no-capture-draw 160 --verbose",
+    "stratego:eval": "tsx scripts/stratego/eval.ts",
+    "stratego:train:deep:eval": "npm run stratego:train:deep && npm run stratego:eval -- --games 60 --difficulty extreme --max-turns 500 --no-capture-draw 160 --progress-every 10"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.93.3",

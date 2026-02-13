@@ -1,5 +1,5 @@
 import { generateRandomSetup, isLake } from './constants';
-import { blendHeuristicWithModel } from './ml';
+import { blendHeuristicWithModel, type StrategoModel } from './ml';
 import {
   CombatResult,
   GameState,
@@ -64,6 +64,13 @@ interface SearchContext {
   config: SearchConfig;
   startedAtMs: number;
   nodesEvaluated: number;
+  modelOverride?: StrategoModel;
+  disableModelBlend?: boolean;
+}
+
+export interface MoveSelectionOptions {
+  modelOverride?: StrategoModel;
+  disableModelBlend?: boolean;
 }
 
 const PIECE_VALUES: Record<PieceRank, number> = {
@@ -115,6 +122,7 @@ const DIFFICULTY_CONFIG: Record<ComputerDifficulty, SearchConfig> = {
 };
 
 const ALL_PIECE_RANKS: PieceRank[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const MOVABLE_PIECE_RANKS: PieceRank[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const PIECE_TOTAL_COUNTS: Record<PieceRank, number> = {
   0: 1,
   1: 1,
@@ -228,6 +236,7 @@ export function chooseStrategoMoveForColor(
   state: LocalStrategoState,
   color: TeamColor,
   difficulty: ComputerDifficulty,
+  options?: MoveSelectionOptions,
 ): StrategicMove | null {
   if (state.status !== 'playing' || state.currentTurn !== color) return null;
 
@@ -243,6 +252,8 @@ export function chooseStrategoMoveForColor(
     config,
     startedAtMs: Date.now(),
     nodesEvaluated: 0,
+    modelOverride: options?.modelOverride,
+    disableModelBlend: options?.disableModelBlend === true,
   };
 
   const orderedMoves = orderMoves(templateState, allMoves, color, color)
@@ -329,6 +340,7 @@ export function createDeterminizedPerspectiveState(
   const clonedState = cloneLocalState(state);
   const opponentPieces = getPieces(clonedState, opponentColor);
   const unknownPieces = opponentPieces.filter((piece) => !piece.revealed);
+  const knownByPieceId = inferOpponentPieceKnowledge(clonedState, perspective);
 
   if (unknownPieces.length === 0) return clonedState;
 
@@ -347,28 +359,82 @@ export function createDeterminizedPerspectiveState(
     remainingCounts[piece.rank] = Math.max(0, remainingCounts[piece.rank] - 1);
   }
 
-  const sampledRankPool: PieceRank[] = [];
-  for (const rank of ALL_PIECE_RANKS) {
-    const count = remainingCounts[rank];
-    for (let index = 0; index < count; index += 1) {
-      sampledRankPool.push(rank);
-    }
-  }
-  shuffleInPlace(sampledRankPool);
-
-  let poolIndex = 0;
   for (const piece of opponentPieces) {
     if (piece.revealed) continue;
-    const sampledRank = sampledRankPool[poolIndex];
-    if (sampledRank === undefined) {
-      piece.rank = ALL_PIECE_RANKS[Math.floor(Math.random() * ALL_PIECE_RANKS.length)];
-    } else {
-      piece.rank = sampledRank;
-      poolIndex += 1;
+    const knowledge = knownByPieceId.get(piece.id);
+    const hasMoved = knowledge?.hasMoved ?? false;
+    const mustBeScout = knowledge?.mustBeScout ?? false;
+
+    if (mustBeScout) {
+      piece.rank = 2;
+      remainingCounts[2] = Math.max(0, remainingCounts[2] - 1);
+      continue;
     }
+
+    const candidateRanks = (hasMoved ? MOVABLE_PIECE_RANKS : ALL_PIECE_RANKS)
+      .filter((rank) => remainingCounts[rank] > 0);
+
+    const fallbackRanks = hasMoved ? MOVABLE_PIECE_RANKS : ALL_PIECE_RANKS;
+    const sampledRank = sampleRankFromRemainingCounts(
+      candidateRanks.length > 0 ? candidateRanks : fallbackRanks,
+      remainingCounts,
+    );
+    piece.rank = sampledRank;
+    remainingCounts[sampledRank] = Math.max(0, remainingCounts[sampledRank] - 1);
   }
 
   return clonedState;
+}
+
+function inferOpponentPieceKnowledge(
+  state: LocalStrategoState,
+  perspective: TeamColor,
+): Map<string, { hasMoved: boolean; mustBeScout: boolean }> {
+  const opponentColor = flipColor(perspective);
+  const knowledge = new Map<string, { hasMoved: boolean; mustBeScout: boolean }>();
+
+  for (const move of state.moveHistory) {
+    if (move.color !== opponentColor) continue;
+
+    const rowDelta = Math.abs(move.to_row - move.from_row);
+    const colDelta = Math.abs(move.to_col - move.from_col);
+    const travelDistance = rowDelta + colDelta;
+    if (travelDistance <= 0) continue;
+
+    const current = knowledge.get(move.piece_id) ?? { hasMoved: false, mustBeScout: false };
+    current.hasMoved = true;
+    if (travelDistance > 1) {
+      current.mustBeScout = true;
+    }
+    knowledge.set(move.piece_id, current);
+  }
+
+  return knowledge;
+}
+
+function sampleRankFromRemainingCounts(
+  candidates: PieceRank[],
+  remainingCounts: Record<PieceRank, number>,
+): PieceRank {
+  let total = 0;
+  for (const rank of candidates) {
+    total += Math.max(0, remainingCounts[rank]);
+  }
+
+  if (total <= 0) {
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  const pick = Math.random() * total;
+  let cumulative = 0;
+  for (const rank of candidates) {
+    cumulative += Math.max(0, remainingCounts[rank]);
+    if (pick <= cumulative) {
+      return rank;
+    }
+  }
+
+  return candidates[candidates.length - 1];
 }
 
 function createDeterminizedSearchStates(
@@ -407,7 +473,12 @@ function minimax(
   }
 
   if (depth <= 0 || shouldCutSearch(context)) {
-    return evaluateState(state, maximizingColor);
+    return evaluateState(
+      state,
+      maximizingColor,
+      context.modelOverride,
+      context.disableModelBlend === true,
+    );
   }
 
   const moves = generateMovesForColor(state, activeColor);
@@ -450,9 +521,17 @@ function shouldCutSearch(context: SearchContext): boolean {
   return Date.now() - context.startedAtMs >= context.config.timeBudgetMs;
 }
 
-function evaluateState(state: LocalStrategoState, perspective: TeamColor): number {
+function evaluateState(
+  state: LocalStrategoState,
+  perspective: TeamColor,
+  modelOverride?: StrategoModel,
+  disableModelBlend = false,
+): number {
   const heuristicScore = evaluateStateHeuristic(state, perspective);
-  return blendHeuristicWithModel(state, perspective, heuristicScore);
+  if (disableModelBlend) {
+    return heuristicScore;
+  }
+  return blendHeuristicWithModel(state, perspective, heuristicScore, modelOverride);
 }
 
 function evaluateStateHeuristic(state: LocalStrategoState, perspective: TeamColor): number {
@@ -489,16 +568,105 @@ function evaluateStateHeuristic(state: LocalStrategoState, perspective: TeamColo
     - flagPressureScore(oppPieces, myFlag, flipColor(perspective));
 
   const tacticalScore = immediateThreatScore(state, perspective);
+  const phaseWeights = getPhaseHeuristicWeights(state.turnNumber);
+  const stagnationPenalty = noCaptureStagnationPenalty(state.moveHistory);
+  const repetitionPenalty = repetitionLoopPenalty(state.moveHistory);
+
+  const weightedMaterial = materialScore * phaseWeights.material;
+  const weightedMobility = mobilityScore * phaseWeights.mobility;
+  const weightedProgress = (myProgress - oppProgress) * 6 * phaseWeights.progress;
+  const weightedCenter = (myCenter - oppCenter) * 10 * phaseWeights.center;
+  const weightedFlagSafety = (myFlagSafety - oppFlagSafety) * 28 * phaseWeights.flagSafety;
+  const weightedPressure = pressureScore * 22 * phaseWeights.pressure;
+  const weightedTactics = tacticalScore * phaseWeights.tactics;
 
   return (
-    materialScore
-    + mobilityScore
-    + (myProgress - oppProgress) * 6
-    + (myCenter - oppCenter) * 10
-    + (myFlagSafety - oppFlagSafety) * 28
-    + pressureScore * 22
-    + tacticalScore
+    weightedMaterial
+    + weightedMobility
+    + weightedProgress
+    + weightedCenter
+    + weightedFlagSafety
+    + weightedPressure
+    + weightedTactics
+    - stagnationPenalty
+    - repetitionPenalty
   );
+}
+
+function getPhaseHeuristicWeights(turnNumber: number): {
+  material: number;
+  mobility: number;
+  progress: number;
+  center: number;
+  flagSafety: number;
+  pressure: number;
+  tactics: number;
+} {
+  // 0 -> opening, 1 -> later phase. Smoothly shifts priorities over game length.
+  const phase = clamp((turnNumber - 1) / 180, 0, 1);
+  return {
+    material: lerp(1.0, 1.22, phase),
+    mobility: lerp(1.15, 0.78, phase),
+    progress: lerp(1.08, 0.62, phase),
+    center: lerp(1.1, 0.7, phase),
+    flagSafety: lerp(0.9, 1.36, phase),
+    pressure: lerp(0.85, 1.48, phase),
+    tactics: lerp(1.0, 1.22, phase),
+  };
+}
+
+function noCaptureStagnationPenalty(history: MoveHistoryEntry[]): number {
+  const streak = countNoCaptureStreak(history);
+  if (streak <= 10) return 0;
+
+  const scaled = streak - 10;
+  const base = scaled * 9;
+  const extra = Math.max(0, scaled - 20) * 6;
+  return Math.min(2200, base + extra);
+}
+
+function countNoCaptureStreak(history: MoveHistoryEntry[]): number {
+  let streak = 0;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry.combat_result !== null) break;
+    streak += 1;
+  }
+  return streak;
+}
+
+function repetitionLoopPenalty(history: MoveHistoryEntry[]): number {
+  if (history.length < 4) return 0;
+
+  const start = Math.max(2, history.length - 28);
+  let oscillationCount = 0;
+  for (let index = start; index < history.length; index += 1) {
+    const current = history[index];
+    const previousOwnTurn = history[index - 2];
+    if (current.combat_result !== null || previousOwnTurn.combat_result !== null) continue;
+    if (current.color !== previousOwnTurn.color) continue;
+    if (current.piece_id !== previousOwnTurn.piece_id) continue;
+
+    const reversed = current.from_row === previousOwnTurn.to_row
+      && current.from_col === previousOwnTurn.to_col
+      && current.to_row === previousOwnTurn.from_row
+      && current.to_col === previousOwnTurn.from_col;
+    if (reversed) {
+      oscillationCount += 1;
+    }
+  }
+
+  if (oscillationCount === 0) return 0;
+  // Escalates quickly when the same-piece ping-pong repeats.
+  return oscillationCount * 120 + Math.max(0, oscillationCount - 3) * 80;
+}
+
+function lerp(start: number, end: number, t: number): number {
+  return start + (end - start) * t;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function progressionScore(pieces: Piece[], color: TeamColor): number {

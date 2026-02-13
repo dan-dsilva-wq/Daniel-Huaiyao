@@ -144,6 +144,10 @@ export function getActiveStrategoModel(): StrategoModel {
   return ACTIVE_MODEL;
 }
 
+export function parseStrategoModel(input: unknown): StrategoModel | null {
+  return parseModel(input);
+}
+
 export function extractStrategoFeatures(
   state: LocalStrategoState,
   perspective: TeamColor,
@@ -222,8 +226,8 @@ export function blendHeuristicWithModel(
   state: LocalStrategoState,
   perspective: TeamColor,
   heuristicScore: number,
+  model: StrategoModel = ACTIVE_MODEL,
 ): number {
-  const model = ACTIVE_MODEL;
   const sampleCount = model.training.positionSamples;
   if (sampleCount < 1500) return heuristicScore;
 

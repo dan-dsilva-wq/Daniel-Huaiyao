@@ -22,6 +22,7 @@ interface TrainOptions {
   epochs: number;
   difficulty: ComputerDifficulty;
   maxTurns: number;
+  noCaptureDrawMoves: number;
   learningRate: number;
   l2: number;
   verbose: boolean;
@@ -60,7 +61,10 @@ interface WorkerProgressPayload {
   turnsPlayed: number;
   winner: 'red' | 'blue' | null;
   winReason: 'flag_captured' | 'no_moves' | 'resignation' | null;
+  terminalReason: 'flag_captured' | 'no_moves' | 'resignation' | 'max_turns' | 'no_capture_streak';
   samplesAdded: number;
+  captureCount: number;
+  longestNoCaptureStreak: number;
   durationMs: number;
 }
 
@@ -92,6 +96,7 @@ const DEFAULT_OPTIONS: TrainOptions = {
   epochs: 12,
   difficulty: 'hard',
   maxTurns: 500,
+  noCaptureDrawMoves: 160,
   learningRate: 0.018,
   l2: 0.00035,
   verbose: false,
@@ -111,7 +116,7 @@ async function main(): Promise<void> {
 
   logStage(
     'setup',
-    `Training Stratego model | games=${options.games} difficulty=${options.difficulty} epochs=${options.epochs} maxTurns=${options.maxTurns} workers=${options.workers}`,
+    `Training Stratego model | games=${options.games} difficulty=${options.difficulty} epochs=${options.epochs} maxTurns=${options.maxTurns} noCaptureDraw=${options.noCaptureDrawMoves} workers=${options.workers}`,
   );
   if (options.verbose) {
     logStage(
@@ -221,6 +226,7 @@ function runSelfPlaySingleProcess(
     {
       difficulty: options.difficulty,
       maxTurns: options.maxTurns,
+      noCaptureDrawMoves: options.noCaptureDrawMoves,
       traceTurns: options.traceTurns,
       traceLog: options.traceTurns ? (line) => console.log(`  [trace] ${line}`) : undefined,
     },
@@ -324,6 +330,8 @@ function runSelfPlayWorker(
       options.difficulty,
       '--max-turns',
       String(options.maxTurns),
+      '--no-capture-draw',
+      String(options.noCaptureDrawMoves),
       '--out',
       assignment.outPath,
     ];
@@ -349,7 +357,10 @@ function runSelfPlayWorker(
           turnsPlayed: payload.turnsPlayed,
           winner: payload.winner,
           winReason: payload.winReason,
+          terminalReason: payload.terminalReason,
           samplesAdded: payload.samplesAdded,
+          captureCount: payload.captureCount,
+          longestNoCaptureStreak: payload.longestNoCaptureStreak,
           durationMs: payload.durationMs,
         };
         onProgress(summary, payload.workerId);
@@ -475,12 +486,12 @@ function maybeLogSelfPlayProgress(
   const elapsedMs = performance.now() - startedAtMs;
   const etaMs = estimateRemainingMs(elapsedMs, aggregate.completedGames, options.games);
   const winnerLabel = summary.winner ?? 'draw';
-  const reasonLabel = summary.winReason ?? 'max_turns_or_draw';
+  const reasonLabel = summary.terminalReason;
   const workerLabel = workerId ? ` worker=${workerId}` : '';
   const prefix = options.verbose ? '[self-play:game]' : '[self-play]';
 
   console.log(
-    `${prefix} ${aggregate.completedGames}/${options.games}${workerLabel} turns=${summary.turnsPlayed} winner=${winnerLabel} reason=${reasonLabel} samples=${aggregate.sampleCount} game_time=${formatDuration(summary.durationMs)} elapsed=${formatDuration(elapsedMs)} eta=${formatDuration(etaMs)} W/L/D=${aggregate.redWins}/${aggregate.blueWins}/${aggregate.draws}`,
+    `${prefix} ${aggregate.completedGames}/${options.games}${workerLabel} turns=${summary.turnsPlayed} winner=${winnerLabel} reason=${reasonLabel} captures=${summary.captureCount} max_no_cap=${summary.longestNoCaptureStreak} samples=${aggregate.sampleCount} game_time=${formatDuration(summary.durationMs)} elapsed=${formatDuration(elapsedMs)} eta=${formatDuration(etaMs)} W/L/D=${aggregate.redWins}/${aggregate.blueWins}/${aggregate.draws}`,
   );
   logger.log('self_play_progress', {
     completedGames: aggregate.completedGames,
@@ -489,6 +500,9 @@ function maybeLogSelfPlayProgress(
     turnsPlayed: summary.turnsPlayed,
     winner: summary.winner,
     winReason: summary.winReason,
+    terminalReason: summary.terminalReason,
+    captureCount: summary.captureCount,
+    longestNoCaptureStreak: summary.longestNoCaptureStreak,
     sampleCount: aggregate.sampleCount,
     redWins: aggregate.redWins,
     blueWins: aggregate.blueWins,
@@ -628,6 +642,7 @@ function writeDatasetFile(
       games: options.games,
       difficulty: options.difficulty,
       maxTurns: options.maxTurns,
+      noCaptureDrawMoves: options.noCaptureDrawMoves,
       workers: options.workers,
     },
   };
@@ -695,6 +710,10 @@ function parseOptions(argv: string[]): TrainOptions {
         break;
       case '--max-turns':
         options.maxTurns = parsePositiveInt(nextValue, arg);
+        index += 1;
+        break;
+      case '--no-capture-draw':
+        options.noCaptureDrawMoves = parseNonNegativeInt(nextValue, arg);
         index += 1;
         break;
       case '--workers':
@@ -769,6 +788,15 @@ function parsePositiveFloat(value: string | undefined, flag: string): number {
   return parsed;
 }
 
+function parseNonNegativeInt(value: string | undefined, flag: string): number {
+  if (!value) throw new Error(`Missing value for ${flag}.`);
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`Invalid value for ${flag}: ${value}. Expected a non-negative integer.`);
+  }
+  return parsed;
+}
+
 function printUsageAndExit(): never {
   console.log('Usage: npm run stratego:train -- [options]');
   console.log('');
@@ -777,6 +805,7 @@ function printUsageAndExit(): never {
   console.log('  --epochs <n>          Number of SGD passes (default: 12)');
   console.log('  --difficulty <d>      AI strength for self-play: medium|hard|extreme (default: hard)');
   console.log('  --max-turns <n>       Max turns per game before draw (default: 500)');
+  console.log('  --no-capture-draw <n> Draw when no capture occurs for N moves (default: 160, 0 disables)');
   console.log('  --workers <n>         Worker processes for self-play (default: CPU cores - 1)');
   console.log('  --lr <n>              Learning rate (default: 0.018)');
   console.log('  --l2 <n>              L2 regularization (default: 0.00035)');

@@ -9,6 +9,7 @@ interface WorkerOptions {
   games: number;
   difficulty: ComputerDifficulty;
   maxTurns: number;
+  noCaptureDrawMoves: number;
   traceTurns: boolean;
   outPath: string;
 }
@@ -32,6 +33,7 @@ function main(): void {
     {
       difficulty: options.difficulty,
       maxTurns: options.maxTurns,
+      noCaptureDrawMoves: options.noCaptureDrawMoves,
       traceTurns: options.traceTurns,
       traceLog: options.traceTurns
         ? (line) => emitTrace(options.workerId, line)
@@ -77,6 +79,7 @@ function parseOptions(argv: string[]): WorkerOptions {
   let games = 1;
   let difficulty: ComputerDifficulty = 'hard';
   let maxTurns = 500;
+  let noCaptureDrawMoves = 160;
   let traceTurns = false;
   let outPath = '';
 
@@ -105,6 +108,10 @@ function parseOptions(argv: string[]): WorkerOptions {
         maxTurns = parsePositiveInt(nextValue, arg);
         index += 1;
         break;
+      case '--no-capture-draw':
+        noCaptureDrawMoves = parseNonNegativeInt(nextValue, arg);
+        index += 1;
+        break;
       case '--out':
         if (!nextValue) throw new Error('Missing value for --out');
         outPath = nextValue;
@@ -126,6 +133,7 @@ function parseOptions(argv: string[]): WorkerOptions {
     games,
     difficulty,
     maxTurns,
+    noCaptureDrawMoves,
     traceTurns,
     outPath,
   };
@@ -142,6 +150,15 @@ function parsePositiveInt(value: string | undefined, flag: string): number {
   if (!value) throw new Error(`Missing value for ${flag}`);
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Invalid value for ${flag}: ${value}`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeInt(value: string | undefined, flag: string): number {
+  if (!value) throw new Error(`Missing value for ${flag}`);
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
     throw new Error(`Invalid value for ${flag}: ${value}`);
   }
   return parsed;
