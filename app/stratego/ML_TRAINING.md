@@ -170,3 +170,39 @@ Train + benchmark in one command:
 ```bash
 npm run stratego:train:deep:eval
 ```
+
+## Auto-Tune Hidden Layers
+
+Try multiple MLP shapes each generation, benchmark each one, and keep the best:
+
+```bash
+npm run stratego:tune -- --games 300 --epochs 60 --eval-games 60
+```
+
+Custom candidate list:
+
+```bash
+npm run stratego:tune -- --architectures "96,48|128,64|128,96,48" --games 300 --epochs 60 --eval-games 60
+```
+
+## Continuous Autopilot (Train -> Commit -> Push -> Deploy -> Repeat)
+
+Run forever (`--generations 0`), auto-commit model outputs, push, and deploy after each generation:
+
+```bash
+npm run stratego:autopilot -- --mode tune --generations 0 --pause-seconds 30 -- --games 300 --epochs 60 --eval-games 60
+```
+
+If you want training only (no git push / no deploy):
+
+```bash
+npm run stratego:autopilot -- --mode tune --no-push --no-deploy --generations 0 -- --games 300 --epochs 60 --eval-games 60
+```
+
+Useful autopilot flags:
+
+```bash
+--git-paths "lib/stratego/trained-model.json,.stratego-cache/tune/last-tune.json"
+--commit-message "stratego: gen {generation} {mode} {best_arch}"
+--continue-on-error
+```
