@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
-import { cpus } from 'node:os';
 import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { ComputerDifficulty } from '../../lib/stratego/ai';
+import { getStrategoHardwareProfile } from './hardware-profile';
 
 interface DeepTrainOptions {
   games: number;
@@ -69,17 +69,19 @@ interface ReplayMergeResult {
   droppedSamples: number;
 }
 
+const HARDWARE_PROFILE = getStrategoHardwareProfile();
+
 const DEFAULT_OPTIONS: DeepTrainOptions = {
   games: 240,
   difficulty: 'hard',
   maxTurns: 500,
   noCaptureDrawMoves: 160,
-  workers: Math.max(1, cpus().length - 1),
+  workers: HARDWARE_PROFILE.selfPlayWorkers,
   verbose: true,
   traceTurns: false,
   progressEvery: 20,
   epochs: 60,
-  batchSize: 1024,
+  batchSize: HARDWARE_PROFILE.deepBatchSize,
   learningRate: 0.0015,
   weightDecay: 0.0001,
   hidden: '96,48',
@@ -105,6 +107,10 @@ async function main(): Promise<void> {
     ? path.resolve(process.cwd(), options.datasetOut)
     : path.resolve(process.cwd(), '.stratego-cache', `deep-dataset-${Date.now()}.json`);
 
+  logStage(
+    'setup',
+    `Hardware profile | cpu=${HARDWARE_PROFILE.logicalCpuCount} ram=${HARDWARE_PROFILE.totalMemoryGiB.toFixed(1)}GiB defaultWorkers=${HARDWARE_PROFILE.selfPlayWorkers} defaultBatch=${HARDWARE_PROFILE.deepBatchSize}`,
+  );
   logStage('setup', `Deep training pipeline | games=${options.games} difficulty=${options.difficulty} workers=${options.workers} epochs=${options.epochs}`);
   logStage('setup', `Self-play limits | maxTurns=${options.maxTurns} noCaptureDraw=${options.noCaptureDrawMoves}`);
   logStage(
@@ -156,7 +162,7 @@ async function main(): Promise<void> {
     );
   }
 
-  logStage('deep-train', 'Training deep neural net (PyTorch, CUDA if available)...');
+  logStage('deep-train', 'Training deep neural net (PyTorch, accelerator if available)...');
   const deepScriptPath = path.resolve(process.cwd(), 'scripts/stratego/train-model-deep.py');
   const pythonArgs = [
     deepScriptPath,
@@ -690,14 +696,14 @@ function printUsageAndExit(): never {
   console.log('  --difficulty <d>      medium|hard|extreme (default: hard)');
   console.log('  --max-turns <n>       Max turns per game (default: 500)');
   console.log('  --no-capture-draw <n> Draw when no capture occurs for N moves (default: 160, 0 disables)');
-  console.log('  --workers <n>         Worker processes (default: CPU cores - 1)');
+  console.log(`  --workers <n>         Worker processes (default: ${DEFAULT_OPTIONS.workers})`);
   console.log('  --progress-every <n>  Self-play progress interval (default: 20)');
   console.log('  --verbose, -v         Verbose self-play logging');
   console.log('  --trace-turns         Turn-by-turn trace logging');
   console.log('');
   console.log('Deep model options:');
   console.log('  --epochs <n>          Deep training epochs (default: 60)');
-  console.log('  --batch-size <n>      Batch size (default: 1024)');
+  console.log(`  --batch-size <n>      Batch size (default: ${DEFAULT_OPTIONS.batchSize})`);
   console.log('  --lr <n>              Learning rate (default: 0.0015)');
   console.log('  --weight-decay <n>    Weight decay (default: 0.0001)');
   console.log('  --hidden <csv>        Hidden layers, e.g. "128,64" (default: 96,48)');

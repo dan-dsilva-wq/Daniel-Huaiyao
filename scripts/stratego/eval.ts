@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
-import { cpus, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { ComputerDifficulty } from '../../lib/stratego/ai';
 import { getActiveStrategoModel, type StrategoModel } from '../../lib/stratego/ml';
+import { getStrategoHardwareProfile } from './hardware-profile';
 import {
   applySummaryToEvalAggregate,
   createEmptyEvalAggregate,
@@ -65,13 +66,15 @@ interface WorkerOutputFile {
   aggregate: EvalAggregate;
 }
 
+const HARDWARE_PROFILE = getStrategoHardwareProfile();
+
 const DEFAULT_OPTIONS: EvalOptions = {
   games: 60,
   difficulty: 'extreme',
   maxTurns: 500,
   noCaptureDrawMoves: 160,
   progressEvery: 10,
-  workers: Math.max(1, Math.min(8, cpus().length - 1)),
+  workers: HARDWARE_PROFILE.evalWorkers,
   verbose: false,
   modelPath: null,
   baselineModelPath: null,
@@ -536,7 +539,7 @@ function printUsageAndExit(): never {
   console.log('  --difficulty <d>       medium|hard|extreme search strength (default: extreme)');
   console.log('  --max-turns <n>        Max turns before draw (default: 500)');
   console.log('  --no-capture-draw <n>  Draw when no capture occurs for N moves (default: 160, 0 disables)');
-  console.log('  --workers <n>          Parallel worker processes (default: min(8, CPU cores - 1))');
+  console.log(`  --workers <n>          Parallel worker processes (default: ${DEFAULT_OPTIONS.workers})`);
   console.log('  --progress-every <n>   Print interval in games (default: 10)');
   console.log('  --model <path>         Candidate model JSON path (default: lib/stratego/trained-model.json)');
   console.log('  --baseline-model <p>   Optional baseline model path (default: heuristic-only baseline)');

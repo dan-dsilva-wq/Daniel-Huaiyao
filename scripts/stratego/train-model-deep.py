@@ -13,8 +13,16 @@ try:
     from torch import nn
     from torch.utils.data import DataLoader, TensorDataset
 except Exception:
-    print("PyTorch is required. Install with: pip install torch", flush=True)
+    print(
+        "PyTorch is required. Install with: pip install torch (and optionally pip install torch-directml for AMD GPU acceleration on Windows)",
+        flush=True,
+    )
     raise
+
+try:
+    import torch_directml  # type: ignore
+except Exception:
+    torch_directml = None
 
 
 class StrategoValueNet(nn.Module):
@@ -44,7 +52,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", required=True, help="Path to JSON dataset from train-model.ts --dataset-out")
     parser.add_argument("--out", default="lib/stratego/trained-model.json", help="Output model JSON path")
     parser.add_argument("--epochs", type=int, default=60, help="Epoch count")
-    parser.add_argument("--batch-size", type=int, default=1024, help="Batch size")
+    parser.add_argument(
+        "--batch-size",
+        default="auto",
+        help="Batch size (positive integer or 'auto', default: auto)",
+    )
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="Training device: auto|cuda|mps|directml|cpu (default: auto)",
+    )
+    parser.add_argument(
+        "--loader-workers",
+        default="auto",
+        help="DataLoader workers (non-negative integer or 'auto', default: auto)",
+    )
+    parser.add_argument(
+        "--prefetch-factor",
+        type=int,
+        default=2,
+        help="DataLoader prefetch factor when loader workers > 0 (default: 2)",
+    )
     parser.add_argument("--lr", type=float, default=0.0015, help="Learning rate")
     parser.add_argument("--weight-decay", type=float, default=0.0001, help="AdamW weight decay")
     parser.add_argument("--hidden", default="96,48", help="Comma-separated hidden layer sizes")
@@ -108,6 +136,109 @@ def parse_hidden_layers(value: str) -> List[int]:
     return hidden
 
 
+def parse_positive_int(raw: str, flag: str) -> int:
+    try:
+        parsed = int(raw)
+    except Exception as error:
+        raise ValueError(f"Invalid value for {flag}: {raw}") from error
+    if parsed <= 0:
+        raise ValueError(f"Invalid value for {flag}: {raw}")
+    return parsed
+
+
+def parse_non_negative_int(raw: str, flag: str) -> int:
+    try:
+        parsed = int(raw)
+    except Exception as error:
+        raise ValueError(f"Invalid value for {flag}: {raw}") from error
+    if parsed < 0:
+        raise ValueError(f"Invalid value for {flag}: {raw}")
+    return parsed
+
+
+def resolve_device(raw_value: str) -> Tuple[Any, str]:
+    requested = raw_value.strip().lower()
+    if requested not in {"auto", "cuda", "mps", "directml", "cpu"}:
+        raise ValueError(f"Invalid --device value: {raw_value}")
+
+    if requested in {"auto", "cuda"} and torch.cuda.is_available():
+        return torch.device("cuda"), "cuda"
+    if requested == "cuda":
+        raise ValueError("--device cuda requested, but CUDA is not available")
+
+    mps_backend = getattr(getattr(torch, "backends", None), "mps", None)
+    mps_available = bool(mps_backend and torch.backends.mps.is_available())
+    if requested in {"auto", "mps"} and mps_available:
+        return torch.device("mps"), "mps"
+    if requested == "mps":
+        raise ValueError("--device mps requested, but MPS is not available")
+
+    if requested in {"auto", "directml"} and torch_directml is not None:
+        try:
+            device_count = getattr(torch_directml, "device_count", None)
+            if callable(device_count) and int(device_count()) <= 0:
+                raise ValueError("no DirectML devices detected")
+            return torch_directml.device(), "directml"
+        except Exception as error:
+            if requested == "directml":
+                raise ValueError(f"--device directml requested, but unavailable: {error}") from error
+
+    if requested == "directml":
+        raise ValueError("--device directml requested, but torch-directml is not installed")
+
+    return torch.device("cpu"), "cpu"
+
+
+def suggest_cuda_batch_size() -> int:
+    try:
+        props = torch.cuda.get_device_properties(0)
+        total_vram_gib = float(props.total_memory) / (1024 ** 3)
+    except Exception:
+        return 2048
+
+    if total_vram_gib >= 20:
+        return 8192
+    if total_vram_gib >= 12:
+        return 4096
+    if total_vram_gib >= 8:
+        return 2048
+    if total_vram_gib >= 6:
+        return 1024
+    return 512
+
+
+def resolve_batch_size(raw_value: str, device_label: str, train_sample_count: int) -> int:
+    raw = raw_value.strip().lower()
+    max_batch = max(1, train_sample_count)
+    if raw != "auto":
+        return min(parse_positive_int(raw, "--batch-size"), max_batch)
+
+    cpu_count = max(1, os.cpu_count() or 1)
+    if device_label == "cuda":
+        suggested = suggest_cuda_batch_size()
+    elif device_label in {"mps", "directml"}:
+        suggested = 2048
+    elif cpu_count >= 12:
+        suggested = 2048
+    elif cpu_count >= 8:
+        suggested = 1024
+    else:
+        suggested = 512
+
+    return min(suggested, max_batch)
+
+
+def resolve_loader_workers(raw_value: str, device_label: str) -> int:
+    raw = raw_value.strip().lower()
+    if raw != "auto":
+        return parse_non_negative_int(raw, "--loader-workers")
+
+    cpu_count = max(1, os.cpu_count() or 1)
+    if device_label in {"cuda", "mps", "directml"}:
+        return min(8, max(1, cpu_count // 2))
+    return 0
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
@@ -115,7 +246,7 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def compute_metrics(model: nn.Module, x: torch.Tensor, y: torch.Tensor, device: torch.device):
+def compute_metrics(model: nn.Module, x: torch.Tensor, y: torch.Tensor, device: Any):
     model.eval()
     with torch.no_grad():
         predictions = model(x.to(device)).cpu().squeeze(1)
@@ -193,7 +324,9 @@ def build_output_payload(
     sample_count: int,
     epochs_completed: int,
     args: argparse.Namespace,
-    device: torch.device,
+    device_label: str,
+    resolved_batch_size: int,
+    loader_workers: int,
 ) -> Dict[str, Any]:
     exported_layers = []
     model_layers = linear_layers(model)
@@ -226,11 +359,12 @@ def build_output_payload(
             "epochs": int(epochs_completed),
             "difficulty": difficulty,
             "framework": "pytorch",
-            "device": device.type,
-            "batchSize": int(args.batch_size),
+            "device": device_label,
+            "batchSize": int(resolved_batch_size),
             "learningRate": float(args.lr),
             "hiddenLayers": hidden_layers,
             "workers": int(meta.get("workers", 1)),
+            "loaderWorkers": int(loader_workers),
         },
     }
 
@@ -244,7 +378,9 @@ def write_exported_model(
     sample_count: int,
     epochs_completed: int,
     args: argparse.Namespace,
-    device: torch.device,
+    device_label: str,
+    resolved_batch_size: int,
+    loader_workers: int,
 ) -> None:
     ensure_parent_dir(out_path)
     payload = build_output_payload(
@@ -255,7 +391,9 @@ def write_exported_model(
         sample_count=sample_count,
         epochs_completed=epochs_completed,
         args=args,
-        device=device,
+        device_label=device_label,
+        resolved_batch_size=resolved_batch_size,
+        loader_workers=loader_workers,
     )
     with open(out_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
@@ -362,13 +500,16 @@ def load_checkpoint(
     optimizer: torch.optim.Optimizer,
     feature_names: List[str],
     hidden_layers: List[int],
-    device: torch.device,
+    device: Any,
 ) -> Tuple[int, bool]:
     if not os.path.exists(checkpoint_path):
         return 1, False
 
     try:
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        map_location: Any = device
+        if isinstance(device, torch.device) and device.type not in {"cpu", "cuda", "mps"}:
+            map_location = "cpu"
+        checkpoint = torch.load(checkpoint_path, map_location=map_location)
     except Exception as error:
         print(f"[deep:resume] failed to read checkpoint ({error}), starting from scratch", flush=True)
         return 1, False
@@ -410,6 +551,8 @@ def main() -> None:
     args = parse_args()
     if args.save_every <= 0:
         raise ValueError("--save-every must be a positive integer")
+    if args.prefetch_factor <= 0:
+        raise ValueError("--prefetch-factor must be a positive integer")
     if args.early_stop_patience < 0:
         raise ValueError("--early-stop-patience must be >= 0")
     if args.early_stop_min_delta < 0:
@@ -420,6 +563,10 @@ def main() -> None:
     run_id = f"deep-{int(time.time() * 1000)}-{os.getpid()}"
     hidden_layers = parse_hidden_layers(args.hidden)
     set_seed(args.seed)
+    try:
+        torch.set_float32_matmul_precision("high")
+    except Exception:
+        pass
 
     with open(args.dataset, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -450,11 +597,24 @@ def main() -> None:
     x_val = x_data[val_indices]
     y_val = y_data[val_indices]
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device, device_label = resolve_device(args.device)
+    resolved_batch_size = resolve_batch_size(str(args.batch_size), device_label, int(x_train.shape[0]))
+    loader_workers = resolve_loader_workers(str(args.loader_workers), device_label)
+    loader_kwargs: Dict[str, Any] = {
+        "batch_size": resolved_batch_size,
+        "shuffle": True,
+        "num_workers": loader_workers,
+    }
+    if loader_workers > 0:
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = int(args.prefetch_factor)
+    if device_label == "cuda":
+        loader_kwargs["pin_memory"] = True
+
     model = StrategoValueNet(len(feature_names), hidden_layers).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     criterion = nn.MSELoss()
-    loader = DataLoader(TensorDataset(x_train, y_train), batch_size=args.batch_size, shuffle=True)
+    loader = DataLoader(TensorDataset(x_train, y_train), **loader_kwargs)
     output_path = os.path.abspath(args.out)
     checkpoint_path = os.path.abspath(args.checkpoint)
     metrics_path = os.path.abspath(args.metrics_log)
@@ -496,8 +656,9 @@ def main() -> None:
 
     print(
         (
-            f"[deep:setup] device={device.type} samples={sample_count} train={x_train.shape[0]} "
+            f"[deep:setup] device={device_label} samples={sample_count} train={x_train.shape[0]} "
             f"val={x_val.shape[0]} hidden={hidden_layers} epochs={args.epochs} start_epoch={start_epoch} "
+            f"batch_size={resolved_batch_size} loader_workers={loader_workers} prefetch_factor={args.prefetch_factor if loader_workers > 0 else 0} "
             f"resume={'on' if args.resume else 'off'} warm_start={'on' if args.warm_start else 'off'} "
             f"loaded_checkpoint={'yes' if resumed_from_checkpoint else 'no'} loaded_weights={'yes' if warm_started else 'no'} "
             f"early_stop_patience={args.early_stop_patience} early_stop_min_delta={args.early_stop_min_delta} "
@@ -516,18 +677,21 @@ def main() -> None:
                 "difficulty": str(meta.get("difficulty", "mixed")),
                 "workers": int(meta.get("workers", 1)),
                 "epochs": int(args.epochs),
-                "batchSize": int(args.batch_size),
+                "batchSize": int(resolved_batch_size),
+                "loaderWorkers": int(loader_workers),
+                "prefetchFactor": int(args.prefetch_factor if loader_workers > 0 else 0),
                 "learningRate": float(args.lr),
                 "weightDecay": float(args.weight_decay),
                 "hiddenLayers": hidden_layers,
                 "resume": bool(args.resume),
                 "warmStart": bool(args.warm_start),
                 "checkpoint": checkpoint_path,
+                "device": device_label,
                 "earlyStopPatience": int(args.early_stop_patience),
                 "earlyStopMinDelta": float(args.early_stop_min_delta),
                 "earlyStopMinEpochs": int(args.early_stop_min_epochs),
             },
-            "device": device.type,
+            "device": device_label,
             "sampleCount": int(sample_count),
             "resumedFromCheckpoint": resumed_from_checkpoint,
             "warmStarted": warm_started,
@@ -588,7 +752,9 @@ def main() -> None:
                 sample_count=sample_count,
                 epochs_completed=max(last_epoch_with_updates, last_completed_epoch),
                 args=args,
-                device=device,
+                device_label=device_label,
+                resolved_batch_size=resolved_batch_size,
+                loader_workers=loader_workers,
             )
             print(
                 f"[deep:interrupt] checkpoint saved to {checkpoint_path}; partial model exported to {output_path}",
@@ -703,7 +869,9 @@ def main() -> None:
         sample_count=sample_count,
         epochs_completed=selected_model_epoch,
         args=args,
-        device=device,
+        device_label=device_label,
+        resolved_batch_size=resolved_batch_size,
+        loader_workers=loader_workers,
     )
 
     if os.path.exists(checkpoint_path):

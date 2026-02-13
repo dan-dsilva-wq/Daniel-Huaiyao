@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { getStrategoHardwareProfile } from './hardware-profile';
 
 interface ParsedArgs {
   trainArgs: string[];
@@ -19,15 +21,48 @@ const DEFAULT_EVAL_ARGS = [
   '10',
 ];
 
+const HARDWARE_PROFILE = getStrategoHardwareProfile();
+
+const DEFAULT_DEEP_TRAIN_ARGS = [
+  '--games',
+  '300',
+  '--difficulty',
+  'extreme',
+  '--workers',
+  String(HARDWARE_PROFILE.selfPlayWorkers),
+  '--epochs',
+  '60',
+  '--batch-size',
+  String(HARDWARE_PROFILE.deepBatchSize),
+  '--save-every',
+  '1',
+  '--resume',
+  '--warm-start',
+  '--replay-max-runs',
+  '6',
+  '--replay-max-samples',
+  '400000',
+  '--no-capture-draw',
+  '160',
+  '--early-stop-patience',
+  '6',
+  '--early-stop-min-delta',
+  '0.002',
+  '--early-stop-min-epochs',
+  '10',
+  '--verbose',
+];
+
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
   if (parsed.help) {
     printHelpAndExit();
   }
 
-  const npmCmd = resolveNpmCommand();
-  await runCommand(npmCmd, ['run', 'stratego:train:deep', '--', ...parsed.trainArgs]);
-  await runCommand(npmCmd, ['run', 'stratego:eval', '--', ...DEFAULT_EVAL_ARGS, ...parsed.evalArgs]);
+  const trainDeepScript = resolveScriptPath('scripts/stratego/train-deep.ts');
+  const evalScript = resolveScriptPath('scripts/stratego/eval.ts');
+  await runTsxScript(trainDeepScript, [...DEFAULT_DEEP_TRAIN_ARGS, ...parsed.trainArgs]);
+  await runTsxScript(evalScript, [...DEFAULT_EVAL_ARGS, ...parsed.evalArgs]);
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -87,16 +122,23 @@ function runCommand(command: string, args: string[]): Promise<void> {
   });
 }
 
-function resolveNpmCommand(): string {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+async function runTsxScript(scriptPath: string, args: string[]): Promise<void> {
+  await runCommand(process.execPath, ['--import', 'tsx', scriptPath, ...args]);
+}
+
+function resolveScriptPath(relativePath: string): string {
+  return path.resolve(process.cwd(), relativePath);
 }
 
 function printHelpAndExit(): never {
   console.log('Usage: npm run stratego:train:deep:eval -- [train args] [eval args]');
   console.log('');
   console.log('Behavior:');
-  console.log('  1) Runs stratego:train:deep with train args');
+  console.log('  1) Runs train-deep.ts with stratego:train:deep preset args, then your train overrides');
   console.log('  2) Runs stratego:eval with default eval args, plus eval overrides');
+  console.log('');
+  console.log('Train preset defaults:');
+  console.log(`  ${DEFAULT_DEEP_TRAIN_ARGS.join(' ')}`);
   console.log('');
   console.log('Train args:');
   console.log('  Any non --eval-* args are forwarded to stratego:train:deep');
