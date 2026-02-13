@@ -1,18 +1,23 @@
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { cpus, tmpdir } from 'node:os';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
+import type { ComputerDifficulty } from '../../lib/stratego/ai';
+import { getActiveStrategoModel, type StrategoModel } from '../../lib/stratego/ml';
 import {
-  applyStrategoMove,
-  chooseStrategoMoveForColor,
-  type ComputerDifficulty,
-  type LocalStrategoState,
-} from '../../lib/stratego/ai';
-import { generateRandomSetup } from '../../lib/stratego/constants';
-import { getActiveStrategoModel, parseStrategoModel, type StrategoModel } from '../../lib/stratego/ml';
-import type { Piece, TeamColor, WinReason } from '../../lib/stratego/types';
-
-type EvalSource = 'heuristic' | 'model';
-type TerminalReason = WinReason | 'max_turns' | 'no_capture_streak';
+  applySummaryToEvalAggregate,
+  createEmptyEvalAggregate,
+  describeStrategoModel,
+  loadStrategoModelFromPath,
+  mergeEvalAggregates,
+  runEvalBatch,
+  summarizeStrategoModel,
+  type EvalAggregate,
+  type EvalGameSummary,
+  type EvalSource,
+  type EvalTerminalReason,
+} from './eval-core';
 
 interface EvalOptions {
   games: number;
@@ -20,32 +25,44 @@ interface EvalOptions {
   maxTurns: number;
   noCaptureDrawMoves: number;
   progressEvery: number;
+  workers: number;
   verbose: boolean;
   modelPath: string | null;
   baselineModelPath: string | null;
   metricsLogPath: string;
 }
 
-interface GameSummary {
+interface WorkerAssignment {
+  workerId: number;
+  startGame: number;
+  games: number;
+  outPath: string;
+}
+
+interface WorkerProgressPayload {
+  workerId: number;
   gameIndex: number;
-  candidateColor: TeamColor;
+  candidateColor: 'red' | 'blue';
   turnsPlayed: number;
-  winner: TeamColor | null;
-  terminalReason: TerminalReason;
+  winner: 'red' | 'blue' | null;
+  terminalReason: EvalTerminalReason;
   captureCount: number;
   longestNoCaptureStreak: number;
   durationMs: number;
 }
 
-interface EvalAggregate {
+interface WorkerDonePayload {
+  workerId: number;
+  outPath: string;
   games: number;
-  candidateWins: number;
-  baselineWins: number;
-  draws: number;
-  totalTurns: number;
-  totalCaptures: number;
-  maxTurnsDraws: number;
-  noCaptureDraws: number;
+}
+
+interface WorkerOutputFile {
+  workerId: number;
+  startGame: number;
+  games: number;
+  summaries: EvalGameSummary[];
+  aggregate: EvalAggregate;
 }
 
 const DEFAULT_OPTIONS: EvalOptions = {
@@ -54,6 +71,7 @@ const DEFAULT_OPTIONS: EvalOptions = {
   maxTurns: 500,
   noCaptureDrawMoves: 160,
   progressEvery: 10,
+  workers: Math.max(1, Math.min(8, cpus().length - 1)),
   verbose: false,
   modelPath: null,
   baselineModelPath: null,
@@ -63,10 +81,10 @@ const DEFAULT_OPTIONS: EvalOptions = {
 async function main(): Promise<void> {
   const options = parseOptions(process.argv.slice(2));
   const candidateModel = options.modelPath
-    ? loadModelFromPath(options.modelPath)
+    ? loadStrategoModelFromPath(options.modelPath)
     : getActiveStrategoModel();
   const baselineModel = options.baselineModelPath
-    ? loadModelFromPath(options.baselineModelPath)
+    ? loadStrategoModelFromPath(options.baselineModelPath)
     : null;
   const baselineSource: EvalSource = baselineModel ? 'model' : 'heuristic';
   const logger = createMetricsLogger(options.metricsLogPath);
@@ -78,15 +96,16 @@ async function main(): Promise<void> {
   const baselineModelPath = options.baselineModelPath
     ? path.resolve(process.cwd(), options.baselineModelPath)
     : null;
+  const mode = options.workers > 1 ? 'parallel' : 'single';
 
   console.log(
-    `[eval:setup] games=${options.games} difficulty=${options.difficulty} maxTurns=${options.maxTurns} noCaptureDraw=${options.noCaptureDrawMoves} baseline=${baselineSource}`,
+    `[eval:setup] games=${options.games} difficulty=${options.difficulty} workers=${options.workers} mode=${mode} maxTurns=${options.maxTurns} noCaptureDraw=${options.noCaptureDrawMoves} baseline=${baselineSource}`,
   );
   console.log(
-    `[eval:setup] candidate=${describeModel(candidateModel)} path=${candidateModelPath}`,
+    `[eval:setup] candidate=${describeStrategoModel(candidateModel)} path=${candidateModelPath}`,
   );
   if (baselineModelPath) {
-    console.log(`[eval:setup] baseline=${describeModel(baselineModel)} path=${baselineModelPath}`);
+    console.log(`[eval:setup] baseline=${describeStrategoModel(baselineModel)} path=${baselineModelPath}`);
   } else {
     console.log('[eval:setup] baseline=heuristic-only (model blend disabled)');
   }
@@ -95,40 +114,26 @@ async function main(): Promise<void> {
     options: {
       games: options.games,
       difficulty: options.difficulty,
+      workers: options.workers,
       maxTurns: options.maxTurns,
       noCaptureDrawMoves: options.noCaptureDrawMoves,
       progressEvery: options.progressEvery,
       candidateModelPath,
       baselineModelPath,
       baselineSource,
+      mode,
     },
-    candidateModel: summarizeModel(candidateModel),
-    baselineModel: baselineModel ? summarizeModel(baselineModel) : null,
+    candidateModel: summarizeStrategoModel(candidateModel),
+    baselineModel: baselineModel ? summarizeStrategoModel(baselineModel) : null,
     pid: process.pid,
   });
 
-  const aggregate: EvalAggregate = {
-    games: 0,
-    candidateWins: 0,
-    baselineWins: 0,
-    draws: 0,
-    totalTurns: 0,
-    totalCaptures: 0,
-    maxTurnsDraws: 0,
-    noCaptureDraws: 0,
-  };
-
-  for (let gameIndex = 1; gameIndex <= options.games; gameIndex += 1) {
-    const summary = runEvalGame(gameIndex, {
-      difficulty: options.difficulty,
-      maxTurns: options.maxTurns,
-      noCaptureDrawMoves: options.noCaptureDrawMoves,
-      candidateModel,
-      baselineModel,
-    });
-    applySummary(aggregate, summary);
-    maybeLogProgress(options, aggregate, summary, runStarted);
-  }
+  const aggregate = await runEval(options, runStarted, {
+    candidateModel,
+    baselineModel,
+    candidateModelPath: options.modelPath ? candidateModelPath : null,
+    baselineModelPath: options.baselineModelPath ? baselineModelPath : null,
+  });
 
   const elapsedMs = performance.now() - runStarted;
   const candidateScore = (aggregate.candidateWins + aggregate.draws * 0.5) / aggregate.games;
@@ -142,6 +147,7 @@ async function main(): Promise<void> {
   logger.log('benchmark_result', {
     games: aggregate.games,
     difficulty: options.difficulty,
+    workers: options.workers,
     maxTurns: options.maxTurns,
     noCaptureDrawMoves: options.noCaptureDrawMoves,
     candidateWins: aggregate.candidateWins,
@@ -156,8 +162,8 @@ async function main(): Promise<void> {
     maxTurnsDraws: aggregate.maxTurnsDraws,
     noCaptureDraws: aggregate.noCaptureDraws,
     baselineSource,
-    candidateModel: summarizeModel(candidateModel),
-    baselineModel: baselineModel ? summarizeModel(baselineModel) : null,
+    candidateModel: summarizeStrategoModel(candidateModel),
+    baselineModel: baselineModel ? summarizeStrategoModel(baselineModel) : null,
     elapsedSeconds: Number((elapsedMs / 1000).toFixed(3)),
   });
 
@@ -172,163 +178,235 @@ async function main(): Promise<void> {
   });
 }
 
-function runEvalGame(
-  gameIndex: number,
-  options: {
-    difficulty: ComputerDifficulty;
-    maxTurns: number;
-    noCaptureDrawMoves: number;
+async function runEval(
+  options: EvalOptions,
+  startedAtMs: number,
+  models: {
     candidateModel: StrategoModel;
     baselineModel: StrategoModel | null;
+    candidateModelPath: string | null;
+    baselineModelPath: string | null;
   },
-): GameSummary {
-  const startedAt = performance.now();
-  let state = createEvalState(gameIndex);
-  let terminalReason: TerminalReason = 'max_turns';
-  let captureCount = 0;
-  let noCaptureStreak = 0;
-  let longestNoCaptureStreak = 0;
-  const candidateColor: TeamColor = gameIndex % 2 === 0 ? 'blue' : 'red';
+): Promise<EvalAggregate> {
+  if (options.workers <= 1) {
+    return runEvalSingleProcess(options, startedAtMs, models.candidateModel, models.baselineModel);
+  }
+  return runEvalParallel(options, startedAtMs, models.candidateModelPath, models.baselineModelPath);
+}
 
-  while (state.status === 'playing' && state.turnNumber <= options.maxTurns) {
-    const activeColor = state.currentTurn;
-    const candidateTurn = activeColor === candidateColor;
-    const chosenMove = chooseStrategoMoveForColor(
-      state,
-      activeColor,
-      options.difficulty,
-      candidateTurn
-        ? { modelOverride: options.candidateModel }
-        : options.baselineModel
-          ? { modelOverride: options.baselineModel }
-          : { disableModelBlend: true },
+function runEvalSingleProcess(
+  options: EvalOptions,
+  startedAtMs: number,
+  candidateModel: StrategoModel,
+  baselineModel: StrategoModel | null,
+): EvalAggregate {
+  const aggregate = createEmptyEvalAggregate();
+  runEvalBatch(
+    1,
+    options.games,
+    {
+      difficulty: options.difficulty,
+      maxTurns: options.maxTurns,
+      noCaptureDrawMoves: options.noCaptureDrawMoves,
+      candidateModel,
+      baselineModel,
+    },
+    (summary) => {
+      applySummaryToEvalAggregate(aggregate, summary);
+      maybeLogProgress(options, aggregate, summary, startedAtMs);
+    },
+  );
+  return aggregate;
+}
+
+async function runEvalParallel(
+  options: EvalOptions,
+  startedAtMs: number,
+  candidateModelPath: string | null,
+  baselineModelPath: string | null,
+): Promise<EvalAggregate> {
+  const workerCount = Math.min(options.workers, options.games);
+  const workerScriptPath = path.resolve(process.cwd(), 'scripts/stratego/eval-worker.ts');
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'stratego-eval-'));
+  const assignments = buildWorkerAssignments(options.games, workerCount, tempDir);
+  const progressAggregate = createEmptyEvalAggregate();
+
+  try {
+    const workerResults = await Promise.all(
+      assignments.map((assignment) => runEvalWorker(
+        workerScriptPath,
+        assignment,
+        options,
+        candidateModelPath,
+        baselineModelPath,
+        (summary, workerId) => {
+          applySummaryToEvalAggregate(progressAggregate, summary);
+          maybeLogProgress(options, progressAggregate, summary, startedAtMs, workerId);
+        },
+      )),
     );
 
-    if (!chosenMove) {
-      state = finishNoMovesState(state, activeColor);
-      terminalReason = 'no_moves';
-      break;
+    const aggregate = createEmptyEvalAggregate();
+    for (const result of workerResults) {
+      mergeEvalAggregates(aggregate, result.aggregate);
+    }
+    return aggregate;
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function runEvalWorker(
+  workerScriptPath: string,
+  assignment: WorkerAssignment,
+  options: EvalOptions,
+  candidateModelPath: string | null,
+  baselineModelPath: string | null,
+  onProgress: (summary: EvalGameSummary, workerId: number) => void,
+): Promise<WorkerOutputFile> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '--import',
+      'tsx',
+      workerScriptPath,
+      '--worker-id',
+      String(assignment.workerId),
+      '--start-game',
+      String(assignment.startGame),
+      '--games',
+      String(assignment.games),
+      '--difficulty',
+      options.difficulty,
+      '--max-turns',
+      String(options.maxTurns),
+      '--no-capture-draw',
+      String(options.noCaptureDrawMoves),
+      '--out',
+      assignment.outPath,
+    ];
+    if (candidateModelPath) {
+      args.push('--candidate-model', candidateModelPath);
+    }
+    if (baselineModelPath) {
+      args.push('--baseline-model', baselineModelPath);
     }
 
-    const result = applyStrategoMove(state, activeColor, {
-      pieceId: chosenMove.pieceId,
-      toRow: chosenMove.toRow,
-      toCol: chosenMove.toCol,
+    const child = spawn(process.execPath, args, {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    state = result.state;
 
-    if (result.combatResult) {
-      captureCount += 1;
-      noCaptureStreak = 0;
-    } else {
-      noCaptureStreak += 1;
-      longestNoCaptureStreak = Math.max(longestNoCaptureStreak, noCaptureStreak);
-    }
+    let stdoutBuffer = '';
+    let stderrBuffer = '';
+    let donePayload: WorkerDonePayload | null = null;
 
-    if (options.noCaptureDrawMoves > 0 && noCaptureStreak >= options.noCaptureDrawMoves) {
-      terminalReason = 'no_capture_streak';
-      state = {
-        ...state,
-        status: 'finished',
-        winner: null,
-        winReason: null,
-        updatedAt: new Date().toISOString(),
-      };
-      break;
-    }
+    const handleLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
 
-    if (state.status === 'finished') {
-      terminalReason = state.winReason ?? 'max_turns';
-      break;
-    }
-  }
+      if (trimmed.startsWith('@@PROGRESS ')) {
+        const payload = JSON.parse(trimmed.slice('@@PROGRESS '.length)) as WorkerProgressPayload;
+        const summary: EvalGameSummary = {
+          gameIndex: payload.gameIndex,
+          candidateColor: payload.candidateColor,
+          turnsPlayed: payload.turnsPlayed,
+          winner: payload.winner,
+          terminalReason: payload.terminalReason,
+          captureCount: payload.captureCount,
+          longestNoCaptureStreak: payload.longestNoCaptureStreak,
+          durationMs: payload.durationMs,
+        };
+        onProgress(summary, payload.workerId);
+        return;
+      }
 
-  if (state.status === 'playing') {
-    terminalReason = 'max_turns';
-    state = {
-      ...state,
-      status: 'finished',
-      winner: null,
-      winReason: null,
-      updatedAt: new Date().toISOString(),
+      if (trimmed.startsWith('@@DONE ')) {
+        donePayload = JSON.parse(trimmed.slice('@@DONE '.length)) as WorkerDonePayload;
+        return;
+      }
+
+      if (options.verbose) {
+        console.log(`[eval-worker:${assignment.workerId}] ${trimmed}`);
+      }
     };
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBuffer += chunk.toString('utf8');
+      stdoutBuffer = processBufferedLines(stdoutBuffer, handleLine);
+    });
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf8');
+      stderrBuffer += text;
+      if (options.verbose) {
+        process.stderr.write(`[eval-worker:${assignment.workerId}] ${text}`);
+      }
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (stdoutBuffer.trim().length > 0) {
+        handleLine(stdoutBuffer);
+      }
+
+      if (code !== 0) {
+        reject(
+          new Error(
+            `Eval worker ${assignment.workerId} failed with code ${code}.\n${stderrBuffer.trim()}`,
+          ),
+        );
+        return;
+      }
+
+      if (!donePayload) {
+        reject(new Error(`Eval worker ${assignment.workerId} exited without @@DONE payload.`));
+        return;
+      }
+
+      if (donePayload.outPath !== assignment.outPath) {
+        reject(new Error(`Eval worker ${assignment.workerId} returned unexpected output path.`));
+        return;
+      }
+
+      const raw = readFileSync(assignment.outPath, 'utf8');
+      const parsed = JSON.parse(raw) as WorkerOutputFile;
+      resolve(parsed);
+    });
+  });
+}
+
+function buildWorkerAssignments(
+  games: number,
+  workerCount: number,
+  tempDir: string,
+): WorkerAssignment[] {
+  const assignments: WorkerAssignment[] = [];
+  const baseGames = Math.floor(games / workerCount);
+  const extra = games % workerCount;
+  let nextStartGame = 1;
+
+  for (let workerId = 1; workerId <= workerCount; workerId += 1) {
+    const batchSize = baseGames + (workerId <= extra ? 1 : 0);
+    if (batchSize <= 0) continue;
+
+    assignments.push({
+      workerId,
+      startGame: nextStartGame,
+      games: batchSize,
+      outPath: path.join(tempDir, `eval-worker-${workerId}.json`),
+    });
+    nextStartGame += batchSize;
   }
 
-  return {
-    gameIndex,
-    candidateColor,
-    turnsPlayed: state.moveHistory.length,
-    winner: state.winner,
-    terminalReason,
-    captureCount,
-    longestNoCaptureStreak,
-    durationMs: performance.now() - startedAt,
-  };
-}
-
-function createEvalState(gameIndex: number): LocalStrategoState {
-  const now = new Date().toISOString();
-  return {
-    id: `eval-${Date.now()}-${gameIndex}`,
-    status: 'playing',
-    currentTurn: 'red',
-    turnNumber: 1,
-    redPieces: createSetupPieces('red', gameIndex),
-    bluePieces: createSetupPieces('blue', gameIndex),
-    redCaptured: [],
-    blueCaptured: [],
-    moveHistory: [],
-    winner: null,
-    winReason: null,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function createSetupPieces(color: TeamColor, gameIndex: number): Piece[] {
-  return generateRandomSetup(color).map((piece, index) => ({
-    id: `${color}_eval_${gameIndex}_${index}`,
-    rank: piece.rank,
-    row: piece.row,
-    col: piece.col,
-    revealed: false,
-  }));
-}
-
-function finishNoMovesState(state: LocalStrategoState, activeColor: TeamColor): LocalStrategoState {
-  const winner = activeColor === 'red' ? 'blue' : 'red';
-  return {
-    ...state,
-    status: 'finished',
-    winner,
-    winReason: 'no_moves',
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function applySummary(aggregate: EvalAggregate, summary: GameSummary): void {
-  aggregate.games += 1;
-  aggregate.totalTurns += summary.turnsPlayed;
-  aggregate.totalCaptures += summary.captureCount;
-  if (summary.terminalReason === 'max_turns') aggregate.maxTurnsDraws += 1;
-  if (summary.terminalReason === 'no_capture_streak') aggregate.noCaptureDraws += 1;
-
-  if (!summary.winner) {
-    aggregate.draws += 1;
-    return;
-  }
-  if (summary.winner === summary.candidateColor) {
-    aggregate.candidateWins += 1;
-  } else {
-    aggregate.baselineWins += 1;
-  }
+  return assignments;
 }
 
 function maybeLogProgress(
   options: EvalOptions,
   aggregate: EvalAggregate,
-  summary: GameSummary,
+  summary: EvalGameSummary,
   startedAtMs: number,
+  workerId?: number,
 ): void {
   const shouldLog = options.verbose
     || aggregate.games % options.progressEvery === 0
@@ -339,46 +417,22 @@ function maybeLogProgress(
   const etaMs = estimateRemainingMs(elapsedMs, aggregate.games, options.games);
   const winnerLabel = summary.winner ?? 'draw';
   const score = aggregate.candidateWins + aggregate.draws * 0.5;
+  const workerLabel = workerId ? ` worker=${workerId}` : '';
+  const prefix = options.verbose ? '[eval:game]' : '[eval]';
   console.log(
-    `[eval] ${aggregate.games}/${options.games} game=${summary.gameIndex} candidate=${summary.candidateColor} winner=${winnerLabel} reason=${summary.terminalReason} turns=${summary.turnsPlayed} captures=${summary.captureCount} max_no_cap=${summary.longestNoCaptureStreak} score=${score.toFixed(1)}/${aggregate.games} W/L/D=${aggregate.candidateWins}/${aggregate.baselineWins}/${aggregate.draws} elapsed=${formatDuration(elapsedMs)} eta=${formatDuration(etaMs)}`,
+    `${prefix} ${aggregate.games}/${options.games}${workerLabel} game=${summary.gameIndex} candidate=${summary.candidateColor} winner=${winnerLabel} reason=${summary.terminalReason} turns=${summary.turnsPlayed} captures=${summary.captureCount} max_no_cap=${summary.longestNoCaptureStreak} score=${score.toFixed(1)}/${aggregate.games} W/L/D=${aggregate.candidateWins}/${aggregate.baselineWins}/${aggregate.draws} elapsed=${formatDuration(elapsedMs)} eta=${formatDuration(etaMs)}`,
   );
 }
 
-function loadModelFromPath(filePath: string): StrategoModel {
-  const absolutePath = path.resolve(process.cwd(), filePath);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(absolutePath, 'utf8')) as unknown;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Unable to read model from ${absolutePath}: ${message}`);
+function processBufferedLines(buffer: string, onLine: (line: string) => void): string {
+  let nextNewline = buffer.indexOf('\n');
+  while (nextNewline !== -1) {
+    const line = buffer.slice(0, nextNewline);
+    onLine(line);
+    buffer = buffer.slice(nextNewline + 1);
+    nextNewline = buffer.indexOf('\n');
   }
-
-  const model = parseStrategoModel(parsed);
-  if (!model) {
-    throw new Error(`Invalid model format: ${absolutePath}`);
-  }
-  return model;
-}
-
-function describeModel(model: StrategoModel | null): string {
-  if (!model) return 'none';
-  const kind = model.kind ?? 'linear';
-  const samples = model.training.positionSamples;
-  return `${kind} samples=${samples} generatedAt=${model.training.generatedAt}`;
-}
-
-function summarizeModel(model: StrategoModel) {
-  return {
-    kind: model.kind ?? 'linear',
-    generatedAt: model.training.generatedAt,
-    positionSamples: model.training.positionSamples,
-    games: model.training.games,
-    epochs: model.training.epochs,
-    difficulty: model.training.difficulty,
-    framework: model.training.framework ?? null,
-    device: model.training.device ?? null,
-  };
+  return buffer;
 }
 
 function parseOptions(argv: string[]): EvalOptions {
@@ -412,6 +466,10 @@ function parseOptions(argv: string[]): EvalOptions {
         options.progressEvery = parsePositiveInt(next, arg);
         index += 1;
         break;
+      case '--workers':
+        options.workers = parsePositiveInt(next, arg);
+        index += 1;
+        break;
       case '--model':
         if (!next) throw new Error('Missing value for --model');
         options.modelPath = next;
@@ -438,6 +496,9 @@ function parseOptions(argv: string[]): EvalOptions {
 
   if (options.progressEvery > options.games) {
     options.progressEvery = options.games;
+  }
+  if (options.workers > options.games) {
+    options.workers = options.games;
   }
   return options;
 }
@@ -475,6 +536,7 @@ function printUsageAndExit(): never {
   console.log('  --difficulty <d>       medium|hard|extreme search strength (default: extreme)');
   console.log('  --max-turns <n>        Max turns before draw (default: 500)');
   console.log('  --no-capture-draw <n>  Draw when no capture occurs for N moves (default: 160, 0 disables)');
+  console.log('  --workers <n>          Parallel worker processes (default: min(8, CPU cores - 1))');
   console.log('  --progress-every <n>   Print interval in games (default: 10)');
   console.log('  --model <path>         Candidate model JSON path (default: lib/stratego/trained-model.json)');
   console.log('  --baseline-model <p>   Optional baseline model path (default: heuristic-only baseline)');

@@ -25,8 +25,9 @@ async function main(): Promise<void> {
     printHelpAndExit();
   }
 
-  await runCommand('npm', ['run', 'stratego:train:deep', '--', ...parsed.trainArgs]);
-  await runCommand('npm', ['run', 'stratego:eval', '--', ...DEFAULT_EVAL_ARGS, ...parsed.evalArgs]);
+  const npmCmd = resolveNpmCommand();
+  await runCommand(npmCmd, ['run', 'stratego:train:deep', '--', ...parsed.trainArgs]);
+  await runCommand(npmCmd, ['run', 'stratego:eval', '--', ...DEFAULT_EVAL_ARGS, ...parsed.evalArgs]);
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -68,7 +69,7 @@ function runCommand(command: string, args: string[]): Promise<void> {
     const child = spawn(command, args, {
       cwd: process.cwd(),
       stdio: 'inherit',
-      shell: process.platform === 'win32',
+      shell: false,
     });
 
     child.on('error', reject);
@@ -84,6 +85,10 @@ function runCommand(command: string, args: string[]): Promise<void> {
       reject(new Error(`${command} exited with code ${code}`));
     });
   });
+}
+
+function resolveNpmCommand(): string {
+  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
 }
 
 function printHelpAndExit(): never {

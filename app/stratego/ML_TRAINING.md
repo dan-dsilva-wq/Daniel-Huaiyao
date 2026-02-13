@@ -147,6 +147,12 @@ Run the current model against a fixed baseline (heuristic-only search):
 npm run stratego:eval -- --games 60 --difficulty extreme --max-turns 500 --no-capture-draw 160
 ```
 
+Speed up benchmark by parallelizing games:
+
+```bash
+npm run stratego:eval -- --games 60 --difficulty extreme --workers 8
+```
+
 What this logs:
 
 1. Candidate score % (`win + 0.5 * draw`) against the fixed baseline.
