@@ -2,6 +2,8 @@
   "name": "Daniel & Huaiyao",
   "short_name": "D&H",
   "description": "Fun stuff we made together",
+  "id": "/",
+  "scope": "/",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f8fafc",

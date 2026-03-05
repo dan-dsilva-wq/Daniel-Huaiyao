@@ -1,8 +1,11 @@
 // Service Worker for Daniel & Huaiyao PWA
-const CACHE_NAME = 'dh-cache-v8'; // Force refresh 2026-02-11 event planning
+const CACHE_NAME = 'dh-cache-v9'; // Force refresh 2026-03-05 iOS splash/icon fixes
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
+  '/icons/apple-touch-icon.png',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
 ];
 
 // Install event - cache static assets
@@ -44,7 +47,7 @@ self.addEventListener('fetch', (event) => {
     fetch(event.request)
       .then((response) => {
         // Only cache http/https requests (skip chrome-extension, etc.)
-        if (event.request.url.startsWith('http')) {
+        if (event.request.url.startsWith('http') && response.ok) {
           const responseClone = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseClone);
