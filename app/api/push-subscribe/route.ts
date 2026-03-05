@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-const KNOWN_USERS = new Set(['daniel', 'huaiyao']);
+import {
+  deletePushSubscription,
+  isValidTimezone,
+  normalizeKnownUser,
+  upsertPushSubscription,
+} from '@/lib/server/push';
 
 type PushSubscriptionPayload = {
   endpoint?: string;
@@ -18,14 +16,14 @@ type PushSubscriptionPayload = {
 
 export async function POST(request: NextRequest) {
   try {
-    const { subscription, userName } = await request.json();
+    const { subscription, userName, timezone } = await request.json();
 
     if (!subscription || !userName) {
       return NextResponse.json({ error: 'Missing subscription or userName' }, { status: 400 });
     }
 
-    const normalizedUserName = String(userName).toLowerCase().trim();
-    if (!KNOWN_USERS.has(normalizedUserName)) {
+    const normalizedUserName = normalizeKnownUser(userName);
+    if (!normalizedUserName) {
       return NextResponse.json(
         { error: 'Invalid userName', details: 'Expected daniel or huaiyao' },
         { status: 400 }
@@ -44,19 +42,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Upsert subscription (update if endpoint exists, insert if new)
-    const { error } = await supabase
-      .from('push_subscriptions')
-      .upsert(
-        {
-          user_name: normalizedUserName,
-          endpoint: endpoint,
-          p256dh: p256dh,
-          auth: auth,
-          last_used_at: new Date().toISOString(),
-        },
-        { onConflict: 'endpoint' }
-      );
+    const normalizedTimezone = isValidTimezone(timezone) ? timezone : null;
+    const { error } = await upsertPushSubscription({
+      userName: normalizedUserName,
+      endpoint,
+      p256dh,
+      auth,
+      timezone: normalizedTimezone,
+    });
 
     if (error) {
       console.error('Error saving subscription:', error);
@@ -81,10 +74,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Missing endpoint' }, { status: 400 });
     }
 
-    const { error } = await supabase
-      .from('push_subscriptions')
-      .delete()
-      .eq('endpoint', endpoint);
+    const { error } = await deletePushSubscription(endpoint);
 
     if (error) {
       console.error('Error removing subscription:', error);

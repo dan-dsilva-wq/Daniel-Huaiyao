@@ -1,31 +1,6 @@
 import { NextResponse } from 'next/server';
-import webpush from 'web-push';
-import { createClient } from '@supabase/supabase-js';
-
-let vapidConfigured = false;
-
-function ensureVapidConfigured(): { ok: true } | { ok: false; reason: string } {
-  if (vapidConfigured) return { ok: true };
-  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-  const privateKey = process.env.VAPID_PRIVATE_KEY;
-  if (publicKey && privateKey) {
-    webpush.setVapidDetails(
-      'mailto:notifications@daniel-huaiyao.vercel.app',
-      publicKey,
-      privateKey
-    );
-    vapidConfigured = true;
-  }
-  if (vapidConfigured) {
-    return { ok: true };
-  }
-  return { ok: false, reason: 'Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY' };
-}
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { normalizeKnownUser, sendPushToUsers } from '@/lib/server/push';
+import { getSupabaseAdmin } from '@/lib/server/supabase-admin';
 
 // Quiet hours: only send between 9 AM and 11 PM (Eastern Time)
 const QUIET_HOURS_START = 23; // 11 PM
@@ -120,13 +95,7 @@ const ACTION_APP_NAMES: Record<string, string> = {
 
 export async function POST(request: Request) {
   try {
-    const vapidStatus = ensureVapidConfigured();
-    if (!vapidStatus.ok) {
-      return NextResponse.json(
-        { error: 'Push notifications are not configured', details: vapidStatus.reason },
-        { status: 500 }
-      );
-    }
+    const supabase = getSupabaseAdmin();
 
     const { action, title, user } = await request.json() as {
       action: ActionType;
@@ -134,7 +103,7 @@ export async function POST(request: Request) {
       user: 'daniel' | 'huaiyao';
     };
 
-    if (!action || !user) {
+    if (!action || !user || !normalizeKnownUser(user)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -165,77 +134,32 @@ export async function POST(request: Request) {
     const recipient = user === 'daniel' ? 'huaiyao' : 'daniel';
     const senderName = user === 'daniel' ? 'Daniel' : 'Huaiyao';
 
-    // Get push subscriptions for the recipient
-    const { data: subscriptions, error: subError } = await supabase
-      .from('push_subscriptions')
-      .select('endpoint, p256dh, auth')
-      .eq('user_name', recipient);
-
-    if (subError) {
-      console.error('Error fetching subscriptions:', subError);
-      return NextResponse.json(
-        { error: 'Failed to fetch subscriptions', details: subError.message },
-        { status: 500 }
-      );
-    }
-
-    if (!subscriptions || subscriptions.length === 0) {
-      return NextResponse.json({
-        success: true,
-        skipped: true,
-        reason: 'No push subscriptions for recipient'
-      });
-    }
-
     // Prepare notification payload
     const notificationTitle = senderName;
     const actionMessage = ACTION_MESSAGES[action] || 'updated something';
     const message = title ? `${actionMessage}: ${title}` : actionMessage;
     const url = ACTION_URLS[action] || '/';
-
-    const payload = JSON.stringify({
+    const pushResult = await sendPushToUsers([recipient], {
       title: notificationTitle,
       body: message,
       icon: '/icons/icon-192.png',
-      url: url,
-      tag: action, // Prevents duplicate notifications
+      url,
+      tag: action,
     });
 
-    // Send to all subscriptions for this user
-    const results = await Promise.allSettled(
-      subscriptions.map(async (sub) => {
-        const pushSubscription = {
-          endpoint: sub.endpoint,
-          keys: {
-            p256dh: sub.p256dh,
-            auth: sub.auth,
-          },
-        };
-
-        try {
-          await webpush.sendNotification(pushSubscription, payload);
-          return { success: true, endpoint: sub.endpoint };
-        } catch (error: unknown) {
-          // If subscription is invalid, remove it
-          const webPushError = error as { statusCode?: number };
-          if (webPushError.statusCode === 410 || webPushError.statusCode === 404) {
-            await supabase
-              .from('push_subscriptions')
-              .delete()
-              .eq('endpoint', sub.endpoint);
-          }
-          throw error;
-        }
-      })
-    );
-
-    const successful = results.filter(r => r.status === 'fulfilled').length;
-    const failed = results.filter(r => r.status === 'rejected').length;
+    if (!pushResult.success) {
+      return NextResponse.json(
+        { error: 'Failed to send notifications', details: pushResult.reason },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      sent: successful,
-      failed: failed
+      sent: pushResult.sent,
+      failed: pushResult.failed,
+      skipped: pushResult.skipped,
+      reason: pushResult.reason,
     });
   } catch (error) {
     console.error('Notification error:', error);

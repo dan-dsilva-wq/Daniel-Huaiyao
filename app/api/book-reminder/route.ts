@@ -1,31 +1,10 @@
 import { NextResponse } from 'next/server';
-import webpush from 'web-push';
-import { createClient } from '@supabase/supabase-js';
-
-let vapidConfigured = false;
-
-function ensureVapidConfigured() {
-  if (vapidConfigured) return;
-  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-  const privateKey = process.env.VAPID_PRIVATE_KEY;
-  if (publicKey && privateKey) {
-    webpush.setVapidDetails(
-      'mailto:notifications@daniel-huaiyao.vercel.app',
-      publicKey,
-      privateKey
-    );
-    vapidConfigured = true;
-  }
-}
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { sendPushToUsers, type KnownUser } from '@/lib/server/push';
+import { getSupabaseAdmin } from '@/lib/server/supabase-admin';
 
 // This endpoint is called by a cron job daily to remind storybook contributors
 export async function GET(request: Request) {
-  ensureVapidConfigured();
+  const supabase = getSupabaseAdmin();
 
   // Verify cron secret to prevent unauthorized calls
   const authHeader = request.headers.get('authorization');
@@ -64,71 +43,32 @@ export async function GET(request: Request) {
     }
 
     // Determine whose turn it is (opposite of last writer)
-    const whoseTurn = lastSentence.writer === 'daniel' ? 'huaiyao' : 'daniel';
+    const whoseTurn: KnownUser = lastSentence.writer === 'daniel' ? 'huaiyao' : 'daniel';
     const partnerName = lastSentence.writer === 'daniel' ? 'Daniel' : 'Huaiyao';
+    const pushResult = await sendPushToUsers([whoseTurn], {
+      title: 'Story Book',
+      body: `It's been ${daysSince} days — ${partnerName} is waiting for your next line`,
+      icon: '/icons/icon-192.png',
+      url: '/book',
+      tag: 'book-turn-reminder',
+    });
 
-    // Fetch push subscriptions for the person whose turn it is
-    const { data: subscriptions, error: subError } = await supabase
-      .from('push_subscriptions')
-      .select('endpoint, p256dh, auth, user_name')
-      .eq('user_name', whoseTurn);
-
-    if (subError) {
-      console.error('Error fetching subscriptions:', subError);
-      return NextResponse.json({ error: 'Failed to fetch subscriptions' }, { status: 500 });
+    if (!pushResult.success) {
+      return NextResponse.json(
+        {
+          error: 'Failed to send reminder',
+          details: pushResult.reason,
+        },
+        { status: 500 }
+      );
     }
-
-    if (!subscriptions || subscriptions.length === 0) {
-      return NextResponse.json({
-        success: true,
-        skipped: true,
-        reason: `No push subscriptions for ${whoseTurn}`,
-        whoseTurn
-      });
-    }
-
-    // Send notifications
-    const results = await Promise.allSettled(
-      subscriptions.map(async (sub) => {
-        const payload = JSON.stringify({
-          title: 'Story Book',
-          body: `It's been ${daysSince} days — ${partnerName} is waiting for your next line`,
-          icon: '/icons/icon-192.png',
-          url: '/book',
-          tag: 'book-turn-reminder',
-        });
-
-        const pushSubscription = {
-          endpoint: sub.endpoint,
-          keys: {
-            p256dh: sub.p256dh,
-            auth: sub.auth,
-          },
-        };
-
-        try {
-          await webpush.sendNotification(pushSubscription, payload);
-          return { success: true, user: sub.user_name };
-        } catch (error: unknown) {
-          const webPushError = error as { statusCode?: number };
-          if (webPushError.statusCode === 410 || webPushError.statusCode === 404) {
-            await supabase
-              .from('push_subscriptions')
-              .delete()
-              .eq('endpoint', sub.endpoint);
-          }
-          throw error;
-        }
-      })
-    );
-
-    const successful = results.filter(r => r.status === 'fulfilled').length;
-    const failed = results.filter(r => r.status === 'rejected').length;
 
     return NextResponse.json({
       success: true,
-      sent: successful,
-      failed: failed,
+      sent: pushResult.sent,
+      failed: pushResult.failed,
+      skipped: pushResult.skipped,
+      reason: pushResult.reason,
       whoseTurn,
       daysSince
     });

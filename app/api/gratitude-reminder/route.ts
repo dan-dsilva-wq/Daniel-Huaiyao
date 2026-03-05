@@ -1,31 +1,10 @@
 import { NextResponse } from 'next/server';
-import webpush from 'web-push';
-import { createClient } from '@supabase/supabase-js';
-
-let vapidConfigured = false;
-
-function ensureVapidConfigured() {
-  if (vapidConfigured) return;
-  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-  const privateKey = process.env.VAPID_PRIVATE_KEY;
-  if (publicKey && privateKey) {
-    webpush.setVapidDetails(
-      'mailto:notifications@daniel-huaiyao.vercel.app',
-      publicKey,
-      privateKey
-    );
-    vapidConfigured = true;
-  }
-}
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { sendPushToUsers, type KnownUser } from '@/lib/server/push';
+import { getSupabaseAdmin } from '@/lib/server/supabase-admin';
 
 // This endpoint is called by a cron job at 8 PM Eastern
 export async function GET(request: Request) {
-  ensureVapidConfigured();
+  const supabase = getSupabaseAdmin();
   // Verify cron secret to prevent unauthorized calls
   const authHeader = request.headers.get('authorization');
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -49,7 +28,7 @@ export async function GET(request: Request) {
 
     // Who has already written today?
     const wroteToday = new Set(todayNotes?.map(n => n.from_player) || []);
-    const needsReminder: string[] = [];
+    const needsReminder: KnownUser[] = [];
 
     if (!wroteToday.has('daniel')) needsReminder.push('daniel');
     if (!wroteToday.has('huaiyao')) needsReminder.push('huaiyao');
@@ -62,70 +41,41 @@ export async function GET(request: Request) {
       });
     }
 
-    // Get subscriptions only for those who haven't written
-    const { data: subscriptions, error: subError } = await supabase
-      .from('push_subscriptions')
-      .select('endpoint, p256dh, auth, user_name')
-      .in('user_name', needsReminder);
-
-    if (subError) {
-      console.error('Error fetching subscriptions:', subError);
-      return NextResponse.json({ error: 'Failed to fetch subscriptions' }, { status: 500 });
-    }
-
-    if (!subscriptions || subscriptions.length === 0) {
-      return NextResponse.json({
-        success: true,
-        skipped: true,
-        reason: 'No push subscriptions for users who need reminder',
-        needsReminder
+    let sent = 0;
+    let failed = 0;
+    const failures: string[] = [];
+    for (const user of needsReminder) {
+      const partnerName = user === 'daniel' ? 'Huaiyao' : 'Daniel';
+      const result = await sendPushToUsers([user], {
+        title: 'Gratitude Wall',
+        body: `Take a moment to share gratitude with ${partnerName} 💝`,
+        icon: '/icons/icon-192.png',
+        url: '/gratitude',
+        tag: 'gratitude-reminder',
       });
+      sent += result.sent;
+      failed += result.failed;
+      if (!result.success && result.reason) {
+        failures.push(`${user}: ${result.reason}`);
+      }
     }
 
-    // Send personalized reminders
-    const results = await Promise.allSettled(
-      subscriptions.map(async (sub) => {
-        const partnerName = sub.user_name === 'daniel' ? 'Huaiyao' : 'Daniel';
-
-        const payload = JSON.stringify({
-          title: 'Gratitude Wall',
-          body: `Take a moment to share gratitude with ${partnerName} 💝`,
-          icon: '/icons/icon-192.png',
-          url: '/gratitude',
-          tag: 'gratitude-reminder',
-        });
-
-        const pushSubscription = {
-          endpoint: sub.endpoint,
-          keys: {
-            p256dh: sub.p256dh,
-            auth: sub.auth,
-          },
-        };
-
-        try {
-          await webpush.sendNotification(pushSubscription, payload);
-          return { success: true, user: sub.user_name };
-        } catch (error: unknown) {
-          const webPushError = error as { statusCode?: number };
-          if (webPushError.statusCode === 410 || webPushError.statusCode === 404) {
-            await supabase
-              .from('push_subscriptions')
-              .delete()
-              .eq('endpoint', sub.endpoint);
-          }
-          throw error;
-        }
-      })
-    );
-
-    const successful = results.filter(r => r.status === 'fulfilled').length;
-    const failed = results.filter(r => r.status === 'rejected').length;
+    if (failures.length > 0) {
+      return NextResponse.json(
+        {
+          error: 'Failed to send reminders for some users',
+          details: failures.join('; '),
+          sent,
+          failed,
+        },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      sent: successful,
-      failed: failed,
+      sent,
+      failed,
       remindedUsers: needsReminder
     });
   } catch (error) {

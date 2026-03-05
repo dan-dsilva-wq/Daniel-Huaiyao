@@ -6,6 +6,7 @@ import { ServiceWorkerRegister } from "./components/ServiceWorkerRegister";
 import { OfflineIndicator } from "./components/OfflineIndicator";
 import NotificationPrompt from "./components/NotificationPrompt";
 import ChatBubble from "./components/ChatBubble";
+import { UserBootstrap } from "./components/UserBootstrap";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -22,7 +23,11 @@ export const metadata: Metadata = {
   description: "Some fun stuff we made",
   manifest: "/manifest.json",
   icons: {
-    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👋</text></svg>",
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    shortcut: "/icons/icon-192.png",
     apple: "/icons/apple-touch-icon.png",
   },
   appleWebApp: {
@@ -59,11 +64,15 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <link rel="apple-touch-startup-image" href="/icons/apple-touch-icon.png" />
       </head>
       <body
         className={`${inter.variable} ${crimsonPro.variable} font-sans antialiased`}
       >
         <ThemeProvider>
+          <UserBootstrap />
           <OfflineIndicator />
           {children}
           <ServiceWorkerRegister />

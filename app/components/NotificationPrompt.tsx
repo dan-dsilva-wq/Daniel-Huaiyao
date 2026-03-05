@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getCurrentUser } from '@/lib/user-session';
 
 // VAPID public key - must match the one in environment variables
 const VAPID_PUBLIC_KEY = (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '').trim();
@@ -58,12 +59,14 @@ export default function NotificationPrompt() {
   const [error, setError] = useState<string | null>(null);
 
   const saveSubscription = useCallback(async (subscription: PushSubscription, userName: string): Promise<void> => {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     const response = await fetch('/api/push-subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         subscription: subscription.toJSON(),
         userName,
+        timezone,
       }),
     });
 
@@ -119,7 +122,7 @@ export default function NotificationPrompt() {
       return;
     }
 
-    const user = normalizeUser(localStorage.getItem('currentUser'));
+    const user = normalizeUser(getCurrentUser());
     setCurrentUser(user);
 
     // Check current subscription status
@@ -127,7 +130,7 @@ export default function NotificationPrompt() {
   }, [checkSubscription]);
 
   const subscribe = async () => {
-    const selectedUser = normalizeUser(currentUser || localStorage.getItem('currentUser'));
+    const selectedUser = normalizeUser(currentUser || getCurrentUser());
     if (!selectedUser) {
       setError('Please select who you are first');
       return;
@@ -220,7 +223,7 @@ export default function NotificationPrompt() {
                   Enable notifications?
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                  Get notified when {currentUser === 'daniel' ? 'Huaiyao' : 'Daniel'} adds something new
+                  Get notified when {currentUser === 'daniel' ? 'Huaiyao' : currentUser === 'huaiyao' ? 'Daniel' : 'your partner'} adds something new
                 </p>
 
                 {error && (

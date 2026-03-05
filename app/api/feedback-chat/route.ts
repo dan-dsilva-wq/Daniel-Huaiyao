@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { sendPushToUsers } from '@/lib/server/push';
 
 // Lazy initialize to avoid build-time errors
 let openai: OpenAI | null = null;
@@ -131,58 +132,16 @@ export async function POST(request: NextRequest) {
 
 async function sendNotificationToDaniel(summary: string) {
   try {
-    // Get Daniel's push subscriptions
-    const { data: subscriptions, error: subError } = await supabase
-      .from('push_subscriptions')
-      .select('endpoint, p256dh, auth')
-      .eq('user_name', 'daniel');
-
-    if (subError || !subscriptions || subscriptions.length === 0) {
-      console.log('No subscriptions found for Daniel');
-      return;
-    }
-
-    // Dynamic import web-push to avoid build issues
-    const webpush = await import('web-push');
-
-    webpush.default.setVapidDetails(
-      'mailto:notifications@daniel-huaiyao.vercel.app',
-      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-      process.env.VAPID_PRIVATE_KEY!
-    );
-
     const truncatedSummary = summary.length > 200 ? summary.substring(0, 200) + '...' : summary;
-
-    const payload = JSON.stringify({
+    const pushResult = await sendPushToUsers(['daniel'], {
       title: 'Feedback from Huaiyao',
       body: truncatedSummary,
       icon: '/icons/icon-192.png',
       url: '/feedback',
       tag: 'huaiyao-feedback',
     });
-
-    // Send to all of Daniel's subscriptions
-    for (const sub of subscriptions) {
-      const pushSubscription = {
-        endpoint: sub.endpoint,
-        keys: {
-          p256dh: sub.p256dh,
-          auth: sub.auth,
-        },
-      };
-
-      try {
-        await webpush.default.sendNotification(pushSubscription, payload);
-      } catch (pushError: unknown) {
-        const webPushError = pushError as { statusCode?: number };
-        if (webPushError.statusCode === 410 || webPushError.statusCode === 404) {
-          await supabase
-            .from('push_subscriptions')
-            .delete()
-            .eq('endpoint', sub.endpoint);
-        }
-        console.error('Push error:', pushError);
-      }
+    if (!pushResult.success) {
+      console.error('Push notification to Daniel failed:', pushResult.reason);
     }
 
     // Also store the feedback in database for reference
