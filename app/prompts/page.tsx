@@ -2,9 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { clearCurrentUser, getCurrentUser, setCurrentUser as persistCurrentUser } from '@/lib/user-session';
 
 interface DailyPrompt {
   daily_prompt_id: string;
@@ -39,6 +41,8 @@ export default function PromptsPage() {
   const [response, setResponse] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPartnerResponse, setShowPartnerResponse] = useState(false);
+  const [lateResponses, setLateResponses] = useState<Record<string, string>>({});
+  const [submittingLateId, setSubmittingLateId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!isSupabaseConfigured || !currentUser) {
@@ -60,7 +64,7 @@ export default function PromptsPage() {
       // Get history
       const { data: historyData, error: historyError } = await supabase.rpc('get_prompt_history', {
         p_player: currentUser,
-        p_limit: 30,
+        p_limit: 365,
       });
       if (historyError) throw historyError;
       setHistory(historyData || []);
@@ -71,7 +75,7 @@ export default function PromptsPage() {
   }, [currentUser]);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
+    const savedUser = getCurrentUser() as 'daniel' | 'huaiyao' | null;
     setCurrentUser(savedUser);
   }, []);
 
@@ -116,7 +120,29 @@ export default function PromptsPage() {
 
   const selectUser = (user: 'daniel' | 'huaiyao') => {
     setCurrentUser(user);
-    localStorage.setItem('currentUser', user);
+    persistCurrentUser(user);
+  };
+
+  const submitLateResponse = async (dailyPromptId: string, responseText: string) => {
+    if (!currentUser || !responseText.trim()) return;
+
+    setSubmittingLateId(dailyPromptId);
+    try {
+      const { error } = await supabase.rpc('submit_prompt_response', {
+        p_daily_prompt_id: dailyPromptId,
+        p_player: currentUser,
+        p_response_text: responseText.trim(),
+      });
+      if (error) throw error;
+
+      sendNotification();
+      setLateResponses((prev) => ({ ...prev, [dailyPromptId]: '' }));
+      await fetchData();
+    } catch (error) {
+      console.error('Error submitting late response:', error);
+    } finally {
+      setSubmittingLateId(null);
+    }
   };
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
@@ -150,7 +176,7 @@ export default function PromptsPage() {
               onClick={() => selectUser('daniel')}
               className="px-8 py-4 rounded-xl bg-blue-500 text-white font-medium shadow-lg hover:bg-blue-600 transition-colors"
             >
-              I'm Daniel
+              I&apos;m Daniel
             </motion.button>
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -158,7 +184,7 @@ export default function PromptsPage() {
               onClick={() => selectUser('huaiyao')}
               className="px-8 py-4 rounded-xl bg-rose-500 text-white font-medium shadow-lg hover:bg-rose-600 transition-colors"
             >
-              I'm Huaiyao
+              I&apos;m Huaiyao
             </motion.button>
           </div>
         </motion.div>
@@ -202,12 +228,12 @@ export default function PromptsPage() {
           className="text-center mb-6 sm:mb-8"
         >
           <div className="flex items-center justify-between mb-4">
-            <a
+            <Link
               href="/"
               className="px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 active:text-gray-800 transition-colors touch-manipulation"
             >
               ← Home
-            </a>
+            </Link>
             <ThemeToggle />
           </div>
           <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 dark:text-gray-100 mb-2">
@@ -311,7 +337,7 @@ export default function PromptsPage() {
                 {todayPrompt.my_response && (
                   <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
                     <h3 className="font-medium text-gray-800 dark:text-gray-100 mb-3">
-                      {partnerName}'s response
+                      {partnerName}&apos;s response
                     </h3>
                     {todayPrompt.partner_response ? (
                       showPartnerResponse ? (
@@ -323,12 +349,12 @@ export default function PromptsPage() {
                           onClick={() => setShowPartnerResponse(true)}
                           className="text-cyan-500 hover:text-cyan-600"
                         >
-                          Reveal {partnerName}'s response
+                          Reveal {partnerName}&apos;s response
                         </button>
                       )
                     ) : (
                       <p className="text-gray-400 dark:text-gray-500 italic">
-                        {partnerName} hasn't responded yet
+                        {partnerName} hasn&apos;t responded yet
                       </p>
                     )}
                   </div>
@@ -379,9 +405,45 @@ export default function PromptsPage() {
                               <strong>{partnerName}:</strong> {item.partner_response}
                             </p>
                           </div>
+                        ) : !item.my_response && item.partner_response ? (
+                          <div className="space-y-3">
+                            <p className="text-gray-500 dark:text-gray-400 text-sm">
+                              {partnerName} answered. Add yours to reveal both responses.
+                            </p>
+                            <textarea
+                              value={lateResponses[item.daily_prompt_id] || ''}
+                              onChange={(e) =>
+                                setLateResponses((prev) => ({
+                                  ...prev,
+                                  [item.daily_prompt_id]: e.target.value,
+                                }))
+                              }
+                              placeholder="Write your answer..."
+                              rows={3}
+                              className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm
+                                         text-gray-800 dark:text-gray-100 placeholder-gray-400
+                                         focus:outline-none focus:ring-2 focus:ring-cyan-300 resize-none"
+                            />
+                            <button
+                              onClick={() =>
+                                submitLateResponse(
+                                  item.daily_prompt_id,
+                                  lateResponses[item.daily_prompt_id] || ''
+                                )
+                              }
+                              disabled={
+                                !(lateResponses[item.daily_prompt_id] || '').trim() ||
+                                submittingLateId === item.daily_prompt_id
+                              }
+                              className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-teal-500 text-white text-sm rounded-lg
+                                         hover:from-cyan-600 hover:to-teal-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              {submittingLateId === item.daily_prompt_id ? 'Submitting...' : 'Submit & Reveal'}
+                            </button>
+                          </div>
                         ) : (
                           <p className="text-gray-400 dark:text-gray-500 text-sm italic">
-                            {item.my_response ? `${partnerName} didn't respond` : "You didn't respond"}
+                            {item.my_response ? `${partnerName} didn't respond yet` : "No responses yet"}
                           </p>
                         )}
                       </div>
@@ -411,7 +473,7 @@ export default function PromptsPage() {
             {' · '}
             <button
               onClick={() => {
-                localStorage.removeItem('currentUser');
+                clearCurrentUser();
                 setCurrentUser(null);
               }}
               className="underline hover:text-gray-600 dark:hover:text-gray-300"
