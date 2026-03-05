@@ -6,6 +6,16 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+const KNOWN_USERS = new Set(['daniel', 'huaiyao']);
+
+type PushSubscriptionPayload = {
+  endpoint?: string;
+  keys?: {
+    p256dh?: string;
+    auth?: string;
+  };
+};
+
 export async function POST(request: NextRequest) {
   try {
     const { subscription, userName } = await request.json();
@@ -14,17 +24,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing subscription or userName' }, { status: 400 });
     }
 
-    const { endpoint, keys } = subscription;
+    const normalizedUserName = String(userName).toLowerCase().trim();
+    if (!KNOWN_USERS.has(normalizedUserName)) {
+      return NextResponse.json(
+        { error: 'Invalid userName', details: 'Expected daniel or huaiyao' },
+        { status: 400 }
+      );
+    }
+
+    const typedSubscription = subscription as PushSubscriptionPayload;
+    const endpoint = typedSubscription.endpoint?.trim();
+    const p256dh = typedSubscription.keys?.p256dh?.trim();
+    const auth = typedSubscription.keys?.auth?.trim();
+
+    if (!endpoint || !p256dh || !auth) {
+      return NextResponse.json(
+        { error: 'Invalid subscription payload', details: 'Missing endpoint or keys' },
+        { status: 400 }
+      );
+    }
 
     // Upsert subscription (update if endpoint exists, insert if new)
     const { error } = await supabase
       .from('push_subscriptions')
       .upsert(
         {
-          user_name: userName,
+          user_name: normalizedUserName,
           endpoint: endpoint,
-          p256dh: keys.p256dh,
-          auth: keys.auth,
+          p256dh: p256dh,
+          auth: auth,
           last_used_at: new Date().toISOString(),
         },
         { onConflict: 'endpoint' }
@@ -32,7 +60,10 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error('Error saving subscription:', error);
-      return NextResponse.json({ error: 'Failed to save subscription' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to save subscription', details: error.message },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ success: true });

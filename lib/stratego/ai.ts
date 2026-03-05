@@ -1,5 +1,9 @@
 import { generateRandomSetup, isLake } from './constants';
-import { blendHeuristicWithModel, type StrategoModel } from './ml';
+import {
+  blendHeuristicWithModel,
+  evaluateStrategoPolicyLogitsForMoves,
+  type StrategoModel,
+} from './ml';
 import {
   CombatResult,
   GameState,
@@ -68,9 +72,46 @@ interface SearchContext {
   disableModelBlend?: boolean;
 }
 
+export type SearchAlgorithm = 'minimax' | 'puct-lite';
+
 export interface MoveSelectionOptions {
   modelOverride?: StrategoModel;
   disableModelBlend?: boolean;
+  searchAlgorithm?: SearchAlgorithm;
+  puctSimulations?: number;
+  puctCpuct?: number;
+  puctRolloutDepth?: number;
+}
+
+export interface ScoredStrategoMove {
+  move: StrategicMove;
+  score: number;
+  visits?: number;
+}
+
+interface PuctSearchConfig {
+  simulations: number;
+  cPuct: number;
+  rolloutDepth: number;
+  rootBeamWidth: number;
+  childBeamWidth: number;
+  determinizationSamples: number;
+}
+
+interface PuctNode {
+  state: LocalStrategoState;
+  activeColor: TeamColor;
+  depth: number;
+  visitCount: number;
+  edges: PuctEdge[] | null;
+}
+
+interface PuctEdge {
+  move: StrategicMove;
+  prior: number;
+  visitCount: number;
+  valueSum: number;
+  child: PuctNode | null;
 }
 
 const PIECE_VALUES: Record<PieceRank, number> = {
@@ -118,6 +159,24 @@ const DIFFICULTY_CONFIG: Record<ComputerDifficulty, SearchConfig> = {
     exploreTopMoves: 1,
     explorationChance: 0,
     determinizationSamples: 3,
+  },
+};
+
+const PUCT_DEFAULTS: Record<ComputerDifficulty, Omit<PuctSearchConfig, 'rootBeamWidth' | 'childBeamWidth' | 'determinizationSamples'>> = {
+  medium: {
+    simulations: 90,
+    cPuct: 1.25,
+    rolloutDepth: 14,
+  },
+  hard: {
+    simulations: 240,
+    cPuct: 1.18,
+    rolloutDepth: 18,
+  },
+  extreme: {
+    simulations: 520,
+    cPuct: 1.1,
+    rolloutDepth: 22,
   },
 };
 
@@ -238,15 +297,35 @@ export function chooseStrategoMoveForColor(
   difficulty: ComputerDifficulty,
   options?: MoveSelectionOptions,
 ): StrategicMove | null {
-  if (state.status !== 'playing' || state.currentTurn !== color) return null;
+  if (options?.searchAlgorithm === 'puct-lite') {
+    return chooseStrategoMoveForColorPuctLite(state, color, difficulty, options);
+  }
+
+  const scoredMoves = scoreStrategoMovesForColor(state, color, difficulty, options);
+  if (scoredMoves.length === 0) return null;
+  const config = DIFFICULTY_CONFIG[difficulty];
+  return pickMoveFromScoredMoves(scoredMoves, config);
+}
+
+export function scoreStrategoMovesForColor(
+  state: LocalStrategoState,
+  color: TeamColor,
+  difficulty: ComputerDifficulty,
+  options?: MoveSelectionOptions,
+): ScoredStrategoMove[] {
+  if (options?.searchAlgorithm === 'puct-lite') {
+    return scoreStrategoMovesForColorPuctLite(state, color, difficulty, options);
+  }
+
+  if (state.status !== 'playing' || state.currentTurn !== color) return [];
 
   const config = DIFFICULTY_CONFIG[difficulty];
   const searchStates = createDeterminizedSearchStates(state, color, config.determinizationSamples);
-  if (searchStates.length === 0) return null;
+  if (searchStates.length === 0) return [];
 
   const templateState = searchStates[0];
   const allMoves = generateMovesForColor(templateState, color);
-  if (allMoves.length === 0) return null;
+  if (allMoves.length === 0) return [];
 
   const context: SearchContext = {
     config,
@@ -256,7 +335,14 @@ export function chooseStrategoMoveForColor(
     disableModelBlend: options?.disableModelBlend === true,
   };
 
-  const orderedMoves = orderMoves(templateState, allMoves, color, color)
+  const orderedMoves = orderMoves(
+    templateState,
+    allMoves,
+    color,
+    color,
+    options?.modelOverride,
+    options?.disableModelBlend === true,
+  )
     .slice(0, config.rootBeamWidth);
 
   const scoredMoves = orderedMoves.map((move) => {
@@ -283,25 +369,323 @@ export function chooseStrategoMoveForColor(
   });
 
   scoredMoves.sort((left, right) => right.score - left.score);
+  return scoredMoves;
+}
 
-  if (scoredMoves.length === 0) return allMoves[Math.floor(Math.random() * allMoves.length)] ?? null;
+function chooseStrategoMoveForColorPuctLite(
+  state: LocalStrategoState,
+  color: TeamColor,
+  difficulty: ComputerDifficulty,
+  options?: MoveSelectionOptions,
+): StrategicMove | null {
+  const scoredMoves = scoreStrategoMovesForColorPuctLite(state, color, difficulty, options);
+  if (scoredMoves.length === 0) {
+    return chooseStrategoMoveForColor(
+      state,
+      color,
+      difficulty,
+      {
+        ...options,
+        searchAlgorithm: 'minimax',
+      },
+    );
+  }
+  return scoredMoves[0].move;
+}
+
+interface AggregatedPuctRootEntry {
+  move: StrategicMove;
+  visits: number;
+  valueSum: number;
+}
+
+function scoreStrategoMovesForColorPuctLite(
+  state: LocalStrategoState,
+  color: TeamColor,
+  difficulty: ComputerDifficulty,
+  options?: MoveSelectionOptions,
+): ScoredStrategoMove[] {
+  if (state.status !== 'playing' || state.currentTurn !== color) return [];
+
+  const candidates = collectPuctRootCandidates(state, color, difficulty, options)
+    .filter((entry) => entry.visits > 0);
+  if (candidates.length === 0) return [];
+
+  candidates.sort((left, right) => {
+    if (right.visits !== left.visits) return right.visits - left.visits;
+    const leftValue = left.valueSum / Math.max(1, left.visits);
+    const rightValue = right.valueSum / Math.max(1, right.visits);
+    return rightValue - leftValue;
+  });
+
+  return candidates.map((entry) => ({
+    move: entry.move,
+    // Keep score scale aligned with minimax output so value-target plumbing is consistent.
+    score: (entry.valueSum / Math.max(1, entry.visits)) * 5200,
+    visits: entry.visits,
+  }));
+}
+
+function collectPuctRootCandidates(
+  state: LocalStrategoState,
+  color: TeamColor,
+  difficulty: ComputerDifficulty,
+  options?: MoveSelectionOptions,
+): AggregatedPuctRootEntry[] {
+  const config = resolvePuctSearchConfig(difficulty, options);
+  const searchStates = createDeterminizedSearchStates(state, color, config.determinizationSamples);
+  if (searchStates.length === 0) return [];
+
+  const aggregate = new Map<string, AggregatedPuctRootEntry>();
+  const baseSimulations = Math.floor(config.simulations / searchStates.length);
+  const extraSimulations = config.simulations % searchStates.length;
+
+  for (let index = 0; index < searchStates.length; index += 1) {
+    const determinizedState = searchStates[index];
+    const simulations = Math.max(1, baseSimulations + (index < extraSimulations ? 1 : 0));
+    const root: PuctNode = {
+      state: determinizedState,
+      activeColor: color,
+      depth: 0,
+      visitCount: 0,
+      edges: null,
+    };
+
+    for (let sim = 0; sim < simulations; sim += 1) {
+      runPuctSimulation(
+        root,
+        config,
+        options?.modelOverride,
+        options?.disableModelBlend === true,
+      );
+    }
+
+    const rootEdges = root.edges ?? [];
+    for (const edge of rootEdges) {
+      const key = puctMoveKey(edge.move);
+      const existing = aggregate.get(key);
+      if (!existing) {
+        aggregate.set(key, {
+          move: edge.move,
+          visits: edge.visitCount,
+          valueSum: edge.valueSum,
+        });
+      } else {
+        existing.visits += edge.visitCount;
+        existing.valueSum += edge.valueSum;
+      }
+    }
+  }
+
+  return [...aggregate.values()];
+}
+
+function resolvePuctSearchConfig(
+  difficulty: ComputerDifficulty,
+  options?: MoveSelectionOptions,
+): PuctSearchConfig {
+  const searchConfig = DIFFICULTY_CONFIG[difficulty];
+  const defaults = PUCT_DEFAULTS[difficulty];
+
+  return {
+    simulations: puctClampInt(options?.puctSimulations ?? defaults.simulations, 24, 20000),
+    cPuct: clamp(options?.puctCpuct ?? defaults.cPuct, 0.2, 4),
+    rolloutDepth: puctClampInt(options?.puctRolloutDepth ?? defaults.rolloutDepth, 2, 64),
+    rootBeamWidth: searchConfig.rootBeamWidth,
+    childBeamWidth: searchConfig.childBeamWidth,
+    determinizationSamples: searchConfig.determinizationSamples,
+  };
+}
+
+function runPuctSimulation(
+  node: PuctNode,
+  config: PuctSearchConfig,
+  modelOverride?: StrategoModel,
+  disableModelBlend = false,
+): number {
+  if (node.state.status === 'finished') {
+    return terminalUtilityForColor(node.state, node.activeColor);
+  }
+
+  if (node.depth >= config.rolloutDepth) {
+    return normalizeValueForPuct(
+      evaluateState(node.state, node.activeColor, modelOverride, disableModelBlend),
+    );
+  }
+
+  if (node.edges === null) {
+    const moves = generateMovesForColor(node.state, node.activeColor);
+    if (moves.length === 0) return -1;
+    node.edges = buildPuctEdges(
+      node.state,
+      moves,
+      node.activeColor,
+      node.depth,
+      config,
+      modelOverride,
+      disableModelBlend,
+    );
+    node.visitCount += 1;
+    return normalizeValueForPuct(
+      evaluateState(node.state, node.activeColor, modelOverride, disableModelBlend),
+    );
+  }
+
+  if (node.edges.length === 0) {
+    return -1;
+  }
+
+  const selectedEdge = selectPuctEdge(node.edges, node.visitCount, config.cPuct);
+  if (!selectedEdge.child) {
+    const nextState = applyStrategoMoveInternal(
+      node.state,
+      node.activeColor,
+      selectedEdge.move,
+      false,
+    ).state;
+    selectedEdge.child = {
+      state: nextState,
+      activeColor: nextState.currentTurn,
+      depth: node.depth + 1,
+      visitCount: 0,
+      edges: null,
+    };
+  }
+
+  const childValue = runPuctSimulation(
+    selectedEdge.child,
+    config,
+    modelOverride,
+    disableModelBlend,
+  );
+  const valueForNode = -childValue;
+  selectedEdge.visitCount += 1;
+  selectedEdge.valueSum += valueForNode;
+  node.visitCount += 1;
+  return valueForNode;
+}
+
+function buildPuctEdges(
+  state: LocalStrategoState,
+  moves: StrategicMove[],
+  activeColor: TeamColor,
+  depth: number,
+  config: PuctSearchConfig,
+  modelOverride?: StrategoModel,
+  disableModelBlend = false,
+): PuctEdge[] {
+  const beam = depth === 0 ? config.rootBeamWidth : config.childBeamWidth;
+  const limitedMoves = orderMoves(
+    state,
+    moves,
+    activeColor,
+    activeColor,
+    modelOverride,
+    disableModelBlend,
+  ).slice(0, beam);
+  if (limitedMoves.length === 0) return [];
+
+  const rawScores = limitedMoves.map((move) => tacticalMoveScore(state, move, activeColor, activeColor));
+  const tacticalPriors = normalizedSoftmax(rawScores, 180);
+  const policyLogits = disableModelBlend
+    ? null
+    : evaluateStrategoPolicyLogitsForMoves(state, activeColor, limitedMoves, modelOverride);
+  const policyPriors = policyLogits ? normalizedSoftmax(policyLogits, 1) : null;
+  const blend = policyPriors ? 0.72 : 0;
+  const uniformPrior = 1 / limitedMoves.length;
+
+  return limitedMoves.map((move, index) => ({
+    move,
+    prior: policyPriors
+      ? blend * policyPriors[index] + (1 - blend) * tacticalPriors[index]
+      : tacticalPriors[index] ?? uniformPrior,
+    visitCount: 0,
+    valueSum: 0,
+    child: null,
+  }));
+}
+
+function selectPuctEdge(edges: PuctEdge[], nodeVisitCount: number, cPuct: number): PuctEdge {
+  let bestEdge = edges[0];
+  let bestScore = Number.NEGATIVE_INFINITY;
+  const sqrtVisits = Math.sqrt(Math.max(1, nodeVisitCount));
+
+  for (const edge of edges) {
+    const q = edge.visitCount > 0 ? edge.valueSum / edge.visitCount : 0;
+    const u = cPuct * edge.prior * sqrtVisits / (1 + edge.visitCount);
+    const score = q + u;
+    if (score > bestScore) {
+      bestScore = score;
+      bestEdge = edge;
+    }
+  }
+
+  return bestEdge;
+}
+
+function terminalUtilityForColor(state: LocalStrategoState, perspective: TeamColor): number {
+  if (!state.winner) return 0;
+  return state.winner === perspective ? 1 : -1;
+}
+
+function normalizeValueForPuct(rawScore: number): number {
+  if (!Number.isFinite(rawScore)) return 0;
+  return Math.tanh(rawScore / 5200);
+}
+
+function normalizedSoftmax(values: readonly number[], temperature: number): number[] {
+  if (values.length === 0) return [];
+  const safeTemperature = clamp(temperature, 0.01, 8);
+  const scaled = values.map((value) => value / safeTemperature);
+  const finiteScaled = scaled.map((value) => (Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY));
+  const maxValue = Math.max(...finiteScaled);
+  if (!Number.isFinite(maxValue)) {
+    const uniform = 1 / values.length;
+    return new Array(values.length).fill(uniform);
+  }
+
+  const weights = finiteScaled.map((value) => Math.exp(value - maxValue));
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    const uniform = 1 / values.length;
+    return new Array(values.length).fill(uniform);
+  }
+  return weights.map((value) => value / total);
+}
+
+function puctMoveKey(move: StrategicMove): string {
+  return `${move.pieceId}:${move.fromRow},${move.fromCol}->${move.toRow},${move.toCol}`;
+}
+
+function puctClampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function pickMoveFromScoredMoves(
+  scoredMoves: ScoredStrategoMove[],
+  config: SearchConfig,
+): StrategicMove {
+  if (scoredMoves.length === 0) {
+    throw new Error('pickMoveFromScoredMoves requires at least one scored move.');
+  }
 
   if (
     config.exploreTopMoves > 1
     && config.explorationChance > 0
     && Math.random() < config.explorationChance
   ) {
-    const options = scoredMoves.slice(0, config.exploreTopMoves);
-    const bestScore = options[0].score;
-    const weights = options.map((option) => Math.exp((option.score - bestScore) / 180));
+    const exploreOptions = scoredMoves.slice(0, config.exploreTopMoves);
+    const bestScore = exploreOptions[0].score;
+    const weights = exploreOptions.map((option) => Math.exp((option.score - bestScore) / 180));
     const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
     const randomValue = Math.random() * totalWeight;
     let cumulative = 0;
 
-    for (let index = 0; index < options.length; index += 1) {
+    for (let index = 0; index < exploreOptions.length; index += 1) {
       cumulative += weights[index];
       if (randomValue <= cumulative) {
-        return options[index].move;
+        return exploreOptions[index].move;
       }
     }
   }
@@ -486,8 +870,14 @@ function minimax(
     return activeColor === maximizingColor ? -70000 : 70000;
   }
 
-  const orderedMoves = orderMoves(state, moves, activeColor, maximizingColor)
-    .slice(0, context.config.childBeamWidth);
+  const orderedMoves = orderMoves(
+    state,
+    moves,
+    activeColor,
+    maximizingColor,
+    context.modelOverride,
+    context.disableModelBlend === true,
+  ).slice(0, context.config.childBeamWidth);
 
   if (activeColor === maximizingColor) {
     let value = Number.NEGATIVE_INFINITY;
@@ -768,16 +1158,57 @@ function orderMoves(
   moves: StrategicMove[],
   activeColor: TeamColor,
   maximizingColor: TeamColor,
+  modelOverride?: StrategoModel,
+  disableModelBlend = false,
 ): StrategicMove[] {
   const ordered = [...moves];
+  const policyBonusByMove = disableModelBlend
+    ? null
+    : buildPolicyOrderingBonusByMove(
+      state,
+      ordered,
+      activeColor,
+      maximizingColor,
+      modelOverride,
+    );
 
   ordered.sort((left, right) => {
-    const rightScore = tacticalMoveScore(state, right, activeColor, maximizingColor);
-    const leftScore = tacticalMoveScore(state, left, activeColor, maximizingColor);
+    const rightScore = tacticalMoveScore(state, right, activeColor, maximizingColor)
+      + (policyBonusByMove?.get(puctMoveKey(right)) ?? 0);
+    const leftScore = tacticalMoveScore(state, left, activeColor, maximizingColor)
+      + (policyBonusByMove?.get(puctMoveKey(left)) ?? 0);
     return rightScore - leftScore;
   });
 
   return ordered;
+}
+
+function buildPolicyOrderingBonusByMove(
+  state: LocalStrategoState,
+  moves: StrategicMove[],
+  activeColor: TeamColor,
+  maximizingColor: TeamColor,
+  modelOverride?: StrategoModel,
+): Map<string, number> | null {
+  const logits = evaluateStrategoPolicyLogitsForMoves(state, activeColor, moves, modelOverride);
+  if (!logits || logits.length !== moves.length) return null;
+
+  const probabilities = normalizedSoftmax(logits, 1);
+  if (probabilities.length !== moves.length) return null;
+  const expected = 1 / moves.length;
+
+  const bonusByMove = new Map<string, number>();
+  for (let index = 0; index < moves.length; index += 1) {
+    const key = puctMoveKey(moves[index]);
+    const centered = (probabilities[index] ?? expected) - expected;
+    let bonus = clamp(centered * moves.length * 28, -42, 72);
+    if (activeColor !== maximizingColor) {
+      bonus = -bonus;
+    }
+    bonusByMove.set(key, bonus);
+  }
+
+  return bonusByMove;
 }
 
 function tacticalMoveScore(

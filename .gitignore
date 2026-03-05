@@ -43,3 +43,8 @@ next-env.d.ts
 .vercel
 .env*.local
 .claude
+
+# local ML/training artifacts
+.hive-cache/
+.stratego-cache/
+scripts/**/__pycache__/

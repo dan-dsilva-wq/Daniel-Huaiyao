@@ -1,5 +1,5 @@
 import type { LocalStrategoState } from './ai';
-import type { Piece, PieceRank, TeamColor } from './types';
+import type { MoveHistoryEntry, Piece, PieceRank, TeamColor } from './types';
 import trainedModelData from './trained-model.json';
 
 export type StrategoDifficultyLabel = 'medium' | 'hard' | 'extreme' | 'mixed';
@@ -16,10 +16,15 @@ export interface StrategoModelTrainingInfo {
   learningRate?: number;
   workers?: number;
   hiddenLayers?: number[];
+  policySamples?: number;
+  weightDecay?: number;
+  policyWeight?: number;
+  valueWeight?: number;
 }
 
 export const STRATEGO_LINEAR_MODEL_VERSION = 1;
 export const STRATEGO_MLP_MODEL_VERSION = 2;
+export const STRATEGO_POLICY_VALUE_MODEL_VERSION = 3;
 export const STRATEGO_MODEL_VERSION = STRATEGO_LINEAR_MODEL_VERSION;
 
 export interface StrategoLinearModel {
@@ -50,9 +55,47 @@ export interface StrategoMlpModel {
   training: StrategoModelTrainingInfo;
 }
 
-export type StrategoModel = StrategoLinearModel | StrategoMlpModel;
+export interface StrategoPolicyValueHead {
+  inputSize: number;
+  outputSize: number;
+  weights: readonly number[];
+  bias: readonly number[];
+  activation?: StrategoActivation;
+}
 
-export const STRATEGO_FEATURE_NAMES = [
+export interface StrategoPolicyValueMlpModel {
+  version: number;
+  kind: 'policy_value_mlp';
+  featureNames: readonly string[];
+  actionSpace: number;
+  trunk: readonly StrategoMlpLayer[];
+  valueHead: StrategoPolicyValueHead;
+  policyHead: StrategoPolicyValueHead;
+  training: StrategoModelTrainingInfo;
+}
+
+export type StrategoModel = StrategoLinearModel | StrategoMlpModel | StrategoPolicyValueMlpModel;
+
+export interface StrategoPolicyMove {
+  fromRow: number;
+  fromCol: number;
+  toRow: number;
+  toCol: number;
+}
+
+interface OpponentBeliefFeatures {
+  unknownRatio: number;
+  unknownMovedRatio: number;
+  unknownBacklineUnmovedRatio: number;
+  mustScoutRatio: number;
+  recentLongMoveRate: number;
+  recentAttackRate: number;
+  unknownEntropy: number;
+  unknownStrength: number;
+  rankProbabilities: Record<PieceRank, number>;
+}
+
+const STRATEGO_BASE_FEATURE_NAMES = [
   'rank_balance_0',
   'rank_balance_1',
   'rank_balance_2',
@@ -80,6 +123,35 @@ export const STRATEGO_FEATURE_NAMES = [
   'flag_pressure_diff',
   'turn_advantage',
   'game_phase',
+] as const;
+
+const STRATEGO_BELIEF_FEATURE_NAMES = [
+  'belief_opp_unknown_ratio',
+  'belief_opp_unknown_moved_ratio',
+  'belief_opp_unknown_backline_unmoved_ratio',
+  'belief_opp_must_scout_ratio',
+  'belief_opp_recent_long_move_rate',
+  'belief_opp_recent_attack_rate',
+  'belief_opp_unknown_entropy',
+  'belief_opp_unknown_strength',
+  'belief_opp_prob_rank_0',
+  'belief_opp_prob_rank_1',
+  'belief_opp_prob_rank_2',
+  'belief_opp_prob_rank_3',
+  'belief_opp_prob_rank_4',
+  'belief_opp_prob_rank_5',
+  'belief_opp_prob_rank_6',
+  'belief_opp_prob_rank_7',
+  'belief_opp_prob_rank_8',
+  'belief_opp_prob_rank_9',
+  'belief_opp_prob_rank_10',
+  'belief_opp_prob_rank_11',
+] as const;
+
+export const STRATEGO_LEGACY_FEATURE_NAMES = STRATEGO_BASE_FEATURE_NAMES;
+export const STRATEGO_FEATURE_NAMES = [
+  ...STRATEGO_BASE_FEATURE_NAMES,
+  ...STRATEGO_BELIEF_FEATURE_NAMES,
 ] as const;
 
 export type StrategoFeatureName = typeof STRATEGO_FEATURE_NAMES[number];
@@ -115,6 +187,23 @@ const PIECE_VALUES: Record<PieceRank, number> = {
 };
 
 const PIECE_RANKS: PieceRank[] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
+const MOVABLE_PIECE_RANKS: PieceRank[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+const HISTORY_FEATURE_WINDOW = 12;
+
+const BELIEF_RANK_STRENGTH: Record<PieceRank, number> = {
+  0: 0,
+  1: 0.25,
+  2: 0.2,
+  3: 0.3,
+  4: 0.4,
+  5: 0.5,
+  6: 0.6,
+  7: 0.7,
+  8: 0.8,
+  9: 0.9,
+  10: 1,
+  11: 0.1,
+};
 
 const MAX_MATERIAL_PER_SIDE = PIECE_RANKS.reduce<number>(
   (sum, rank) => sum + PIECE_VALUES[rank] * PIECE_COUNTS_BY_RANK[rank],
@@ -138,6 +227,15 @@ const DEFAULT_MODEL: StrategoLinearModel = {
   },
 };
 
+const FEATURE_INDEX_BY_NAME = new Map<string, number>(
+  STRATEGO_FEATURE_NAMES.map((name, index) => [name, index]),
+);
+
+const SUPPORTED_FEATURE_SCHEMAS: readonly (readonly string[])[] = [
+  STRATEGO_LEGACY_FEATURE_NAMES,
+  STRATEGO_FEATURE_NAMES,
+];
+
 const ACTIVE_MODEL = parseModel(trainedModelData) ?? DEFAULT_MODEL;
 
 export function getActiveStrategoModel(): StrategoModel {
@@ -152,8 +250,9 @@ export function extractStrategoFeatures(
   state: LocalStrategoState,
   perspective: TeamColor,
 ): number[] {
+  const opponentColor = flipColor(perspective);
   const myPieces = getPieces(state, perspective);
-  const oppPieces = getPieces(state, flipColor(perspective));
+  const oppPieces = getPieces(state, opponentColor);
 
   const myCounts = rankCounts(myPieces);
   const oppCounts = rankCounts(oppPieces);
@@ -201,6 +300,18 @@ export function extractStrategoFeatures(
   featureVector.push(myFlagPressure - oppFlagPressure);
   featureVector.push(state.currentTurn === perspective ? 1 : -1);
   featureVector.push(gamePhaseFeature(state.turnNumber));
+  const belief = buildOpponentBeliefFeatures(state, oppPieces, opponentColor);
+  featureVector.push(belief.unknownRatio);
+  featureVector.push(belief.unknownMovedRatio);
+  featureVector.push(belief.unknownBacklineUnmovedRatio);
+  featureVector.push(belief.mustScoutRatio);
+  featureVector.push(belief.recentLongMoveRate);
+  featureVector.push(belief.recentAttackRate);
+  featureVector.push(belief.unknownEntropy);
+  featureVector.push(belief.unknownStrength);
+  for (const rank of PIECE_RANKS) {
+    featureVector.push(belief.rankProbabilities[rank]);
+  }
 
   return featureVector;
 }
@@ -210,7 +321,10 @@ export function evaluateStrategoModel(
   perspective: TeamColor,
   model: StrategoModel = ACTIVE_MODEL,
 ): number {
-  const features = extractStrategoFeatures(state, perspective);
+  const features = extractStrategoFeaturesForModel(state, perspective, model);
+  if (isPolicyValueModel(model)) {
+    return evaluatePolicyValueModel(features, model).value;
+  }
   if (isMlpModel(model)) {
     return evaluateMlp(features, model);
   }
@@ -220,6 +334,36 @@ export function evaluateStrategoModel(
     sum += model.weights[index] * features[index];
   }
   return Math.tanh(sum);
+}
+
+export function evaluateStrategoPolicyLogitsForMoves(
+  state: LocalStrategoState,
+  perspective: TeamColor,
+  moves: readonly StrategoPolicyMove[],
+  model: StrategoModel = ACTIVE_MODEL,
+): number[] | null {
+  if (!isPolicyValueModel(model)) return null;
+  if (moves.length === 0) return [];
+
+  const features = extractStrategoFeaturesForModel(state, perspective, model);
+  const evaluation = evaluatePolicyValueModel(features, model);
+  const trunk = evaluation.trunkActivations;
+  const logits = new Array<number>(moves.length).fill(Number.NEGATIVE_INFINITY);
+  let hasFiniteLogit = false;
+
+  for (let index = 0; index < moves.length; index += 1) {
+    const move = moves[index];
+    const actionIndex = encodeStrategoActionIndex(move);
+    if (actionIndex < 0 || actionIndex >= model.actionSpace) continue;
+    if (actionIndex >= model.policyHead.outputSize) continue;
+    const rawLogit = evaluateHeadRow(trunk, model.policyHead, actionIndex);
+    const activatedLogit = applyActivation(rawLogit, model.policyHead.activation ?? 'linear');
+    if (!Number.isFinite(activatedLogit)) continue;
+    logits[index] = activatedLogit;
+    hasFiniteLogit = true;
+  }
+
+  return hasFiniteLogit ? logits : null;
 }
 
 export function blendHeuristicWithModel(
@@ -233,11 +377,40 @@ export function blendHeuristicWithModel(
 
   const modelScore = evaluateStrategoModel(state, perspective, model) * 5200;
   const baseBlend = Math.min(0.55, 0.25 + Math.log10(sampleCount + 10) * 0.07);
-  const blendWeight = isMlpModel(model)
+  const blendWeight = isMlpModel(model) || isPolicyValueModel(model)
     ? Math.min(0.68, baseBlend + 0.08)
     : baseBlend;
 
   return heuristicScore * (1 - blendWeight) + modelScore * blendWeight;
+}
+
+function extractStrategoFeaturesForModel(
+  state: LocalStrategoState,
+  perspective: TeamColor,
+  model: StrategoModel,
+): number[] {
+  const fullFeatureVector = extractStrategoFeatures(state, perspective);
+  return mapFeatureVectorToSchema(fullFeatureVector, model.featureNames);
+}
+
+function mapFeatureVectorToSchema(
+  fullFeatureVector: readonly number[],
+  schema: readonly string[],
+): number[] {
+  if (
+    schema.length === STRATEGO_FEATURE_NAMES.length
+    && schema.every((name, index) => name === STRATEGO_FEATURE_NAMES[index])
+  ) {
+    return [...fullFeatureVector];
+  }
+
+  const features = new Array<number>(schema.length).fill(0);
+  for (let index = 0; index < schema.length; index += 1) {
+    const fullIndex = FEATURE_INDEX_BY_NAME.get(schema[index]);
+    if (fullIndex === undefined) continue;
+    features[index] = fullFeatureVector[fullIndex] ?? 0;
+  }
+  return features;
 }
 
 function evaluateMlp(features: number[], model: StrategoMlpModel): number {
@@ -262,6 +435,61 @@ function evaluateMlp(features: number[], model: StrategoMlpModel): number {
   return Math.max(-1, Math.min(1, activated));
 }
 
+function evaluatePolicyValueModel(
+  features: number[],
+  model: StrategoPolicyValueMlpModel,
+): { value: number; trunkActivations: number[] } {
+  const trunkActivations = forwardLayers(features, model.trunk);
+  const rawValue = evaluateHeadRow(trunkActivations, model.valueHead, 0);
+  const activatedValue = applyActivation(rawValue, model.valueHead.activation ?? 'tanh');
+  const clippedValue = Number.isFinite(activatedValue)
+    ? Math.max(-1, Math.min(1, activatedValue))
+    : 0;
+  return {
+    value: clippedValue,
+    trunkActivations,
+  };
+}
+
+function forwardLayers(features: number[], layers: readonly StrategoMlpLayer[]): number[] {
+  let activations = features;
+  for (const layer of layers) {
+    const next = new Array<number>(layer.outputSize).fill(0);
+    for (let outIndex = 0; outIndex < layer.outputSize; outIndex += 1) {
+      let sum = layer.bias[outIndex] ?? 0;
+      const offset = outIndex * layer.inputSize;
+      for (let inIndex = 0; inIndex < layer.inputSize; inIndex += 1) {
+        sum += (layer.weights[offset + inIndex] ?? 0) * (activations[inIndex] ?? 0);
+      }
+      next[outIndex] = applyActivation(sum, layer.activation);
+    }
+    activations = next;
+  }
+  return activations;
+}
+
+function evaluateHeadRow(
+  input: readonly number[],
+  head: StrategoPolicyValueHead,
+  rowIndex: number,
+): number {
+  const inputSize = head.inputSize;
+  const offset = rowIndex * inputSize;
+  let sum = head.bias[rowIndex] ?? 0;
+  for (let inIndex = 0; inIndex < inputSize; inIndex += 1) {
+    sum += (head.weights[offset + inIndex] ?? 0) * (input[inIndex] ?? 0);
+  }
+  return sum;
+}
+
+function encodeStrategoActionIndex(
+  move: { fromRow: number; fromCol: number; toRow: number; toCol: number },
+): number {
+  const from = move.fromRow * 10 + move.fromCol;
+  const to = move.toRow * 10 + move.toCol;
+  return from * 100 + to;
+}
+
 function applyActivation(value: number, activation: StrategoActivation): number {
   switch (activation) {
     case 'linear':
@@ -277,6 +505,10 @@ function parseModel(input: unknown): StrategoModel | null {
   if (!input || typeof input !== 'object') return null;
   const candidate = input as Record<string, unknown>;
 
+  if (candidate.kind === 'policy_value_mlp') {
+    return parsePolicyValueModel(candidate);
+  }
+
   if (candidate.kind === 'mlp' || candidate.version === STRATEGO_MLP_MODEL_VERSION) {
     return parseMlpModel(candidate);
   }
@@ -287,18 +519,16 @@ function parseModel(input: unknown): StrategoModel | null {
 function parseLinearModel(candidate: Record<string, unknown>): StrategoLinearModel | null {
   if (candidate.version !== STRATEGO_LINEAR_MODEL_VERSION) return null;
   if (candidate.kind && candidate.kind !== 'linear') return null;
-  if (!Array.isArray(candidate.featureNames)) return null;
   if (!Array.isArray(candidate.weights)) return null;
   if (typeof candidate.bias !== 'number' || !Number.isFinite(candidate.bias)) return null;
 
-  const featureNames = candidate.featureNames;
+  const featureNames = parseFeatureNames(candidate.featureNames);
+  if (!featureNames) return null;
   const weights = candidate.weights;
 
-  if (featureNames.length !== STRATEGO_FEATURE_NAMES.length) return null;
-  if (weights.length !== STRATEGO_FEATURE_NAMES.length) return null;
+  if (weights.length !== featureNames.length) return null;
 
-  for (let index = 0; index < STRATEGO_FEATURE_NAMES.length; index += 1) {
-    if (featureNames[index] !== STRATEGO_FEATURE_NAMES[index]) return null;
+  for (let index = 0; index < weights.length; index += 1) {
     const weight = weights[index];
     if (typeof weight !== 'number' || !Number.isFinite(weight)) return null;
   }
@@ -319,51 +549,13 @@ function parseLinearModel(candidate: Record<string, unknown>): StrategoLinearMod
 function parseMlpModel(candidate: Record<string, unknown>): StrategoMlpModel | null {
   if (candidate.version !== STRATEGO_MLP_MODEL_VERSION) return null;
   if (candidate.kind !== 'mlp') return null;
-  if (!Array.isArray(candidate.featureNames)) return null;
   if (!Array.isArray(candidate.layers)) return null;
 
-  const featureNames = candidate.featureNames;
-  if (featureNames.length !== STRATEGO_FEATURE_NAMES.length) return null;
-  for (let index = 0; index < STRATEGO_FEATURE_NAMES.length; index += 1) {
-    if (featureNames[index] !== STRATEGO_FEATURE_NAMES[index]) return null;
-  }
+  const featureNames = parseFeatureNames(candidate.featureNames);
+  if (!featureNames) return null;
 
-  const layers: StrategoMlpLayer[] = [];
-  let expectedInputSize: number = STRATEGO_FEATURE_NAMES.length;
-
-  for (const rawLayer of candidate.layers) {
-    if (!rawLayer || typeof rawLayer !== 'object') return null;
-    const layer = rawLayer as Record<string, unknown>;
-
-    if (!Number.isInteger(layer.inputSize) || !Number.isInteger(layer.outputSize)) return null;
-    const inputSize = layer.inputSize as number;
-    const outputSize = layer.outputSize as number;
-    if (inputSize <= 0 || outputSize <= 0) return null;
-    if (inputSize !== expectedInputSize) return null;
-    expectedInputSize = outputSize;
-
-    if (!Array.isArray(layer.weights) || !Array.isArray(layer.bias)) return null;
-    if (layer.weights.length !== inputSize * outputSize) return null;
-    if (layer.bias.length !== outputSize) return null;
-
-    if (!isActivation(layer.activation)) return null;
-    const weights = layer.weights as unknown[];
-    const bias = layer.bias as unknown[];
-    for (const value of weights) {
-      if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-    }
-    for (const value of bias) {
-      if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-    }
-
-    layers.push({
-      inputSize,
-      outputSize,
-      weights: [...(layer.weights as number[])],
-      bias: [...(layer.bias as number[])],
-      activation: layer.activation,
-    });
-  }
+  const layers = parseLayers(candidate.layers, featureNames.length);
+  if (!layers) return null;
 
   if (layers.length === 0) return null;
   if (layers[layers.length - 1].outputSize !== 1) return null;
@@ -384,6 +576,146 @@ function parseMlpModel(candidate: Record<string, unknown>): StrategoMlpModel | n
     layers,
     outputActivation,
     training,
+  };
+}
+
+function parsePolicyValueModel(candidate: Record<string, unknown>): StrategoPolicyValueMlpModel | null {
+  if (candidate.kind !== 'policy_value_mlp') return null;
+  if (!Array.isArray(candidate.trunk)) return null;
+  if (
+    !Number.isInteger(candidate.actionSpace)
+    || (candidate.actionSpace as number) <= 0
+  ) {
+    return null;
+  }
+  if (!candidate.valueHead || typeof candidate.valueHead !== 'object') return null;
+  if (!candidate.policyHead || typeof candidate.policyHead !== 'object') return null;
+
+  const featureNames = parseFeatureNames(candidate.featureNames);
+  if (!featureNames) return null;
+
+  const trunk = parseLayers(candidate.trunk, featureNames.length);
+  if (!trunk || trunk.length === 0) return null;
+  const trunkOutputSize = trunk[trunk.length - 1].outputSize;
+
+  const valueHead = parsePolicyValueHead(candidate.valueHead as Record<string, unknown>, trunkOutputSize);
+  if (!valueHead) return null;
+  if (valueHead.outputSize !== 1) return null;
+
+  const policyHead = parsePolicyValueHead(
+    candidate.policyHead as Record<string, unknown>,
+    trunkOutputSize,
+  );
+  if (!policyHead) return null;
+
+  const actionSpace = candidate.actionSpace as number;
+  if (policyHead.outputSize !== actionSpace) return null;
+
+  const training = parseTrainingInfo(candidate.training);
+  if (!training) return null;
+
+  return {
+    version: typeof candidate.version === 'number' ? candidate.version : STRATEGO_POLICY_VALUE_MODEL_VERSION,
+    kind: 'policy_value_mlp',
+    featureNames: [...featureNames] as string[],
+    actionSpace,
+    trunk,
+    valueHead,
+    policyHead,
+    training,
+  };
+}
+
+function parseFeatureNames(input: unknown): string[] | null {
+  if (!Array.isArray(input)) return null;
+  const featureNames: string[] = [];
+  for (const name of input) {
+    if (typeof name !== 'string') return null;
+    featureNames.push(name);
+  }
+
+  for (const schema of SUPPORTED_FEATURE_SCHEMAS) {
+    if (schema.length !== featureNames.length) continue;
+    let matches = true;
+    for (let index = 0; index < schema.length; index += 1) {
+      if (featureNames[index] !== schema[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return featureNames;
+  }
+
+  return null;
+}
+
+function parseLayers(rawLayers: unknown[], expectedInput: number): StrategoMlpLayer[] | null {
+  const layers: StrategoMlpLayer[] = [];
+  let nextInput = expectedInput;
+
+  for (const rawLayer of rawLayers) {
+    if (!rawLayer || typeof rawLayer !== 'object') return null;
+    const layer = rawLayer as Record<string, unknown>;
+
+    if (!Number.isInteger(layer.inputSize) || !Number.isInteger(layer.outputSize)) return null;
+    if (!Array.isArray(layer.weights) || !Array.isArray(layer.bias)) return null;
+    if (!isActivation(layer.activation)) return null;
+
+    const inputSize = layer.inputSize as number;
+    const outputSize = layer.outputSize as number;
+    if (inputSize !== nextInput || inputSize <= 0 || outputSize <= 0) return null;
+    if (layer.weights.length !== inputSize * outputSize) return null;
+    if (layer.bias.length !== outputSize) return null;
+
+    const weights = layer.weights as unknown[];
+    const bias = layer.bias as unknown[];
+    for (const value of weights) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+    }
+    for (const value of bias) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+    }
+
+    layers.push({
+      inputSize,
+      outputSize,
+      weights: [...(layer.weights as number[])],
+      bias: [...(layer.bias as number[])],
+      activation: layer.activation,
+    });
+    nextInput = outputSize;
+  }
+
+  return layers;
+}
+
+function parsePolicyValueHead(
+  rawHead: Record<string, unknown>,
+  expectedInputSize: number,
+): StrategoPolicyValueHead | null {
+  if (!Number.isInteger(rawHead.inputSize) || !Number.isInteger(rawHead.outputSize)) return null;
+  if (!Array.isArray(rawHead.weights) || !Array.isArray(rawHead.bias)) return null;
+
+  const inputSize = rawHead.inputSize as number;
+  const outputSize = rawHead.outputSize as number;
+  if (inputSize !== expectedInputSize || inputSize <= 0 || outputSize <= 0) return null;
+  if (rawHead.weights.length !== inputSize * outputSize) return null;
+  if (rawHead.bias.length !== outputSize) return null;
+  if (!rawHead.weights.every((value) => typeof value === 'number' && Number.isFinite(value))) return null;
+  if (!rawHead.bias.every((value) => typeof value === 'number' && Number.isFinite(value))) return null;
+
+  let activation: StrategoActivation | undefined;
+  if (rawHead.activation !== undefined) {
+    if (!isActivation(rawHead.activation)) return null;
+    activation = rawHead.activation;
+  }
+
+  return {
+    inputSize,
+    outputSize,
+    weights: [...(rawHead.weights as number[])],
+    bias: [...(rawHead.bias as number[])],
+    activation,
   };
 }
 
@@ -416,8 +748,20 @@ function parseTrainingInfo(input: unknown): StrategoModelTrainingInfo | null {
   if (typeof training.learningRate === 'number' && Number.isFinite(training.learningRate)) {
     parsed.learningRate = training.learningRate;
   }
+  if (typeof training.weightDecay === 'number' && Number.isFinite(training.weightDecay)) {
+    parsed.weightDecay = training.weightDecay;
+  }
   if (typeof training.workers === 'number' && Number.isFinite(training.workers)) {
     parsed.workers = training.workers;
+  }
+  if (typeof training.policySamples === 'number' && Number.isFinite(training.policySamples)) {
+    parsed.policySamples = training.policySamples;
+  }
+  if (typeof training.policyWeight === 'number' && Number.isFinite(training.policyWeight)) {
+    parsed.policyWeight = training.policyWeight;
+  }
+  if (typeof training.valueWeight === 'number' && Number.isFinite(training.valueWeight)) {
+    parsed.valueWeight = training.valueWeight;
   }
   if (Array.isArray(training.hiddenLayers)) {
     const hidden = training.hiddenLayers.filter(
@@ -439,6 +783,10 @@ function isActivation(value: unknown): value is StrategoActivation {
 
 function isMlpModel(model: StrategoModel): model is StrategoMlpModel {
   return model.kind === 'mlp';
+}
+
+function isPolicyValueModel(model: StrategoModel): model is StrategoPolicyValueMlpModel {
+  return model.kind === 'policy_value_mlp';
 }
 
 function getPieces(state: LocalStrategoState, color: TeamColor): Piece[] {
@@ -596,6 +944,254 @@ function flagPressureScore(pieces: Piece[], enemyFlag: Piece | undefined): numbe
   const averagePressure = total / movable.length;
   const closestPressure = 1 / (bestDistance + 1);
   return averagePressure * 0.6 + closestPressure * 0.4;
+}
+
+function buildOpponentBeliefFeatures(
+  state: LocalStrategoState,
+  opponentPieces: Piece[],
+  opponentColor: TeamColor,
+): OpponentBeliefFeatures {
+  const unknownPieces = opponentPieces.filter((piece) => !piece.revealed);
+  const knowledgeByPiece = inferPieceKnowledgeFromHistory(state.moveHistory, opponentColor);
+  const recentRates = collectRecentOpponentMoveRates(state.moveHistory, opponentColor);
+  const remainingCounts = buildRemainingOpponentRankCounts(state, opponentPieces, opponentColor);
+
+  const rankProbabilitySums: Record<PieceRank, number> = {
+    0: 0,
+    1: 0,
+    2: 0,
+    3: 0,
+    4: 0,
+    5: 0,
+    6: 0,
+    7: 0,
+    8: 0,
+    9: 0,
+    10: 0,
+    11: 0,
+  };
+
+  let unknownMovedCount = 0;
+  let unknownBacklineUnmovedCount = 0;
+  let unknownMustScoutCount = 0;
+
+  for (const piece of unknownPieces) {
+    const knowledge = knowledgeByPiece.get(piece.id) ?? { hasMoved: false, mustBeScout: false };
+    if (knowledge.hasMoved) unknownMovedCount += 1;
+    if (!knowledge.hasMoved && isBacklineRowForColor(piece.row, opponentColor)) {
+      unknownBacklineUnmovedCount += 1;
+    }
+    if (knowledge.mustBeScout) unknownMustScoutCount += 1;
+
+    const pieceRankProbabilities = buildUnknownPieceRankProbabilities(knowledge, remainingCounts);
+    for (const rank of PIECE_RANKS) {
+      rankProbabilitySums[rank] += pieceRankProbabilities[rank];
+    }
+  }
+
+  const unknownCount = unknownPieces.length;
+  const rankProbabilities: Record<PieceRank, number> = {
+    0: 0,
+    1: 0,
+    2: 0,
+    3: 0,
+    4: 0,
+    5: 0,
+    6: 0,
+    7: 0,
+    8: 0,
+    9: 0,
+    10: 0,
+    11: 0,
+  };
+
+  if (unknownCount > 0) {
+    for (const rank of PIECE_RANKS) {
+      rankProbabilities[rank] = clamp01(rankProbabilitySums[rank] / unknownCount);
+    }
+  }
+
+  let unknownEntropy = 0;
+  if (unknownCount > 0) {
+    for (const rank of PIECE_RANKS) {
+      const probability = rankProbabilities[rank];
+      if (probability <= 0) continue;
+      unknownEntropy -= probability * Math.log(probability);
+    }
+    const maxEntropy = Math.log(PIECE_RANKS.length);
+    if (maxEntropy > 0) {
+      unknownEntropy = clamp01(unknownEntropy / maxEntropy);
+    } else {
+      unknownEntropy = 0;
+    }
+  }
+
+  let unknownStrength = 0;
+  for (const rank of PIECE_RANKS) {
+    unknownStrength += rankProbabilities[rank] * BELIEF_RANK_STRENGTH[rank];
+  }
+
+  const opponentPieceTotal = Math.max(1, opponentPieces.length);
+  const denominator = Math.max(1, unknownCount);
+  return {
+    unknownRatio: clamp01(unknownCount / opponentPieceTotal),
+    unknownMovedRatio: unknownCount > 0 ? clamp01(unknownMovedCount / denominator) : 0,
+    unknownBacklineUnmovedRatio: unknownCount > 0 ? clamp01(unknownBacklineUnmovedCount / denominator) : 0,
+    mustScoutRatio: unknownCount > 0 ? clamp01(unknownMustScoutCount / denominator) : 0,
+    recentLongMoveRate: recentRates.longMoveRate,
+    recentAttackRate: recentRates.attackRate,
+    unknownEntropy,
+    unknownStrength: clamp01(unknownStrength),
+    rankProbabilities,
+  };
+}
+
+function inferPieceKnowledgeFromHistory(
+  history: readonly MoveHistoryEntry[],
+  opponentColor: TeamColor,
+): Map<string, { hasMoved: boolean; mustBeScout: boolean }> {
+  const knowledge = new Map<string, { hasMoved: boolean; mustBeScout: boolean }>();
+
+  for (const move of history) {
+    if (move.color !== opponentColor) continue;
+
+    const travelDistance = Math.abs(move.to_row - move.from_row) + Math.abs(move.to_col - move.from_col);
+    if (travelDistance <= 0) continue;
+
+    const current = knowledge.get(move.piece_id) ?? { hasMoved: false, mustBeScout: false };
+    current.hasMoved = true;
+    if (travelDistance > 1) current.mustBeScout = true;
+    knowledge.set(move.piece_id, current);
+  }
+
+  return knowledge;
+}
+
+function collectRecentOpponentMoveRates(
+  history: readonly MoveHistoryEntry[],
+  opponentColor: TeamColor,
+): { longMoveRate: number; attackRate: number } {
+  const opponentMoves = history.filter((entry) => entry.color === opponentColor);
+  const window = opponentMoves.slice(-HISTORY_FEATURE_WINDOW);
+  if (window.length === 0) {
+    return { longMoveRate: 0, attackRate: 0 };
+  }
+
+  let longMoveCount = 0;
+  let attackCount = 0;
+  for (const move of window) {
+    const distance = Math.abs(move.to_row - move.from_row) + Math.abs(move.to_col - move.from_col);
+    if (distance > 1) longMoveCount += 1;
+    if (move.combat_result !== null) attackCount += 1;
+  }
+
+  return {
+    longMoveRate: clamp01(longMoveCount / window.length),
+    attackRate: clamp01(attackCount / window.length),
+  };
+}
+
+function buildRemainingOpponentRankCounts(
+  state: LocalStrategoState,
+  opponentPieces: Piece[],
+  opponentColor: TeamColor,
+): Record<PieceRank, number> {
+  const capturedOpponent = opponentColor === 'red'
+    ? state.redCaptured
+    : state.blueCaptured;
+
+  const remainingCounts: Record<PieceRank, number> = {
+    0: PIECE_COUNTS_BY_RANK[0],
+    1: PIECE_COUNTS_BY_RANK[1],
+    2: PIECE_COUNTS_BY_RANK[2],
+    3: PIECE_COUNTS_BY_RANK[3],
+    4: PIECE_COUNTS_BY_RANK[4],
+    5: PIECE_COUNTS_BY_RANK[5],
+    6: PIECE_COUNTS_BY_RANK[6],
+    7: PIECE_COUNTS_BY_RANK[7],
+    8: PIECE_COUNTS_BY_RANK[8],
+    9: PIECE_COUNTS_BY_RANK[9],
+    10: PIECE_COUNTS_BY_RANK[10],
+    11: PIECE_COUNTS_BY_RANK[11],
+  };
+
+  for (const piece of capturedOpponent) {
+    remainingCounts[piece.rank] = Math.max(0, remainingCounts[piece.rank] - 1);
+  }
+
+  for (const piece of opponentPieces) {
+    if (!piece.revealed) continue;
+    remainingCounts[piece.rank] = Math.max(0, remainingCounts[piece.rank] - 1);
+  }
+
+  const inferredKnowledge = inferPieceKnowledgeFromHistory(state.moveHistory, opponentColor);
+  for (const piece of opponentPieces) {
+    if (piece.revealed) continue;
+    const knowledge = inferredKnowledge.get(piece.id);
+    if (!knowledge?.mustBeScout) continue;
+    remainingCounts[2] = Math.max(0, remainingCounts[2] - 1);
+  }
+
+  return remainingCounts;
+}
+
+function buildUnknownPieceRankProbabilities(
+  knowledge: { hasMoved: boolean; mustBeScout: boolean },
+  remainingCounts: Record<PieceRank, number>,
+): Record<PieceRank, number> {
+  const probabilities: Record<PieceRank, number> = {
+    0: 0,
+    1: 0,
+    2: 0,
+    3: 0,
+    4: 0,
+    5: 0,
+    6: 0,
+    7: 0,
+    8: 0,
+    9: 0,
+    10: 0,
+    11: 0,
+  };
+
+  let candidates: PieceRank[] = PIECE_RANKS;
+  if (knowledge.mustBeScout) {
+    probabilities[2] = 1;
+    return probabilities;
+  }
+  if (knowledge.hasMoved) {
+    candidates = MOVABLE_PIECE_RANKS;
+  }
+
+  let totalWeight = 0;
+  for (const rank of candidates) {
+    totalWeight += Math.max(0, remainingCounts[rank]);
+  }
+
+  if (totalWeight <= 0) {
+    const uniformProbability = 1 / candidates.length;
+    for (const rank of candidates) {
+      probabilities[rank] = uniformProbability;
+    }
+    return probabilities;
+  }
+
+  for (const rank of candidates) {
+    probabilities[rank] = Math.max(0, remainingCounts[rank]) / totalWeight;
+  }
+  return probabilities;
+}
+
+function isBacklineRowForColor(row: number, color: TeamColor): boolean {
+  if (color === 'red') return row >= 7;
+  return row <= 2;
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
 }
 
 function gamePhaseFeature(turnNumber: number): number {

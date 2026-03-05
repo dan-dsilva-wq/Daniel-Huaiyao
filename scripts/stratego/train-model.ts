@@ -3,15 +3,18 @@ import { cpus, tmpdir } from 'node:os';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
-import type { ComputerDifficulty } from '../../lib/stratego/ai';
+import type { ComputerDifficulty, SearchAlgorithm } from '../../lib/stratego/ai';
 import {
   STRATEGO_FEATURE_NAMES,
   STRATEGO_LINEAR_MODEL_VERSION,
   getActiveStrategoModel,
+  parseStrategoModel,
   type StrategoLinearModel,
 } from '../../lib/stratego/ml';
 import {
+  type LeagueModelEntry,
   runSelfPlayBatch,
+  type ValueTargetMode,
   type SelfPlayBatchResult,
   type SelfPlayGameSummary,
   type TrainingSample,
@@ -31,6 +34,21 @@ interface TrainOptions {
   workers: number;
   datasetOut: string | null;
   skipFit: boolean;
+  includePolicyTargets: boolean;
+  policyTemperature: number;
+  policyTopK: number;
+  valueTargetMode: ValueTargetMode;
+  searchValueBlend: number;
+  bootstrapSteps: number;
+  bootstrapDiscount: number;
+  bootstrapBlend: number;
+  leagueModelPaths: string[];
+  leagueSampleProb: number;
+  leagueHeuristicProb: number;
+  searchAlgorithm: SearchAlgorithm;
+  puctSimulations: number;
+  puctCpuct: number;
+  puctRolloutDepth: number;
 }
 
 interface MetricSummary {
@@ -66,6 +84,8 @@ interface WorkerProgressPayload {
   captureCount: number;
   longestNoCaptureStreak: number;
   durationMs: number;
+  redController?: string;
+  blueController?: string;
 }
 
 interface WorkerDonePayload {
@@ -105,6 +125,21 @@ const DEFAULT_OPTIONS: TrainOptions = {
   workers: Math.max(1, cpus().length - 1),
   datasetOut: null,
   skipFit: false,
+  includePolicyTargets: false,
+  policyTemperature: 1.1,
+  policyTopK: 12,
+  valueTargetMode: 'terminal',
+  searchValueBlend: 0.35,
+  bootstrapSteps: 0,
+  bootstrapDiscount: 1,
+  bootstrapBlend: 0,
+  leagueModelPaths: [],
+  leagueSampleProb: 0,
+  leagueHeuristicProb: 0,
+  searchAlgorithm: 'minimax',
+  puctSimulations: 240,
+  puctCpuct: 1.18,
+  puctRolloutDepth: 18,
 };
 
 const DEFAULT_METRICS_LOG_PATH = '.stratego-cache/metrics/training-metrics.jsonl';
@@ -123,6 +158,39 @@ async function main(): Promise<void> {
       'setup',
       `verbose=${options.verbose} traceTurns=${options.traceTurns} progressEvery=${options.progressEvery} skipFit=${options.skipFit}`,
     );
+    if (options.includePolicyTargets) {
+      logStage(
+        'setup',
+        `policy targets enabled | temperature=${options.policyTemperature} topK=${options.policyTopK}`,
+      );
+    }
+    if (options.valueTargetMode !== 'terminal') {
+      logStage(
+        'setup',
+        `value targets mode=${options.valueTargetMode} searchBlend=${options.searchValueBlend}`,
+      );
+    }
+    if (options.bootstrapSteps > 0 && options.bootstrapBlend > 0) {
+      logStage(
+        'setup',
+        `n-step bootstrap steps=${options.bootstrapSteps} discount=${options.bootstrapDiscount} blend=${options.bootstrapBlend}`,
+      );
+    }
+    if (
+      options.leagueModelPaths.length > 0
+      && (options.leagueSampleProb > 0 || options.leagueHeuristicProb > 0)
+    ) {
+      logStage(
+        'setup',
+        `league self-play pool=${options.leagueModelPaths.length} sampleProb=${options.leagueSampleProb} heuristicProb=${options.leagueHeuristicProb}`,
+      );
+    }
+    if (options.searchAlgorithm === 'puct-lite') {
+      logStage(
+        'setup',
+        `search mode=puct-lite sims=${options.puctSimulations} cpuct=${options.puctCpuct} rolloutDepth=${options.puctRolloutDepth}`,
+      );
+    }
   }
   logger.log('run_start', {
     options,
@@ -211,6 +279,7 @@ function runSelfPlaySingleProcess(
   startedAtMs: number,
   logger: TrainingMetricsLogger,
 ): SelfPlayAggregate {
+  const leagueModels = loadLeagueModelPool(options.leagueModelPaths);
   const aggregate: SelfPlayAggregate = {
     samples: [],
     sampleCount: 0,
@@ -225,9 +294,24 @@ function runSelfPlaySingleProcess(
     options.games,
     {
       difficulty: options.difficulty,
+      searchAlgorithm: options.searchAlgorithm,
+      puctSimulations: options.puctSimulations,
+      puctCpuct: options.puctCpuct,
+      puctRolloutDepth: options.puctRolloutDepth,
       maxTurns: options.maxTurns,
       noCaptureDrawMoves: options.noCaptureDrawMoves,
       traceTurns: options.traceTurns,
+      includePolicyTargets: options.includePolicyTargets,
+      policyTemperature: options.policyTemperature,
+      policyTopK: options.policyTopK,
+      valueTargetMode: options.valueTargetMode,
+      searchValueBlend: options.searchValueBlend,
+      bootstrapSteps: options.bootstrapSteps,
+      bootstrapDiscount: options.bootstrapDiscount,
+      bootstrapBlend: options.bootstrapBlend,
+      leagueModels,
+      leagueSampleProb: options.leagueSampleProb,
+      leagueHeuristicProb: options.leagueHeuristicProb,
       traceLog: options.traceTurns ? (line) => console.log(`  [trace] ${line}`) : undefined,
     },
     (summary) => {
@@ -336,6 +420,37 @@ function runSelfPlayWorker(
       assignment.outPath,
     ];
     if (options.traceTurns) args.push('--trace-turns');
+    if (options.includePolicyTargets) {
+      args.push(
+        '--policy-targets',
+        '--policy-temperature',
+        String(options.policyTemperature),
+        '--policy-top-k',
+        String(options.policyTopK),
+      );
+    }
+    if (options.valueTargetMode !== 'terminal') {
+      args.push('--value-target-mode', options.valueTargetMode);
+      args.push('--search-value-blend', String(options.searchValueBlend));
+    }
+    if (options.bootstrapSteps > 0 && options.bootstrapBlend > 0) {
+      args.push('--bootstrap-steps', String(options.bootstrapSteps));
+      args.push('--bootstrap-discount', String(options.bootstrapDiscount));
+      args.push('--bootstrap-blend', String(options.bootstrapBlend));
+    }
+    if (options.leagueModelPaths.length > 0 || options.leagueHeuristicProb > 0) {
+      if (options.leagueModelPaths.length > 0) {
+        args.push('--league-models', options.leagueModelPaths.join(','));
+      }
+      args.push('--league-sample-prob', String(options.leagueSampleProb));
+      args.push('--league-heuristic-prob', String(options.leagueHeuristicProb));
+    }
+    if (options.searchAlgorithm === 'puct-lite') {
+      args.push('--search-mode', 'puct-lite');
+      args.push('--puct-simulations', String(options.puctSimulations));
+      args.push('--puct-cpuct', String(options.puctCpuct));
+      args.push('--puct-rollout-depth', String(options.puctRolloutDepth));
+    }
 
     const child = spawn(process.execPath, args, {
       cwd: process.cwd(),
@@ -362,6 +477,8 @@ function runSelfPlayWorker(
           captureCount: payload.captureCount,
           longestNoCaptureStreak: payload.longestNoCaptureStreak,
           durationMs: payload.durationMs,
+          redController: payload.redController,
+          blueController: payload.blueController,
         };
         onProgress(summary, payload.workerId);
         return;
@@ -488,10 +605,13 @@ function maybeLogSelfPlayProgress(
   const winnerLabel = summary.winner ?? 'draw';
   const reasonLabel = summary.terminalReason;
   const workerLabel = workerId ? ` worker=${workerId}` : '';
+  const controllerLabel = summary.redController && summary.blueController
+    ? ` controllers=${summary.redController}v${summary.blueController}`
+    : '';
   const prefix = options.verbose ? '[self-play:game]' : '[self-play]';
 
   console.log(
-    `${prefix} ${aggregate.completedGames}/${options.games}${workerLabel} turns=${summary.turnsPlayed} winner=${winnerLabel} reason=${reasonLabel} captures=${summary.captureCount} max_no_cap=${summary.longestNoCaptureStreak} samples=${aggregate.sampleCount} game_time=${formatDuration(summary.durationMs)} elapsed=${formatDuration(elapsedMs)} eta=${formatDuration(etaMs)} W/L/D=${aggregate.redWins}/${aggregate.blueWins}/${aggregate.draws}`,
+    `${prefix} ${aggregate.completedGames}/${options.games}${workerLabel}${controllerLabel} turns=${summary.turnsPlayed} winner=${winnerLabel} reason=${reasonLabel} captures=${summary.captureCount} max_no_cap=${summary.longestNoCaptureStreak} samples=${aggregate.sampleCount} game_time=${formatDuration(summary.durationMs)} elapsed=${formatDuration(elapsedMs)} eta=${formatDuration(etaMs)} W/L/D=${aggregate.redWins}/${aggregate.blueWins}/${aggregate.draws}`,
   );
   logger.log('self_play_progress', {
     completedGames: aggregate.completedGames,
@@ -503,6 +623,8 @@ function maybeLogSelfPlayProgress(
     terminalReason: summary.terminalReason,
     captureCount: summary.captureCount,
     longestNoCaptureStreak: summary.longestNoCaptureStreak,
+    redController: summary.redController ?? null,
+    blueController: summary.blueController ?? null,
     sampleCount: aggregate.sampleCount,
     redWins: aggregate.redWins,
     blueWins: aggregate.blueWins,
@@ -521,6 +643,32 @@ function processBufferedLines(buffer: string, onLine: (line: string) => void): s
     nextNewline = buffer.indexOf('\n');
   }
   return buffer;
+}
+
+function loadLeagueModelPool(modelPaths: string[]): LeagueModelEntry[] {
+  if (modelPaths.length === 0) return [];
+
+  const uniquePaths = [...new Set(modelPaths.map((entry) => path.resolve(process.cwd(), entry)))];
+  const loaded: LeagueModelEntry[] = [];
+  for (let index = 0; index < uniquePaths.length; index += 1) {
+    const absolutePath = uniquePaths[index];
+    const raw = readFileSync(absolutePath, 'utf8');
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      throw new Error(`Failed to parse league model JSON at ${absolutePath}: ${(error as Error).message}`);
+    }
+    const model = parseStrategoModel(parsed);
+    if (!model) {
+      throw new Error(`Invalid Stratego model format at ${absolutePath}`);
+    }
+    loaded.push({
+      id: `${index + 1}:${path.basename(absolutePath)}`,
+      model,
+    });
+  }
+  return loaded;
 }
 
 function fitLinearModel(
@@ -644,6 +792,21 @@ function writeDatasetFile(
       maxTurns: options.maxTurns,
       noCaptureDrawMoves: options.noCaptureDrawMoves,
       workers: options.workers,
+      includePolicyTargets: options.includePolicyTargets,
+      policyTemperature: options.policyTemperature,
+      policyTopK: options.policyTopK,
+      valueTargetMode: options.valueTargetMode,
+      searchValueBlend: options.searchValueBlend,
+      bootstrapSteps: options.bootstrapSteps,
+      bootstrapDiscount: options.bootstrapDiscount,
+      bootstrapBlend: options.bootstrapBlend,
+      leagueModelPaths: options.leagueModelPaths,
+      leagueSampleProb: options.leagueSampleProb,
+      leagueHeuristicProb: options.leagueHeuristicProb,
+      searchAlgorithm: options.searchAlgorithm,
+      puctSimulations: options.puctSimulations,
+      puctCpuct: options.puctCpuct,
+      puctRolloutDepth: options.puctRolloutDepth,
     },
   };
 
@@ -740,6 +903,65 @@ function parseOptions(argv: string[]): TrainOptions {
       case '--skip-fit':
         options.skipFit = true;
         break;
+      case '--policy-targets':
+        options.includePolicyTargets = true;
+        break;
+      case '--policy-temperature':
+        options.policyTemperature = parsePositiveFloat(nextValue, arg);
+        index += 1;
+        break;
+      case '--policy-top-k':
+        options.policyTopK = parsePositiveInt(nextValue, arg);
+        index += 1;
+        break;
+      case '--value-target-mode':
+        options.valueTargetMode = parseValueTargetMode(nextValue);
+        index += 1;
+        break;
+      case '--search-value-blend':
+        options.searchValueBlend = parseUnitInterval(nextValue, arg);
+        index += 1;
+        break;
+      case '--bootstrap-steps':
+        options.bootstrapSteps = parseNonNegativeInt(nextValue, arg);
+        index += 1;
+        break;
+      case '--bootstrap-discount':
+        options.bootstrapDiscount = parseUnitInterval(nextValue, arg);
+        index += 1;
+        break;
+      case '--bootstrap-blend':
+        options.bootstrapBlend = parseUnitInterval(nextValue, arg);
+        index += 1;
+        break;
+      case '--league-models':
+        options.leagueModelPaths = parsePathList(nextValue, arg);
+        index += 1;
+        break;
+      case '--league-sample-prob':
+        options.leagueSampleProb = parseUnitInterval(nextValue, arg);
+        index += 1;
+        break;
+      case '--league-heuristic-prob':
+        options.leagueHeuristicProb = parseUnitInterval(nextValue, arg);
+        index += 1;
+        break;
+      case '--search-mode':
+        options.searchAlgorithm = parseSearchAlgorithm(nextValue);
+        index += 1;
+        break;
+      case '--puct-simulations':
+        options.puctSimulations = parsePositiveInt(nextValue, arg);
+        index += 1;
+        break;
+      case '--puct-cpuct':
+        options.puctCpuct = parsePositiveFloat(nextValue, arg);
+        index += 1;
+        break;
+      case '--puct-rollout-depth':
+        options.puctRolloutDepth = parsePositiveInt(nextValue, arg);
+        index += 1;
+        break;
       case '--verbose':
       case '-v':
         options.verbose = true;
@@ -788,6 +1010,41 @@ function parsePositiveFloat(value: string | undefined, flag: string): number {
   return parsed;
 }
 
+function parseUnitInterval(value: string | undefined, flag: string): number {
+  if (!value) throw new Error(`Missing value for ${flag}.`);
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(`Invalid value for ${flag}: ${value}. Expected a number in [0,1].`);
+  }
+  return parsed;
+}
+
+function parsePathList(value: string | undefined, flag: string): string[] {
+  if (!value) throw new Error(`Missing value for ${flag}.`);
+  const paths = value
+    .split(/[;,]/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  if (paths.length === 0) {
+    throw new Error(`Invalid value for ${flag}: ${value}. Expected one or more comma/semicolon-separated paths.`);
+  }
+  return paths;
+}
+
+function parseValueTargetMode(value: string | undefined): ValueTargetMode {
+  if (value === 'terminal' || value === 'mixed' || value === 'search') {
+    return value;
+  }
+  throw new Error(`Invalid --value-target-mode value: ${value}. Expected terminal|mixed|search.`);
+}
+
+function parseSearchAlgorithm(value: string | undefined): SearchAlgorithm {
+  if (value === 'minimax' || value === 'puct-lite') {
+    return value;
+  }
+  throw new Error(`Invalid --search-mode value: ${value}. Expected minimax|puct-lite.`);
+}
+
 function parseNonNegativeInt(value: string | undefined, flag: string): number {
   if (!value) throw new Error(`Missing value for ${flag}.`);
   const parsed = Number.parseInt(value, 10);
@@ -812,6 +1069,21 @@ function printUsageAndExit(): never {
   console.log('  --progress-every <n>  Progress print interval in games (default: 20)');
   console.log('  --dataset-out <path>  Export generated dataset JSON to this path');
   console.log('  --skip-fit            Skip linear model fitting (self-play/data generation only)');
+  console.log('  --policy-targets      Include search-policy targets in dataset samples');
+  console.log('  --policy-temperature <n> Policy softmax temperature (default: 1.1)');
+  console.log('  --policy-top-k <n>    Keep top-K scored moves for policy targets (default: 12)');
+  console.log('  --value-target-mode <m> terminal|mixed|search (default: terminal)');
+  console.log('  --search-value-blend <n> Blend weight for search value in mixed mode [0..1] (default: 0.35)');
+  console.log('  --bootstrap-steps <n> N-step lookahead for bootstrapped value target (default: 0, disabled)');
+  console.log('  --bootstrap-discount <n> Discount for bootstrapped target in [0..1] (default: 1.0)');
+  console.log('  --bootstrap-blend <n> Blend weight for bootstrapped target in [0..1] (default: 0.0)');
+  console.log('  --league-models <csv> Optional league pool model paths (comma/semicolon-separated)');
+  console.log('  --league-sample-prob <n> Per-side probability to sample from league pool [0..1] (default: 0)');
+  console.log('  --league-heuristic-prob <n> Per-side probability to force heuristic-only play [0..1] (default: 0)');
+  console.log('  --search-mode <m>     minimax|puct-lite (default: minimax)');
+  console.log('  --puct-simulations <n> PUCT simulations when --search-mode puct-lite (default: 240)');
+  console.log('  --puct-cpuct <n>      PUCT exploration constant (default: 1.18)');
+  console.log('  --puct-rollout-depth <n> PUCT depth cutoff for value eval (default: 18)');
   console.log('  --verbose, -v         Print per-game progress details');
   console.log('  --trace-turns         Print every turn decision (implies --verbose)');
   process.exit(0);

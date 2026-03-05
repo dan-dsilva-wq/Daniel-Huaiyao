@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import contextlib
 import json
 import os
 import random
@@ -122,6 +123,17 @@ def parse_args() -> argparse.Namespace:
         help="Do not trigger early stopping before this epoch",
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument(
+        "--amp",
+        default="auto",
+        help="Automatic mixed precision: auto|on|off (default: auto)",
+    )
+    parser.add_argument(
+        "--compile",
+        dest="compile_mode",
+        default="auto",
+        help="torch.compile mode: auto|on|off (default: auto)",
+    )
     parser.set_defaults(resume=True, warm_start=True)
     return parser.parse_args()
 
@@ -154,6 +166,13 @@ def parse_non_negative_int(raw: str, flag: str) -> int:
     if parsed < 0:
         raise ValueError(f"Invalid value for {flag}: {raw}")
     return parsed
+
+
+def parse_mode(raw: str, flag: str) -> str:
+    value = raw.strip().lower()
+    if value not in {"auto", "on", "off"}:
+        raise ValueError(f"Invalid value for {flag}: {raw}")
+    return value
 
 
 def resolve_device(raw_value: str) -> Tuple[Any, str]:
@@ -237,6 +256,61 @@ def resolve_loader_workers(raw_value: str, device_label: str) -> int:
     if device_label in {"cuda", "mps", "directml"}:
         return min(8, max(1, cpu_count // 2))
     return 0
+
+
+def resolve_amp_mode(raw_value: str, device_label: str) -> bool:
+    mode = parse_mode(raw_value, "--amp")
+    if mode == "off":
+        return False
+    if mode == "on" and device_label != "cuda":
+        raise ValueError("--amp on requires CUDA")
+    if device_label != "cuda":
+        return False
+    return True
+
+
+def maybe_compile_model(model: nn.Module, raw_mode: str, device_label: str) -> Tuple[nn.Module, bool]:
+    mode = parse_mode(raw_mode, "--compile")
+    if mode == "off":
+        return model, False
+
+    should_try = mode == "on" or (mode == "auto" and device_label == "cuda")
+    if not should_try:
+        return model, False
+
+    compile_fn = getattr(torch, "compile", None)
+    if not callable(compile_fn):
+        if mode == "on":
+            raise ValueError("--compile on requested, but torch.compile is unavailable")
+        return model, False
+
+    try:
+        compiled_model = compile_fn(model)  # type: ignore[misc]
+        return compiled_model, True
+    except Exception as error:
+        if mode == "on":
+            raise ValueError(f"--compile on requested, but compilation failed: {error}") from error
+        print(f"[deep:compile] skipped ({error})", flush=True)
+        return model, False
+
+
+def resolve_amp_scaler(use_amp: bool) -> Optional[torch.cuda.amp.GradScaler]:
+    if not use_amp:
+        return None
+    try:
+        return torch.cuda.amp.GradScaler(enabled=True)
+    except Exception as error:
+        print(f"[deep:amp] GradScaler unavailable, disabling AMP ({error})", flush=True)
+        return None
+
+
+def autocast_context(use_amp: bool):
+    if not use_amp:
+        return contextlib.nullcontext()
+    try:
+        return torch.autocast(device_type="cuda", dtype=torch.float16)
+    except Exception:
+        return torch.cuda.amp.autocast(enabled=True)
 
 
 def set_seed(seed: int) -> None:
@@ -327,6 +401,8 @@ def build_output_payload(
     device_label: str,
     resolved_batch_size: int,
     loader_workers: int,
+    amp_enabled: bool,
+    compiled_enabled: bool,
 ) -> Dict[str, Any]:
     exported_layers = []
     model_layers = linear_layers(model)
@@ -365,6 +441,8 @@ def build_output_payload(
             "hiddenLayers": hidden_layers,
             "workers": int(meta.get("workers", 1)),
             "loaderWorkers": int(loader_workers),
+            "amp": bool(amp_enabled),
+            "compiled": bool(compiled_enabled),
         },
     }
 
@@ -381,6 +459,8 @@ def write_exported_model(
     device_label: str,
     resolved_batch_size: int,
     loader_workers: int,
+    amp_enabled: bool,
+    compiled_enabled: bool,
 ) -> None:
     ensure_parent_dir(out_path)
     payload = build_output_payload(
@@ -394,6 +474,8 @@ def write_exported_model(
         device_label=device_label,
         resolved_batch_size=resolved_batch_size,
         loader_workers=loader_workers,
+        amp_enabled=amp_enabled,
+        compiled_enabled=compiled_enabled,
     )
     with open(out_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
@@ -598,6 +680,7 @@ def main() -> None:
     y_val = y_data[val_indices]
 
     device, device_label = resolve_device(args.device)
+    use_amp = resolve_amp_mode(str(args.amp), device_label)
     resolved_batch_size = resolve_batch_size(str(args.batch_size), device_label, int(x_train.shape[0]))
     loader_workers = resolve_loader_workers(str(args.loader_workers), device_label)
     loader_kwargs: Dict[str, Any] = {
@@ -612,7 +695,11 @@ def main() -> None:
         loader_kwargs["pin_memory"] = True
 
     model = StrategoValueNet(len(feature_names), hidden_layers).to(device)
+    model, compiled_model = maybe_compile_model(model, str(args.compile_mode), device_label)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    scaler = resolve_amp_scaler(use_amp)
+    if use_amp and scaler is None:
+        use_amp = False
     criterion = nn.MSELoss()
     loader = DataLoader(TensorDataset(x_train, y_train), **loader_kwargs)
     output_path = os.path.abspath(args.out)
@@ -659,6 +746,7 @@ def main() -> None:
             f"[deep:setup] device={device_label} samples={sample_count} train={x_train.shape[0]} "
             f"val={x_val.shape[0]} hidden={hidden_layers} epochs={args.epochs} start_epoch={start_epoch} "
             f"batch_size={resolved_batch_size} loader_workers={loader_workers} prefetch_factor={args.prefetch_factor if loader_workers > 0 else 0} "
+            f"amp={'on' if use_amp else 'off'} compile={'on' if compiled_model else 'off'} "
             f"resume={'on' if args.resume else 'off'} warm_start={'on' if args.warm_start else 'off'} "
             f"loaded_checkpoint={'yes' if resumed_from_checkpoint else 'no'} loaded_weights={'yes' if warm_started else 'no'} "
             f"early_stop_patience={args.early_stop_patience} early_stop_min_delta={args.early_stop_min_delta} "
@@ -683,6 +771,8 @@ def main() -> None:
                 "learningRate": float(args.lr),
                 "weightDecay": float(args.weight_decay),
                 "hiddenLayers": hidden_layers,
+                "amp": bool(use_amp),
+                "compile": bool(compiled_model),
                 "resume": bool(args.resume),
                 "warmStart": bool(args.warm_start),
                 "checkpoint": checkpoint_path,
@@ -724,10 +814,16 @@ def main() -> None:
             batch_targets = batch_targets.to(device)
 
             optimizer.zero_grad(set_to_none=True)
-            predictions = model(batch_inputs)
-            loss = criterion(predictions, batch_targets)
-            loss.backward()
-            optimizer.step()
+            with autocast_context(use_amp):
+                predictions = model(batch_inputs)
+                loss = criterion(predictions, batch_targets)
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
 
             running_loss += loss.item()
             batch_count += 1
@@ -755,6 +851,8 @@ def main() -> None:
                 device_label=device_label,
                 resolved_batch_size=resolved_batch_size,
                 loader_workers=loader_workers,
+                amp_enabled=use_amp,
+                compiled_enabled=compiled_model,
             )
             print(
                 f"[deep:interrupt] checkpoint saved to {checkpoint_path}; partial model exported to {output_path}",
@@ -872,6 +970,8 @@ def main() -> None:
         device_label=device_label,
         resolved_batch_size=resolved_batch_size,
         loader_workers=loader_workers,
+        amp_enabled=use_amp,
+        compiled_enabled=compiled_model,
     )
 
     if os.path.exists(checkpoint_path):

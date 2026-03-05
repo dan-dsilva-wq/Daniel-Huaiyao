@@ -4,8 +4,8 @@ import { createClient } from '@supabase/supabase-js';
 
 let vapidConfigured = false;
 
-function ensureVapidConfigured() {
-  if (vapidConfigured) return;
+function ensureVapidConfigured(): { ok: true } | { ok: false; reason: string } {
+  if (vapidConfigured) return { ok: true };
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
   if (publicKey && privateKey) {
@@ -16,6 +16,10 @@ function ensureVapidConfigured() {
     );
     vapidConfigured = true;
   }
+  if (vapidConfigured) {
+    return { ok: true };
+  }
+  return { ok: false, reason: 'Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY' };
 }
 
 const supabase = createClient(
@@ -116,7 +120,13 @@ const ACTION_APP_NAMES: Record<string, string> = {
 
 export async function POST(request: Request) {
   try {
-    ensureVapidConfigured();
+    const vapidStatus = ensureVapidConfigured();
+    if (!vapidStatus.ok) {
+      return NextResponse.json(
+        { error: 'Push notifications are not configured', details: vapidStatus.reason },
+        { status: 500 }
+      );
+    }
 
     const { action, title, user } = await request.json() as {
       action: ActionType;
@@ -163,7 +173,10 @@ export async function POST(request: Request) {
 
     if (subError) {
       console.error('Error fetching subscriptions:', subError);
-      return NextResponse.json({ error: 'Failed to fetch subscriptions' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'Failed to fetch subscriptions', details: subError.message },
+        { status: 500 }
+      );
     }
 
     if (!subscriptions || subscriptions.length === 0) {
@@ -226,6 +239,9 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error('Notification error:', error);
-    return NextResponse.json({ error: 'Failed to send notification' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to send notification', details: error instanceof Error ? error.message : 'Unknown error' },
+      { status: 500 }
+    );
   }
 }
