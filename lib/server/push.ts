@@ -135,7 +135,11 @@ async function fetchSubscriptions(users: KnownUser[]): Promise<{
       .from('push_subscriptions')
       .select('endpoint, p256dh, auth, user_name, last_used_at')
       .in('user_name', users);
-    data = fallback.data;
+    data =
+      fallback.data?.map((row) => ({
+        ...row,
+        timezone: null,
+      })) ?? null;
     error = fallback.error;
   }
 
