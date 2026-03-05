@@ -561,11 +561,30 @@ export default function MemoriesPage() {
                                 ))}
                               </div>
                             )}
-                            {/* Photo indicator */}
+                            {/* Timeline thumbnails */}
                             {memory.photos && memory.photos.length > 0 && (
-                              <div className={`flex items-center gap-1 mt-2 text-xs text-pink-500 dark:text-pink-400 ${index % 2 === 1 ? 'md:justify-end' : ''}`}>
-                                <span>📷</span>
-                                <span>{memory.photos.length} photo{memory.photos.length > 1 ? 's' : ''}</span>
+                              <div
+                                className={`mt-3 flex items-center gap-2 ${
+                                  index % 2 === 1 ? 'md:justify-end' : ''
+                                }`}
+                              >
+                                {memory.photos.slice(0, 2).map((photo) => (
+                                  <div
+                                    key={photo.id}
+                                    className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 ring-1 ring-black/5 dark:ring-white/10"
+                                  >
+                                    <img
+                                      src={photo.photo_url}
+                                      alt={photo.caption || 'Memory thumbnail'}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </div>
+                                ))}
+                                {memory.photos.length > 2 && (
+                                  <span className="text-xs text-pink-500 dark:text-pink-400 font-medium">
+                                    +{memory.photos.length - 2} more
+                                  </span>
+                                )}
                               </div>
                             )}
                           </div>
