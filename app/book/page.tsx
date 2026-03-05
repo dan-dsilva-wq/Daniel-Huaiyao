@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { playPageFlip, playSubmit, playNotification } from '@/lib/bookSounds';
+import { getCurrentUser as getStoredUser, setCurrentUser as persistCurrentUser } from '@/lib/user-session';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 type Writer = 'daniel' | 'huaiyao';
@@ -35,7 +36,11 @@ function formatTimestamp(timestamp: string): string {
 
 export default function StoryBookPage() {
   useMarkAppViewed('book');
-  const [currentUser, setCurrentUser] = useState<Writer | null>(null);
+  const [currentUser, setCurrentUser] = useState<Writer | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const user = getStoredUser();
+    return user === 'daniel' || user === 'huaiyao' ? user : null;
+  });
   const [sentences, setSentences] = useState<Sentence[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
@@ -44,12 +49,6 @@ export default function StoryBookPage() {
   const [expandedSentence, setExpandedSentence] = useState<string | null>(null);
   const [partnerTyping, setPartnerTyping] = useState(false);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Get current user
-  useEffect(() => {
-    const user = localStorage.getItem('currentUser') as Writer | null;
-    setCurrentUser(user);
-  }, []);
 
   // Calculate current turn
   const currentTurn: Writer = sentences.length === 0
@@ -88,7 +87,9 @@ export default function StoryBookPage() {
   }, []);
 
   useEffect(() => {
-    fetchSentences();
+    queueMicrotask(() => {
+      void fetchSentences();
+    });
   }, [fetchSentences]);
 
   // Update typing status
@@ -204,29 +205,49 @@ export default function StoryBookPage() {
   // User selection
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-amber-950 dark:via-stone-900 dark:to-yellow-950 flex items-center justify-center p-4">
+      <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-amber-100 via-orange-100 to-stone-100 dark:from-stone-950 dark:via-amber-950 dark:to-zinc-950 flex items-center justify-center p-4">
+        <div className="absolute inset-0 pointer-events-none">
+          <motion.div
+            className="absolute -top-20 -left-20 w-64 h-64 bg-amber-300/40 dark:bg-amber-700/20 rounded-full blur-3xl"
+            animate={{ scale: [1, 1.2, 1], x: [0, 18, 0] }}
+            transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <motion.div
+            className="absolute bottom-0 right-0 w-72 h-72 bg-orange-300/35 dark:bg-orange-700/20 rounded-full blur-3xl"
+            animate={{ scale: [1.1, 1, 1.1], x: [0, -22, 0] }}
+            transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut' }}
+          />
+        </div>
+
         <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="text-center"
+          initial={{ opacity: 0, y: 14, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          className="relative z-10 w-full max-w-md rounded-3xl border border-amber-200/70 dark:border-amber-800/60 bg-white/85 dark:bg-stone-900/85 backdrop-blur p-6 sm:p-8 shadow-2xl"
         >
-          <h1 className="text-3xl font-serif text-amber-800 dark:text-amber-200 mb-8">Who&apos;s writing?</h1>
-          <div className="flex gap-4 justify-center">
+          <h1 className="text-3xl font-serif text-amber-900 dark:text-amber-200 text-center">Story Book</h1>
+          <p className="mt-2 text-center text-sm text-amber-700/80 dark:text-amber-300/80">
+            Pick who is writing and continue your shared chapter.
+          </p>
+
+          <div className="mt-6 space-y-3">
             {(['daniel', 'huaiyao'] as Writer[]).map((writer) => (
-              <button
+              <motion.button
                 key={writer}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
                 onClick={() => {
-                  localStorage.setItem('currentUser', writer);
+                  persistCurrentUser(writer);
                   setCurrentUser(writer);
                 }}
-                className={`px-8 py-4 rounded-xl font-medium transition-all ${
+                className={`w-full rounded-2xl px-5 py-4 text-left text-white shadow-md transition-colors ${
                   writer === 'daniel'
-                    ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                    : 'bg-rose-500 hover:bg-rose-600 text-white'
+                    ? 'bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600'
+                    : 'bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600'
                 }`}
               >
-                {formatWriterName(writer)}
-              </button>
+                <div className="font-semibold text-lg">{formatWriterName(writer)}</div>
+                <div className="text-xs text-white/85 mt-0.5">Enter as writer</div>
+              </motion.button>
             ))}
           </div>
         </motion.div>
@@ -236,163 +257,224 @@ export default function StoryBookPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-amber-950 dark:via-stone-900 dark:to-yellow-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-amber-100 via-orange-100 to-stone-100 dark:from-stone-950 dark:via-amber-950 dark:to-zinc-950 flex items-center justify-center">
         <motion.div
           animate={{ rotate: 360 }}
-          transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
+          transition={{ repeat: Infinity, duration: 1.5, ease: 'linear' }}
           className="w-12 h-12 border-4 border-amber-200 border-t-amber-600 rounded-full"
         />
       </div>
     );
   }
 
+  const writerTheme = currentUser === 'daniel'
+    ? {
+        chip: 'bg-blue-100 dark:bg-blue-900/45 text-blue-700 dark:text-blue-200 border-blue-300/80 dark:border-blue-700/70',
+        turn: 'border-blue-300/80 dark:border-blue-700/70 bg-gradient-to-r from-blue-100/80 to-indigo-100/60 dark:from-blue-900/35 dark:to-indigo-900/25 text-blue-800 dark:text-blue-200',
+        button: 'from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600',
+      }
+    : {
+        chip: 'bg-rose-100 dark:bg-rose-900/45 text-rose-700 dark:text-rose-200 border-rose-300/80 dark:border-rose-700/70',
+        turn: 'border-rose-300/80 dark:border-rose-700/70 bg-gradient-to-r from-rose-100/80 to-pink-100/60 dark:from-rose-900/35 dark:to-pink-900/25 text-rose-800 dark:text-rose-200',
+        button: 'from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600',
+      };
+
+  const pageWindowStart = Math.max(1, Math.min(currentPage - 2, totalPages - 4));
+  const pageWindowEnd = Math.min(totalPages, pageWindowStart + 4);
+  const visiblePages = Array.from(
+    { length: pageWindowEnd - pageWindowStart + 1 },
+    (_, index) => pageWindowStart + index
+  );
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-amber-950 dark:via-stone-900 dark:to-yellow-950 py-6 px-4">
-      {/* Header */}
-      <div className="max-w-4xl mx-auto mb-6">
-        <div className="flex items-center justify-between">
-          <Link href="/" className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200">
-            ← Home
-          </Link>
-          <ThemeToggle />
-        </div>
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-amber-100 via-orange-100 to-stone-100 dark:from-stone-950 dark:via-amber-950 dark:to-zinc-950">
+      <div className="absolute inset-0 pointer-events-none">
+        <motion.div
+          className="absolute top-8 left-8 w-56 h-56 bg-amber-300/35 dark:bg-amber-700/20 rounded-full blur-3xl"
+          animate={{ scale: [1, 1.1, 1], y: [0, -15, 0] }}
+          transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <motion.div
+          className="absolute bottom-6 right-8 w-64 h-64 bg-orange-300/35 dark:bg-orange-700/20 rounded-full blur-3xl"
+          animate={{ scale: [1.1, 1, 1.1], y: [0, 18, 0] }}
+          transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }}
+        />
       </div>
 
-      {/* Title */}
-      <motion.h1
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="text-3xl md:text-4xl font-serif text-amber-800 dark:text-amber-200 text-center mb-4"
-      >
-        Our Story
-      </motion.h1>
+      <main className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-16">
+        <header className="rounded-3xl border border-amber-200/70 dark:border-amber-800/60 bg-white/80 dark:bg-stone-900/80 backdrop-blur p-4 sm:p-6 shadow-xl">
+          <div className="flex items-center justify-between gap-3">
+            <Link href="/" className="text-sm text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 transition-colors">
+              ← Home
+            </Link>
+            <div className="flex items-center gap-2">
+              <span className={`px-3 py-1 rounded-full border text-xs font-medium ${writerTheme.chip}`}>
+                Writing as {formatWriterName(currentUser)}
+              </span>
+              <ThemeToggle />
+            </div>
+          </div>
 
-      {/* Turn Indicator */}
-      <div className="flex justify-center mb-6">
-        <motion.div
-          animate={isYourTurn ? { scale: [1, 1.03, 1] } : {}}
-          transition={{ repeat: Infinity, duration: 2 }}
-          className={`px-6 py-2 rounded-full font-medium ${
-            isYourTurn
-              ? currentUser === 'daniel'
-                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 border-2 border-blue-400'
-                : 'bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300 border-2 border-rose-400'
-              : 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
-          }`}
+          <div className="mt-4">
+            <h1 className="text-3xl sm:text-4xl font-serif text-amber-900 dark:text-amber-100">Story Book</h1>
+            <p className="text-sm text-amber-700/80 dark:text-amber-300/80 mt-1">
+              One sentence each turn. Keep the story moving.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-4">
+            <div className="rounded-xl bg-amber-100/80 dark:bg-amber-900/35 px-3 py-2 border border-amber-200/70 dark:border-amber-800/60">
+              <div className="text-xs text-amber-700 dark:text-amber-300">Sentences</div>
+              <div className="text-lg font-semibold text-amber-900 dark:text-amber-100">{sentences.length}</div>
+            </div>
+            <div className="rounded-xl bg-amber-100/80 dark:bg-amber-900/35 px-3 py-2 border border-amber-200/70 dark:border-amber-800/60">
+              <div className="text-xs text-amber-700 dark:text-amber-300">Current page</div>
+              <div className="text-lg font-semibold text-amber-900 dark:text-amber-100">{currentPage}</div>
+            </div>
+            <div className="rounded-xl bg-amber-100/80 dark:bg-amber-900/35 px-3 py-2 border border-amber-200/70 dark:border-amber-800/60">
+              <div className="text-xs text-amber-700 dark:text-amber-300">Total pages</div>
+              <div className="text-lg font-semibold text-amber-900 dark:text-amber-100">{totalPages}</div>
+            </div>
+          </div>
+        </header>
+
+        <motion.section
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`mt-6 rounded-2xl border px-4 py-3 sm:px-6 sm:py-4 ${isYourTurn ? writerTheme.turn : 'border-amber-200/80 dark:border-amber-800/70 bg-amber-50/70 dark:bg-amber-900/25 text-amber-800 dark:text-amber-200'}`}
         >
           {isYourTurn ? (
-            <span className="flex items-center gap-2">
+            <div className="flex items-center gap-2 font-medium">
               <span className="w-2 h-2 rounded-full bg-current animate-pulse" />
-              Your turn!
-            </span>
+              Your turn to write.
+            </div>
           ) : (
-            `Waiting for ${formatWriterName(currentTurn)}...`
+            <div className="font-medium">Waiting for {formatWriterName(currentTurn)} to add the next sentence.</div>
           )}
-        </motion.div>
-      </div>
+        </motion.section>
 
-      {/* Book */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="max-w-3xl mx-auto"
-      >
-        <div className="bg-gradient-to-b from-amber-700 to-amber-900 dark:from-amber-800 dark:to-amber-950 rounded-xl shadow-2xl p-1">
-          <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-100 dark:to-orange-100 rounded-lg min-h-[400px] p-6 md:p-8">
-            {/* Page Content */}
-            <div className="space-y-4">
+        <motion.section
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-6 rounded-[28px] bg-gradient-to-b from-amber-900 to-stone-900 p-1.5 shadow-2xl"
+        >
+          <div className="rounded-[24px] border border-amber-300/80 bg-[#fff9ec] dark:bg-stone-100 min-h-[420px] p-4 sm:p-7">
+            <div className="flex items-center justify-between mb-4 text-sm text-amber-700">
+              <span className="font-serif">Page {currentPage}</span>
+              <span>{currentPageSentences.length} sentence{currentPageSentences.length === 1 ? '' : 's'} on this page</span>
+            </div>
+
+            <div className="space-y-3 sm:space-y-4">
               {currentPageSentences.length === 0 ? (
-                <div className="flex items-center justify-center h-64 text-amber-400 dark:text-amber-600 font-serif italic">
-                  {currentPage === 1 ? 'Begin your story...' : 'Continue writing...'}
+                <div className="min-h-[280px] flex items-center justify-center text-center px-4">
+                  <p className="font-serif italic text-lg text-amber-700">
+                    {currentPage === 1 ? 'Begin your first sentence...' : 'This page is ready for the next sentence.'}
+                  </p>
                 </div>
               ) : (
                 currentPageSentences.map((sentence, index) => (
-                  <motion.div
+                  <motion.button
                     key={sentence.id}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ delay: index * 0.05 }}
+                    type="button"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.04 }}
                     onClick={() => setExpandedSentence(expandedSentence === sentence.id ? null : sentence.id)}
-                    className={`py-2 px-4 rounded-lg cursor-pointer transition-colors ${
+                    className={`w-full text-left rounded-2xl border px-4 py-3 transition-shadow hover:shadow-md ${
                       sentence.writer === 'daniel'
-                        ? 'border-l-4 border-blue-500 bg-blue-50/50 dark:bg-blue-100/30'
-                        : 'border-l-4 border-rose-500 bg-rose-50/50 dark:bg-rose-100/30'
+                        ? 'border-blue-200 bg-blue-50/85'
+                        : 'border-rose-200 bg-rose-50/85'
                     }`}
                   >
-                    <p className={`text-lg md:text-xl leading-relaxed ${
-                      sentence.writer === 'daniel' ? 'text-blue-900' : 'text-rose-900'
-                    }`} style={{ fontFamily: 'Georgia, serif' }}>
+                    <div className="flex items-center justify-between text-[11px] uppercase tracking-wide">
+                      <span className={sentence.writer === 'daniel' ? 'text-blue-600' : 'text-rose-600'}>
+                        {formatWriterName(sentence.writer)}
+                      </span>
+                      <span className="text-stone-500">
+                        {expandedSentence === sentence.id ? 'Hide details' : 'Tap for details'}
+                      </span>
+                    </div>
+
+                    <p
+                      className={`mt-1 text-base sm:text-lg leading-relaxed ${
+                        sentence.writer === 'daniel' ? 'text-blue-950' : 'text-rose-950'
+                      }`}
+                      style={{ fontFamily: 'Georgia, serif' }}
+                    >
                       {sentence.content}
                     </p>
+
                     <AnimatePresence>
                       {expandedSentence === sentence.id && (
                         <motion.div
                           initial={{ opacity: 0, height: 0 }}
                           animate={{ opacity: 1, height: 'auto' }}
                           exit={{ opacity: 0, height: 0 }}
-                          className="text-xs text-gray-500 dark:text-gray-600 mt-2"
+                          className="mt-2 text-xs text-stone-600"
                         >
                           {formatWriterName(sentence.writer)} • {formatTimestamp(sentence.created_at)}
                         </motion.div>
                       )}
                     </AnimatePresence>
-                  </motion.div>
+                  </motion.button>
                 ))
               )}
             </div>
-
-            {/* Page Number */}
-            <div className="text-center mt-8 text-amber-400 dark:text-amber-600 font-serif text-sm">
-              Page {currentPage}
-            </div>
           </div>
-        </div>
+        </motion.section>
 
-        {/* Navigation */}
-        <div className="flex items-center justify-center gap-4 mt-6">
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
           <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
             onClick={() => goToPage(currentPage - 1)}
             disabled={currentPage === 1}
-            className="p-3 rounded-full bg-amber-200 dark:bg-amber-800 hover:bg-amber-300 dark:hover:bg-amber-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-2 rounded-full border border-amber-300 bg-amber-100 text-amber-800 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <svg className="w-5 h-5 text-amber-700 dark:text-amber-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
+            Prev
           </motion.button>
 
-          <span className="text-amber-600 dark:text-amber-400 font-serif min-w-[100px] text-center">
-            {currentPage} of {totalPages}
-          </span>
+          {visiblePages.map((page) => (
+            <button
+              key={page}
+              onClick={() => goToPage(page)}
+              className={`w-9 h-9 rounded-full text-sm font-medium transition-colors ${
+                page === currentPage
+                  ? 'bg-amber-700 text-white'
+                  : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+              }`}
+            >
+              {page}
+            </button>
+          ))}
 
           <motion.button
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
             onClick={() => goToPage(currentPage + 1)}
             disabled={currentPage === totalPages}
-            className="p-3 rounded-full bg-amber-200 dark:bg-amber-800 hover:bg-amber-300 dark:hover:bg-amber-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-2 rounded-full border border-amber-300 bg-amber-100 text-amber-800 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <svg className="w-5 h-5 text-amber-700 dark:text-amber-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
+            Next
           </motion.button>
         </div>
-      </motion.div>
 
-      {/* Write Input */}
-      <div className="max-w-2xl mx-auto mt-8">
-        <AnimatePresence mode="wait">
-          {isYourTurn ? (
-            <motion.form
-              key="input"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              onSubmit={handleSubmit}
-              className="space-y-4"
-            >
-              <div className="relative">
+        <section className="max-w-3xl mx-auto mt-8">
+          <AnimatePresence mode="wait">
+            {isYourTurn ? (
+              <motion.form
+                key="compose"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                onSubmit={handleSubmit}
+                className="rounded-3xl border border-amber-200/80 dark:border-amber-800/70 bg-white/85 dark:bg-stone-900/85 backdrop-blur p-4 sm:p-6 shadow-lg"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-lg font-semibold text-amber-900 dark:text-amber-100">Write the next sentence</h2>
+                  <span className="text-xs text-amber-700 dark:text-amber-300">{content.length}/500</span>
+                </div>
+
                 <textarea
                   value={content}
                   onChange={(e) => {
@@ -403,83 +485,68 @@ export default function StoryBookPage() {
                   placeholder="Continue the story..."
                   disabled={isSubmitting}
                   maxLength={500}
-                  className="w-full p-4 rounded-xl bg-white/80 dark:bg-gray-800/80 border-2 border-dashed border-amber-300 dark:border-amber-600 min-h-[120px] resize-none focus:outline-none focus:border-amber-500 dark:focus:border-amber-400 text-gray-800 dark:text-gray-200"
-                  style={{ fontFamily: 'Georgia, serif', fontSize: '1.1rem' }}
+                  className="w-full min-h-[130px] rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-stone-800/70 p-4 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400 text-stone-900 dark:text-amber-100"
+                  style={{ fontFamily: 'Georgia, serif', fontSize: '1.05rem' }}
                 />
-                <span className="absolute bottom-3 right-3 text-sm text-gray-400">
-                  {content.length}/500
-                </span>
-              </div>
-              <motion.button
-                type="submit"
-                disabled={!content.trim() || isSubmitting}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className={`w-full py-4 rounded-xl font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
-                  currentUser === 'daniel'
-                    ? 'bg-blue-500 hover:bg-blue-600'
-                    : 'bg-rose-500 hover:bg-rose-600'
-                }`}
-              >
-                {isSubmitting ? 'Adding...' : 'Add to our story'}
-              </motion.button>
-            </motion.form>
-          ) : (
-            <motion.div
-              key="waiting"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="text-center py-8 px-6 bg-amber-100/50 dark:bg-amber-900/30 rounded-xl"
-            >
-              {partnerTyping ? (
-                <>
-                  <motion.div
-                    animate={{ scale: [1, 1.1, 1] }}
-                    transition={{ repeat: Infinity, duration: 1 }}
-                    className="text-4xl mb-4"
-                  >
-                    ✍️
-                  </motion.div>
-                  <p className="text-amber-700 dark:text-amber-300 font-serif">
-                    {formatWriterName(currentTurn)} is writing...
-                  </p>
-                  <div className="flex justify-center gap-1 mt-3">
-                    <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                </>
-              ) : (
-                <>
-                  <motion.div
-                    animate={{ y: [0, -5, 0] }}
-                    transition={{ repeat: Infinity, duration: 2 }}
-                    className="text-4xl mb-4"
-                  >
-                    ✨
-                  </motion.div>
-                  <p className="text-amber-700 dark:text-amber-300 font-serif">
-                    It&apos;s {formatWriterName(currentTurn)}&apos;s turn to add to your story.
-                  </p>
-                  <p className="text-amber-500 dark:text-amber-500 text-sm mt-2">
-                    You&apos;ll be able to write when they&apos;re done!
-                  </p>
-                </>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
 
-      {/* Writer badge */}
-      <div className={`fixed bottom-4 right-4 px-4 py-2 rounded-full text-sm font-medium shadow-lg ${
-        currentUser === 'daniel'
-          ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-          : 'bg-rose-100 dark:bg-rose-900 text-rose-700 dark:text-rose-300'
-      }`}>
-        {formatWriterName(currentUser)}
-      </div>
+                <motion.button
+                  type="submit"
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                  disabled={!content.trim() || isSubmitting}
+                  className={`mt-4 w-full py-3 rounded-2xl bg-gradient-to-r text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed ${writerTheme.button}`}
+                >
+                  {isSubmitting ? 'Adding...' : 'Add to story'}
+                </motion.button>
+              </motion.form>
+            ) : (
+              <motion.div
+                key="waiting"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                className="rounded-3xl border border-amber-200/80 dark:border-amber-800/70 bg-white/80 dark:bg-stone-900/80 text-center p-6 shadow-lg"
+              >
+                {partnerTyping ? (
+                  <>
+                    <motion.div
+                      animate={{ scale: [1, 1.08, 1] }}
+                      transition={{ repeat: Infinity, duration: 1 }}
+                      className="text-4xl mb-3"
+                    >
+                      ✍️
+                    </motion.div>
+                    <p className="font-medium text-amber-800 dark:text-amber-200">
+                      {formatWriterName(currentTurn)} is writing right now...
+                    </p>
+                    <div className="flex justify-center gap-1 mt-3">
+                      <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <motion.div
+                      animate={{ y: [0, -5, 0] }}
+                      transition={{ repeat: Infinity, duration: 2 }}
+                      className="text-4xl mb-3"
+                    >
+                      📚
+                    </motion.div>
+                    <p className="font-medium text-amber-800 dark:text-amber-200">
+                      It&apos;s {formatWriterName(currentTurn)}&apos;s turn.
+                    </p>
+                    <p className="text-sm text-amber-700/85 dark:text-amber-300/85 mt-1">
+                      You can write again once they add a sentence.
+                    </p>
+                  </>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </section>
+      </main>
     </div>
   );
 }
