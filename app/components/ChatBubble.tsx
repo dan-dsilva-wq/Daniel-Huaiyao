@@ -13,6 +13,16 @@ interface Message {
   created_at: string;
 }
 
+interface MessageReaction {
+  id: string;
+  message_id: string;
+  user_name: CurrentUser;
+  emoji: string;
+  created_at: string;
+}
+
+const REACTION_OPTIONS = ['❤️', '😂', '😍', '👍', '🔥', '🥹', '🎉'];
+
 function mergeMessages(base: Message[], incoming: Message[]): Message[] {
   const map = new Map<string, Message>();
   for (const message of base) {
@@ -29,12 +39,14 @@ function mergeMessages(base: Message[], incoming: Message[]): Message[] {
 export default function ChatBubble() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [reactionsByMessage, setReactionsByMessage] = useState<Record<string, MessageReaction[]>>({});
   const [newMessage, setNewMessage] = useState('');
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() =>
     typeof window === 'undefined' ? null : getCurrentUser()
   );
   const [isSending, setIsSending] = useState(false);
   const [partnerTyping, setPartnerTyping] = useState(false);
+  const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -68,7 +80,29 @@ export default function ChatBubble() {
       .limit(200);
 
     if (!error && data) {
-      setMessages((prev) => mergeMessages(prev, data as Message[]));
+      const mergedMessages = mergeMessages([], data as Message[]);
+      setMessages(mergedMessages);
+
+      const messageIds = mergedMessages.map((message) => message.id);
+      if (messageIds.length === 0) {
+        setReactionsByMessage({});
+        return;
+      }
+
+      const { data: reactions, error: reactionsError } = await supabase
+        .from('chat_message_reactions')
+        .select('*')
+        .in('message_id', messageIds);
+      if (!reactionsError && reactions) {
+        const grouped: Record<string, MessageReaction[]> = {};
+        for (const reaction of reactions as MessageReaction[]) {
+          if (!grouped[reaction.message_id]) {
+            grouped[reaction.message_id] = [];
+          }
+          grouped[reaction.message_id].push(reaction);
+        }
+        setReactionsByMessage(grouped);
+      }
     }
   }, []);
 
@@ -157,6 +191,38 @@ export default function ChatBubble() {
         }
       });
 
+    const reactionChannel = supabase
+      .channel('chat_message_reactions')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'chat_message_reactions' },
+        (payload) => {
+          const reaction = (payload.new || payload.old) as MessageReaction;
+          const messageId = reaction?.message_id;
+          if (!messageId) return;
+
+          setReactionsByMessage((prev) => {
+            const current = prev[messageId] || [];
+            if (payload.eventType === 'DELETE') {
+              return {
+                ...prev,
+                [messageId]: current.filter((item) => item.id !== reaction.id),
+              };
+            }
+
+            const withoutOld = current.filter((item) => item.id !== reaction.id);
+            const merged = [...withoutOld, payload.new as MessageReaction].sort(
+              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            );
+            return {
+              ...prev,
+              [messageId]: merged,
+            };
+          });
+        }
+      )
+      .subscribe();
+
     const typingChannel = supabase
       .channel('chat_typing')
       .on(
@@ -172,6 +238,7 @@ export default function ChatBubble() {
     return () => {
       supabase.removeChannel(messageChannel);
       supabase.removeChannel(typingChannel);
+      supabase.removeChannel(reactionChannel);
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
@@ -227,6 +294,43 @@ export default function ChatBubble() {
     }
 
     setIsSending(false);
+  };
+
+  const toggleReaction = async (messageId: string, emoji: string) => {
+    if (!currentUser || !isSupabaseConfigured) return;
+
+    const existingReaction = (reactionsByMessage[messageId] || []).find(
+      (reaction) => reaction.user_name === currentUser
+    );
+
+    if (existingReaction?.emoji === emoji) {
+      const { error } = await supabase
+        .from('chat_message_reactions')
+        .delete()
+        .eq('id', existingReaction.id);
+      if (error) {
+        console.error('Failed to remove reaction:', error);
+      } else {
+        setReactionPickerFor(null);
+      }
+      return;
+    }
+
+    const { error } = await supabase.from('chat_message_reactions').upsert(
+      {
+        message_id: messageId,
+        user_name: currentUser,
+        emoji,
+      },
+      { onConflict: 'message_id,user_name' }
+    );
+
+    if (error) {
+      console.error('Failed to save reaction:', error);
+      return;
+    }
+
+    setReactionPickerFor(null);
   };
 
   const formatTime = (dateStr: string) => {
@@ -328,35 +432,85 @@ export default function ChatBubble() {
               ) : (
                 messages.map((msg) => {
                   const isMe = msg.from_user === currentUser;
+                  const reactions = reactionsByMessage[msg.id] || [];
                   return (
                     <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                      <div
-                        className={`max-w-[80%] px-4 py-2 rounded-2xl ${
+                      <div className="max-w-[85%]">
+                        <div
+                          className={`px-4 py-2 rounded-2xl ${
                           isMe
                             ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white rounded-br-md'
                             : 'bg-white dark:bg-gray-700 text-gray-800 dark:text-white rounded-bl-md shadow-sm'
-                        }`}
-                      >
-                        <p className="text-sm break-words">{msg.message}</p>
-                        <div className={`flex items-center gap-1 mt-1 ${isMe ? 'justify-end' : ''}`}>
-                          <span className={`text-xs ${isMe ? 'text-white/60' : 'text-gray-400'}`}>
-                            {formatTime(msg.created_at)}
-                          </span>
-                          {isMe && (
-                            <span className={`text-xs ${msg.is_read ? 'text-blue-300' : 'text-white/40'}`}>
-                              {msg.is_read ? (
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M2 12l5 5L18 6" />
-                                  <path d="M7 12l5 5L23 6" />
-                                </svg>
-                              ) : (
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M5 12l5 5L20 7" />
-                                </svg>
-                              )}
+                          }`}
+                        >
+                          <p className="text-sm break-words">{msg.message}</p>
+                          <div className={`flex items-center gap-1 mt-1 ${isMe ? 'justify-end' : ''}`}>
+                            <span className={`text-xs ${isMe ? 'text-white/60' : 'text-gray-400'}`}>
+                              {formatTime(msg.created_at)}
                             </span>
-                          )}
+                            {isMe && (
+                              <span className={`text-xs ${msg.is_read ? 'text-blue-300' : 'text-white/40'}`}>
+                                {msg.is_read ? (
+                                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M2 12l5 5L18 6" />
+                                    <path d="M7 12l5 5L23 6" />
+                                  </svg>
+                                ) : (
+                                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M5 12l5 5L20 7" />
+                                  </svg>
+                                )}
+                              </span>
+                            )}
+                          </div>
                         </div>
+
+                        {reactions.length > 0 && (
+                          <div className={`mt-1 flex flex-wrap gap-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                            {reactions.map((reaction) => (
+                              <button
+                                key={reaction.id}
+                                type="button"
+                                onClick={() => toggleReaction(msg.id, reaction.emoji)}
+                                className={`px-2 py-0.5 rounded-full text-xs border ${
+                                  reaction.user_name === currentUser
+                                    ? 'bg-pink-100 border-pink-300 text-pink-700 dark:bg-pink-900/40 dark:text-pink-200'
+                                    : 'bg-white border-gray-200 text-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600'
+                                }`}
+                                title={reaction.user_name === currentUser ? 'Tap to remove your reaction' : undefined}
+                              >
+                                {reaction.emoji}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className={`mt-1 ${isMe ? 'text-right' : 'text-left'}`}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setReactionPickerFor((current) => (current === msg.id ? null : msg.id))
+                            }
+                            className="text-xs text-gray-400 hover:text-pink-500 transition-colors"
+                          >
+                            React
+                          </button>
+                        </div>
+
+                        {reactionPickerFor === msg.id && (
+                          <div className={`mt-1 flex flex-wrap gap-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                            {REACTION_OPTIONS.map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => toggleReaction(msg.id, emoji)}
+                                className="px-2 py-1 rounded-full bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-sm hover:scale-105 transition-transform"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
