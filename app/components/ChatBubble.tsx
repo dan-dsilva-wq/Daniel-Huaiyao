@@ -1,143 +1,166 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { getCurrentUser, type CurrentUser } from '@/lib/user-session';
 
 interface Message {
   id: string;
-  from_user: 'daniel' | 'huaiyao';
+  from_user: CurrentUser;
   message: string;
   is_read: boolean;
   created_at: string;
+}
+
+function mergeMessages(base: Message[], incoming: Message[]): Message[] {
+  const map = new Map<string, Message>();
+  for (const message of base) {
+    map.set(message.id, message);
+  }
+  for (const message of incoming) {
+    map.set(message.id, message);
+  }
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
 }
 
 export default function ChatBubble() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(() =>
+    typeof window === 'undefined' ? null : getCurrentUser()
+  );
   const [isSending, setIsSending] = useState(false);
   const [partnerTyping, setPartnerTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Get current user
   useEffect(() => {
-    const user = localStorage.getItem('currentUser') as 'daniel' | 'huaiyao' | null;
-    setCurrentUser(user);
+    const syncUser = () => {
+      setCurrentUser(getCurrentUser());
+    };
+    window.addEventListener('storage', syncUser);
+    return () => {
+      window.removeEventListener('storage', syncUser);
+    };
   }, []);
 
-  // Fetch messages
-  const fetchMessages = async () => {
+  const unreadIds = useMemo(() => {
+    if (!currentUser) return [];
+    return messages
+      .filter((msg) => msg.from_user !== currentUser && !msg.is_read)
+      .map((msg) => msg.id);
+  }, [messages, currentUser]);
+
+  const unreadCount = unreadIds.length;
+
+  const fetchMessages = useCallback(async () => {
     if (!isSupabaseConfigured) return;
 
     const { data, error } = await supabase
       .from('chat_messages')
       .select('*')
       .order('created_at', { ascending: true })
-      .limit(100);
+      .limit(200);
 
     if (!error && data) {
-      setMessages(data);
-      updateUnreadCount(data);
+      setMessages((prev) => mergeMessages(prev, data as Message[]));
     }
-  };
+  }, []);
 
-  // Update unread count
-  const updateUnreadCount = (msgs: Message[]) => {
-    if (!currentUser) return;
-    const unread = msgs.filter(m => m.from_user !== currentUser && !m.is_read).length;
-    setUnreadCount(unread);
-  };
+  const markAsRead = useCallback(
+    async (ids?: string[]) => {
+      if (!currentUser || !isSupabaseConfigured) return;
 
-  // Mark messages as read
-  const markAsRead = async () => {
-    if (!currentUser || !isSupabaseConfigured) return;
+      const targetIds = (ids ?? unreadIds).filter(Boolean);
+      if (targetIds.length === 0) return;
 
-    await supabase
-      .from('chat_messages')
-      .update({ is_read: true })
-      .eq('is_read', false)
-      .neq('from_user', currentUser);
+      setMessages((prev) =>
+        prev.map((message) =>
+          targetIds.includes(message.id) ? { ...message, is_read: true } : message
+        )
+      );
 
-    setUnreadCount(0);
-  };
+      const { error } = await supabase
+        .from('chat_messages')
+        .update({ is_read: true })
+        .in('id', targetIds)
+        .eq('is_read', false)
+        .neq('from_user', currentUser);
 
-  // Update typing status
-  const updateTypingStatus = async (isTyping: boolean) => {
-    if (!currentUser || !isSupabaseConfigured) return;
+      if (error) {
+        console.error('Failed to mark messages as read:', error);
+        await fetchMessages();
+      }
+    },
+    [currentUser, unreadIds, fetchMessages]
+  );
 
-    try {
-      await supabase.rpc('set_typing_status', {
-        p_player: currentUser,
-        p_app_name: 'chat',
-        p_is_typing: isTyping,
-      });
-    } catch (err) {
-      console.error('Error updating typing status:', err);
-    }
-  };
+  const updateTypingStatus = useCallback(
+    async (isTyping: boolean) => {
+      if (!currentUser || !isSupabaseConfigured) return;
 
-  // Handle typing indicator
-  const handleTyping = () => {
-    updateTypingStatus(true);
+      try {
+        await supabase.rpc('set_typing_status', {
+          p_player: currentUser,
+          p_app_name: 'chat',
+          p_is_typing: isTyping,
+        });
+      } catch (err) {
+        console.error('Error updating typing status:', err);
+      }
+    },
+    [currentUser]
+  );
 
-    // Clear existing timeout
+  const handleTyping = useCallback(() => {
+    void updateTypingStatus(true);
+
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
 
-    // Set timeout to clear typing status after 2 seconds of no typing
     typingTimeoutRef.current = setTimeout(() => {
-      updateTypingStatus(false);
+      void updateTypingStatus(false);
     }, 2000);
-  };
+  }, [updateTypingStatus]);
 
-  // Initial fetch and realtime subscription
   useEffect(() => {
-    fetchMessages();
-
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured || !currentUser) return;
 
     const partner = currentUser === 'daniel' ? 'huaiyao' : 'daniel';
 
-    // Subscribe to new messages and updates (for read receipts)
+    queueMicrotask(() => {
+      void fetchMessages();
+    });
+
     const messageChannel = supabase
       .channel('chat_messages')
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'chat_messages' },
-        (payload) => {
-          const newMsg = payload.new as Message;
-          setMessages(prev => [...prev, newMsg]);
-          if (newMsg.from_user !== currentUser) {
-            if (isOpen) {
-              // Mark as read immediately if chat is open
-              markAsRead();
-            } else {
-              setUnreadCount(prev => prev + 1);
-            }
-          }
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, (payload) => {
+        const newMessage = payload.new as Message;
+        setMessages((prev) => mergeMessages(prev, [newMessage]));
+        if (newMessage.from_user !== currentUser && isOpen) {
+          void markAsRead([newMessage.id]);
         }
-      )
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'chat_messages' },
-        (payload) => {
-          // Update message when read status changes
-          const updatedMsg = payload.new as Message;
-          setMessages(prev => prev.map(msg =>
-            msg.id === updatedMsg.id ? updatedMsg : msg
-          ));
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'chat_messages' }, (payload) => {
+        const updatedMessage = payload.new as Message;
+        setMessages((prev) => mergeMessages(prev, [updatedMessage]));
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          void fetchMessages();
         }
-      )
-      .subscribe();
+      });
 
-    // Subscribe to partner's typing status
     const typingChannel = supabase
       .channel('chat_typing')
-      .on('postgres_changes',
+      .on(
+        'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'typing_status', filter: `player=eq.${partner}` },
         (payload) => {
           const typingData = payload.new as { is_typing: boolean; app_name: string };
@@ -149,65 +172,63 @@ export default function ChatBubble() {
     return () => {
       supabase.removeChannel(messageChannel);
       supabase.removeChannel(typingChannel);
-      // Clear typing status when component unmounts
-      if (currentUser) {
-        updateTypingStatus(false);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
       }
+      void updateTypingStatus(false);
     };
-  }, [currentUser, isOpen]);
+  }, [currentUser, fetchMessages, isOpen, markAsRead, updateTypingStatus]);
 
-  // Scroll to bottom when messages change or chat opens
   useEffect(() => {
-    if (isOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (!isOpen) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isOpen]);
 
-  // Mark as read when opening chat
   useEffect(() => {
-    if (isOpen && unreadCount > 0) {
-      markAsRead();
+    if (!isOpen || !currentUser) return;
+    inputRef.current?.focus();
+    if (unreadCount > 0) {
+      queueMicrotask(() => {
+        void markAsRead();
+      });
     }
-    if (isOpen) {
-      inputRef.current?.focus();
-    }
-  }, [isOpen]);
+  }, [isOpen, unreadCount, markAsRead, currentUser]);
 
-  // Send message
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !currentUser || isSending) return;
+    if (!newMessage.trim() || !currentUser || isSending || !isSupabaseConfigured) return;
 
     const messageText = newMessage.trim();
     setIsSending(true);
-    const { error } = await supabase
-      .from('chat_messages')
-      .insert({
-        from_user: currentUser,
-        message: messageText,
-      });
+
+    const { error } = await supabase.from('chat_messages').insert({
+      from_user: currentUser,
+      message: messageText,
+    });
 
     if (!error) {
       setNewMessage('');
-      // Send push notification to partner
       try {
         await fetch('/api/notify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'chat_message',
-            title: messageText.length > 50 ? messageText.substring(0, 50) + '...' : messageText,
+            title: messageText.length > 50 ? `${messageText.substring(0, 50)}...` : messageText,
             user: currentUser,
           }),
         });
       } catch (err) {
         console.error('Failed to send notification:', err);
       }
+    } else {
+      console.error('Failed to send message:', error);
+      await fetchMessages();
     }
+
     setIsSending(false);
   };
 
-  // Format time
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr);
     const now = new Date();
@@ -216,17 +237,20 @@ export default function ChatBubble() {
     if (isToday) {
       return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     }
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   };
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
 
-  // Don't render if no user selected
   if (!currentUser) return null;
 
   return (
     <>
-      {/* Floating bubble button */}
       <motion.button
         onClick={() => setIsOpen(!isOpen)}
         className="fixed bottom-6 left-6 z-50 w-14 h-14 bg-gradient-to-br from-pink-500 to-rose-500 rounded-full shadow-lg flex items-center justify-center text-white hover:shadow-xl transition-shadow"
@@ -251,7 +275,6 @@ export default function ChatBubble() {
         )}
       </motion.button>
 
-      {/* Chat panel */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -261,7 +284,6 @@ export default function ChatBubble() {
             className="fixed bottom-24 left-6 z-50 w-80 sm:w-96 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
             style={{ maxHeight: 'calc(100vh - 140px)' }}
           >
-            {/* Header */}
             <div className="bg-gradient-to-r from-pink-500 to-rose-500 p-4 text-white">
               <div className="flex items-center justify-between">
                 <a href="/profile" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
@@ -273,33 +295,29 @@ export default function ChatBubble() {
                     <p className="text-xs text-white/70">View profiles</p>
                   </div>
                 </a>
-                {/* Call buttons */}
                 <div className="flex gap-2">
-                  {/* WhatsApp Voice Call (unofficial deep link - may work) */}
                   <a
                     href={`whatsapp://call?phone=${currentUser === 'daniel' ? '447774475890' : '447577432052'}`}
                     className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center hover:bg-green-600 transition-colors"
                     title="WhatsApp Call"
                   >
                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z"/>
+                      <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56-.35-.12-.74-.03-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z" />
                     </svg>
                   </a>
-                  {/* WhatsApp Video Call (unofficial deep link - may work) */}
                   <a
                     href={`whatsapp://video?phone=${currentUser === 'daniel' ? '447774475890' : '447577432052'}`}
                     className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center hover:bg-green-600 transition-colors"
                     title="WhatsApp Video"
                   >
                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/>
+                      <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" />
                     </svg>
                   </a>
                 </div>
               </div>
             </div>
 
-            {/* Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[400px] bg-gray-50 dark:bg-gray-900">
               {messages.length === 0 ? (
                 <div className="text-center text-gray-400 dark:text-gray-500 py-8">
@@ -311,10 +329,7 @@ export default function ChatBubble() {
                 messages.map((msg) => {
                   const isMe = msg.from_user === currentUser;
                   return (
-                    <div
-                      key={msg.id}
-                      className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
-                    >
+                    <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                       <div
                         className={`max-w-[80%] px-4 py-2 rounded-2xl ${
                           isMe
@@ -327,17 +342,14 @@ export default function ChatBubble() {
                           <span className={`text-xs ${isMe ? 'text-white/60' : 'text-gray-400'}`}>
                             {formatTime(msg.created_at)}
                           </span>
-                          {/* Read/Delivered status - only show on own messages */}
                           {isMe && (
                             <span className={`text-xs ${msg.is_read ? 'text-blue-300' : 'text-white/40'}`}>
                               {msg.is_read ? (
-                                // Double tick for read
                                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                   <path d="M2 12l5 5L18 6" />
                                   <path d="M7 12l5 5L23 6" />
                                 </svg>
                               ) : (
-                                // Single tick for delivered
                                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                   <path d="M5 12l5 5L20 7" />
                                 </svg>
@@ -350,7 +362,6 @@ export default function ChatBubble() {
                   );
                 })
               )}
-              {/* Typing indicator */}
               {partnerTyping && (
                 <div className="flex justify-start">
                   <div className="max-w-[80%] px-4 py-2 rounded-2xl bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-bl-md shadow-sm">
@@ -368,7 +379,6 @@ export default function ChatBubble() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
             <form onSubmit={sendMessage} className="p-3 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
               <div className="flex gap-2">
                 <input
@@ -379,7 +389,9 @@ export default function ChatBubble() {
                     setNewMessage(e.target.value);
                     handleTyping();
                   }}
-                  onBlur={() => updateTypingStatus(false)}
+                  onBlur={() => {
+                    void updateTypingStatus(false);
+                  }}
                   placeholder={`Message ${partnerName}...`}
                   className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-pink-500 dark:text-white"
                 />
