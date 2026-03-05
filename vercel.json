@@ -10,7 +10,11 @@
     },
     {
       "path": "/api/book-reminder",
-      "schedule": "0 1 * * *"
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/prompts-reminder",
+      "schedule": "0 * * * *"
     }
   ]
 }
