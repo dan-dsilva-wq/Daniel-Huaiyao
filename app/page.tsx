@@ -14,6 +14,7 @@ interface AppCardProps {
   icon: string;
   href: string;
   gradient: string;
+  mode: 'together' | 'apart';
   badge?: string;
   newCount?: number;
   onVisit?: () => void;
@@ -118,35 +119,22 @@ function AppCard({ title, icon, href, gradient, newCount, onVisit }: AppCardProp
 
 // Apps in logical order (not sorted by usage)
 const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
-  // Daily connection
+  // Used together (synchronous/co-op)
   {
     title: 'Quiz Time',
     description: 'How well do you know each other?',
     icon: '🧠',
     href: '/quiz',
     gradient: 'from-indigo-500 to-purple-600',
+    mode: 'together',
   },
-  {
-    title: 'Daily Prompts',
-    description: 'Daily questions to connect deeper',
-    icon: '💬',
-    href: '/prompts',
-    gradient: 'from-cyan-500 to-teal-500',
-  },
-  {
-    title: 'Gratitude Wall',
-    description: 'Leave little notes of appreciation',
-    icon: '💝',
-    href: '/gratitude',
-    gradient: 'from-rose-400 to-pink-500',
-  },
-  // Planning & tracking
   {
     title: 'Date Ideas',
     description: 'Track our bucket list of things to do',
     icon: '✨',
     href: '/dates',
     gradient: 'from-purple-500 to-pink-500',
+    mode: 'together',
   },
   {
     title: 'Countdown',
@@ -154,13 +142,7 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     icon: '⏰',
     href: '/countdown',
     gradient: 'from-amber-500 to-rose-500',
-  },
-  {
-    title: 'Memories',
-    description: 'Our timeline of special moments',
-    icon: '📸',
-    href: '/memories',
-    gradient: 'from-pink-500 to-rose-600',
+    mode: 'together',
   },
   {
     title: 'Our Map',
@@ -168,14 +150,7 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     icon: '🗺️',
     href: '/map',
     gradient: 'from-teal-500 to-cyan-500',
-  },
-  // Entertainment
-  {
-    title: 'Media Tracker',
-    description: 'Movies, shows, books to enjoy together',
-    icon: '🎬',
-    href: '/media',
-    gradient: 'from-violet-500 to-fuchsia-500',
+    mode: 'together',
   },
   {
     title: 'Story Book',
@@ -183,6 +158,7 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     icon: '📖',
     href: '/book',
     gradient: 'from-amber-600 to-orange-700',
+    mode: 'together',
   },
   {
     title: 'Mystery Files',
@@ -190,6 +166,7 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     icon: '🔍',
     href: '/mystery',
     gradient: 'from-purple-900 to-slate-900',
+    mode: 'together',
   },
   {
     title: 'Hive',
@@ -197,6 +174,7 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     icon: '🐝',
     href: '/hive',
     gradient: 'from-yellow-500 to-amber-600',
+    mode: 'together',
   },
   {
     title: 'Stratego',
@@ -204,29 +182,62 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     icon: '⚔️',
     href: '/stratego',
     gradient: 'from-red-500 to-blue-600',
+    mode: 'together',
   },
-  // Together games
   {
     title: 'Two Truths & a Lie',
     description: 'Write two truths and one lie - spot the lie!',
     icon: '🤥',
     href: '/two-truths',
     gradient: 'from-violet-500 to-purple-600',
+    mode: 'together',
   },
-  // Stats
+
+  // Used while apart (asynchronous check-in)
+  {
+    title: 'Daily Prompts',
+    description: 'Daily questions to connect deeper',
+    icon: '💬',
+    href: '/prompts',
+    gradient: 'from-cyan-500 to-teal-500',
+    mode: 'apart',
+  },
+  {
+    title: 'Gratitude Wall',
+    description: 'Leave little notes of appreciation',
+    icon: '💝',
+    href: '/gratitude',
+    gradient: 'from-rose-400 to-pink-500',
+    mode: 'apart',
+  },
+  {
+    title: 'Memories',
+    description: 'Our timeline of special moments',
+    icon: '📸',
+    href: '/memories',
+    gradient: 'from-pink-500 to-rose-600',
+    mode: 'apart',
+  },
+  {
+    title: 'Media Tracker',
+    description: 'Movies, shows, books to enjoy together',
+    icon: '🎬',
+    href: '/media',
+    gradient: 'from-violet-500 to-fuchsia-500',
+    mode: 'apart',
+  },
   {
     title: 'Stats',
     description: 'Track your progress and unlock badges',
     icon: '🏆',
     href: '/stats',
     gradient: 'from-amber-500 to-orange-600',
+    mode: 'apart',
   },
 ];
 
 export default function Home() {
-  const [visitCounts, setVisitCounts] = useState<Record<string, number>>({});
   const [newCounts, setNewCounts] = useState<Record<string, number>>({});
-  const [showUnused, setShowUnused] = useState(false);
   const [currentUser] = useState<string | null>(() =>
     typeof window === 'undefined' ? null : getCurrentUser()
   );
@@ -235,19 +246,6 @@ export default function Home() {
   const [showFeedbackChat, setShowFeedbackChat] = useState(false);
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
-
-  // Fetch visit counts from Supabase
-  const fetchVisitCounts = async () => {
-    if (!isSupabaseConfigured) return;
-    try {
-      const { data, error } = await supabase.rpc('get_app_visit_counts');
-      if (!error && data) {
-        setVisitCounts(data as Record<string, number>);
-      }
-    } catch (err) {
-      console.error('Error fetching visit counts:', err);
-    }
-  };
 
   // Fetch new item counts for badge display
   const fetchNewCounts = async (user: string) => {
@@ -300,11 +298,6 @@ export default function Home() {
         p_app_name: appTitle,
         p_visited_by: currentUser || null,
       });
-      // Optimistically update local count
-      setVisitCounts(prev => ({
-        ...prev,
-        [appTitle]: (prev[appTitle] || 0) + 1,
-      }));
     } catch (err) {
       console.error('Error recording visit:', err);
     }
@@ -312,7 +305,6 @@ export default function Home() {
 
   useEffect(() => {
     queueMicrotask(() => {
-      void fetchVisitCounts();
       if (currentUser) {
         void fetchNewCounts(currentUser);
         void fetchEngagementData(currentUser);
@@ -321,29 +313,17 @@ export default function Home() {
     });
   }, [currentUser, fetchEngagementData, recordCheckIn]);
 
-  // Separate apps into used (visited in last 30 days) and unused - keep original order
-  const { usedApps, unusedApps } = useMemo(() => {
-    const used: typeof apps = [];
-    const unused: typeof apps = [];
-
-    // Maintain the original logical order from the apps array
-    apps.forEach(app => {
-      if ((visitCounts[app.title] || 0) > 0) {
-        used.push(app);
-      } else {
-        unused.push(app);
-      }
-    });
-
-    return { usedApps: used, unusedApps: unused };
-  }, [visitCounts]);
+  const groupedApps = useMemo(
+    () => ({
+      together: apps.filter((app) => app.mode === 'together'),
+      apart: apps.filter((app) => app.mode === 'apart'),
+    }),
+    []
+  );
 
   const handleVisit = (appTitle: string) => {
     recordVisit(appTitle);
   };
-
-  // Check if any app has been visited
-  const hasAnyVisits = usedApps.length > 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-slate-900 dark:to-zinc-900">
@@ -551,72 +531,70 @@ export default function Home() {
           </motion.div>
         )}
 
-        {/* Main Apps (used in last 30 days) */}
-        <motion.div
+        <motion.section
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3 }}
-          className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4"
         >
-          {(hasAnyVisits ? usedApps : apps).map((app, index) => (
-            <motion.div
-              key={app.title}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.2 + index * 0.03 }}
-              layout
-            >
-              <AppCard
-                {...app}
-                newCount={newCounts[app.title]}
-                onVisit={() => handleVisit(app.title)}
-              />
-            </motion.div>
-          ))}
-        </motion.div>
-
-        {/* Unused Apps Section */}
-        {hasAnyVisits && unusedApps.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.6 }}
-            className="mt-16"
-          >
-            <button
-              onClick={() => setShowUnused(!showUnused)}
-              className="w-full flex items-center justify-center gap-2 py-3 text-sm text-gray-400 dark:text-gray-500 hover:text-gray-500 dark:hover:text-gray-400 transition-colors"
-            >
-              <span>{showUnused ? '▼' : '▶'}</span>
-              <span>Unused apps ({unusedApps.length})</span>
-            </button>
-
-            {showUnused && (
+          <div className="mb-4 text-center">
+            <h2 className="text-sm uppercase tracking-[0.2em] text-gray-400 dark:text-gray-500">
+              Apps Used Together
+            </h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Co-op games, planning, and shared experiences
+            </p>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4">
+            {groupedApps.together.map((app, index) => (
               <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4 mt-4"
+                key={app.title}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.25 + index * 0.03 }}
+                layout
               >
-                {unusedApps.map((app, index) => (
-                  <motion.div
-                    key={app.title}
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: index * 0.03 }}
-                    className="opacity-50 hover:opacity-100 transition-opacity"
-                  >
-                    <AppCard
-                      {...app}
-                      newCount={newCounts[app.title]}
-                      onVisit={() => handleVisit(app.title)}
-                    />
-                  </motion.div>
-                ))}
+                <AppCard
+                  {...app}
+                  newCount={newCounts[app.title]}
+                  onVisit={() => handleVisit(app.title)}
+                />
               </motion.div>
-            )}
-          </motion.div>
-        )}
+            ))}
+          </div>
+        </motion.section>
+
+        <motion.section
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.45 }}
+          className="mt-12"
+        >
+          <div className="mb-4 text-center">
+            <h2 className="text-sm uppercase tracking-[0.2em] text-gray-400 dark:text-gray-500">
+              Apps Used While Apart
+            </h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Async check-ins and reflections
+            </p>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4">
+            {groupedApps.apart.map((app, index) => (
+              <motion.div
+                key={app.title}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.4 + index * 0.03 }}
+                layout
+              >
+                <AppCard
+                  {...app}
+                  newCount={newCounts[app.title]}
+                  onVisit={() => handleVisit(app.title)}
+                />
+              </motion.div>
+            ))}
+          </div>
+        </motion.section>
 
         {/* Footer */}
         <motion.footer
