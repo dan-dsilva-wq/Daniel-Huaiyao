@@ -13,7 +13,6 @@ function isDuplicateError(message: string) {
 
 // This endpoint is called by a cron job to remind storybook contributors.
 export async function GET(request: Request) {
-  const supabase = getSupabaseAdmin();
   const url = new URL(request.url);
   const dryRun = url.searchParams.get('dryRun') === '1' || url.searchParams.get('dryRun') === 'true';
 
@@ -24,6 +23,7 @@ export async function GET(request: Request) {
   }
 
   try {
+    const supabase = getSupabaseAdmin();
     // Get the most recent sentence
     const { data: lastSentence, error: sentenceError } = await supabase
       .from('book_sentences')
