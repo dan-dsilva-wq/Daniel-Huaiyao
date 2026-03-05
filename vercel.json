@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/countdown-reminder",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/gratitude-reminder",
       "schedule": "0 1 * * *"
     },
