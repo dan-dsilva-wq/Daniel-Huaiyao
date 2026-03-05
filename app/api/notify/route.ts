@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { normalizeKnownUser, sendPushToUsers } from '@/lib/server/push';
 import { getSupabaseAdmin } from '@/lib/server/supabase-admin';
+import { resolveActivityRoute } from '@/lib/activity-routes';
 
 // Quiet hours: only send between 9 AM and 11 PM (Eastern Time)
 const QUIET_HOURS_START = 23; // 11 PM
@@ -39,32 +40,6 @@ const ACTION_MESSAGES: Record<ActionType, string> = {
   stratego_move: 'made a move in Stratego',
   date_idea_edited: 'edited a date idea',
   event_plan_updated: 'updated plans for',
-};
-
-const ACTION_URLS: Record<string, string> = {
-  added: '/dates',
-  removed: '/dates',
-  completed: '/dates',
-  uncompleted: '/dates',
-  question_added: '/quiz',
-  question_answered: '/quiz',
-  place_added: '/map',
-  place_visited: '/map',
-  mystery_started: '/mystery',
-  mystery_waiting: '/mystery',
-  mystery_agreed: '/mystery',
-  memory_added: '/memories',
-  gratitude_sent: '/gratitude',
-  chat_message: '/',
-  book_sentence: '/book',
-  date_added: '/countdown',
-  date_removed: '/countdown',
-  prompt_answered: '/prompts',
-  media_added: '/media',
-  stratego_new_game: '/stratego',
-  stratego_move: '/stratego',
-  date_idea_edited: '/dates',
-  event_plan_updated: '/countdown',
 };
 
 const ACTION_APP_NAMES: Record<string, string> = {
@@ -138,7 +113,7 @@ export async function POST(request: Request) {
     const notificationTitle = senderName;
     const actionMessage = ACTION_MESSAGES[action] || 'updated something';
     const message = title ? `${actionMessage}: ${title}` : actionMessage;
-    const url = ACTION_URLS[action] || '/';
+    const url = resolveActivityRoute(action, ACTION_APP_NAMES[action]);
     const pushResult = await sendPushToUsers([recipient], {
       title: notificationTitle,
       body: message,

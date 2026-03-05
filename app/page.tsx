@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ThemeToggle } from './components/ThemeToggle';
 import { FeedbackChat } from './components/FeedbackChat';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { resolveActivityRoute } from '@/lib/activity-routes';
+import { getCurrentUser } from '@/lib/user-session';
 
 interface AppCardProps {
   title: string;
@@ -224,9 +226,10 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
 export default function Home() {
   const [visitCounts, setVisitCounts] = useState<Record<string, number>>({});
   const [newCounts, setNewCounts] = useState<Record<string, number>>({});
-  const [mounted, setMounted] = useState(false);
   const [showUnused, setShowUnused] = useState(false);
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [currentUser] = useState<string | null>(() =>
+    typeof window === 'undefined' ? null : getCurrentUser()
+  );
   const [engagementData, setEngagementData] = useState<EngagementData | null>(null);
   const [showActivityFeed, setShowActivityFeed] = useState(false);
   const [showFeedbackChat, setShowFeedbackChat] = useState(false);
@@ -308,21 +311,18 @@ export default function Home() {
   };
 
   useEffect(() => {
-    setMounted(true);
-    const savedUser = localStorage.getItem('currentUser');
-    setCurrentUser(savedUser);
-    fetchVisitCounts();
-    if (savedUser) {
-      fetchNewCounts(savedUser);
-      fetchEngagementData(savedUser);
-      recordCheckIn(savedUser);
-    }
-  }, [fetchEngagementData, recordCheckIn]);
+    queueMicrotask(() => {
+      void fetchVisitCounts();
+      if (currentUser) {
+        void fetchNewCounts(currentUser);
+        void fetchEngagementData(currentUser);
+        void recordCheckIn(currentUser);
+      }
+    });
+  }, [currentUser, fetchEngagementData, recordCheckIn]);
 
   // Separate apps into used (visited in last 30 days) and unused - keep original order
   const { usedApps, unusedApps } = useMemo(() => {
-    if (!mounted) return { usedApps: apps, unusedApps: [] };
-
     const used: typeof apps = [];
     const unused: typeof apps = [];
 
@@ -336,7 +336,7 @@ export default function Home() {
     });
 
     return { usedApps: used, unusedApps: unused };
-  }, [visitCounts, mounted]);
+  }, [visitCounts]);
 
   const handleVisit = (appTitle: string) => {
     recordVisit(appTitle);
@@ -511,7 +511,7 @@ export default function Home() {
                         {engagementData.partner_activity.map((activity) => (
                           <a
                             key={activity.id}
-                            href={`/${activity.app_name}`}
+                            href={resolveActivityRoute(activity.action_type, activity.app_name)}
                             className="flex items-center gap-3 p-3 bg-white/60 dark:bg-gray-800/60 backdrop-blur rounded-xl hover:bg-white dark:hover:bg-gray-800 transition-colors"
                           >
                             <span className="text-xl">

@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "validate:routes": "tsx scripts/validate-activity-routes.ts",
     "stratego:train": "tsx scripts/stratego/train-model.ts",
     "stratego:train:quick": "tsx scripts/stratego/train-model.ts --games 40 --epochs 6 --max-turns 180 --workers 1",
     "stratego:train:parallel": "tsx scripts/stratego/train-model.ts --games 240 --epochs 12 --difficulty extreme --verbose",
