@@ -25,6 +25,7 @@ interface TeamStats {
   memories_created: number;
   prompts_answered: number;
   places_visited: number;
+  morse_signals: number;
 }
 
 interface RecentAchievement {
@@ -46,6 +47,8 @@ interface StatsData {
     media_completed: number;
     places_visited: number;
     book_sentences: number;
+    morse_transmissions: number;
+    morse_runs_completed: number;
   };
   team_stats: TeamStats;
   recent_achievements: RecentAchievement[] | null;
@@ -66,6 +69,7 @@ const CATEGORY_CONFIG: Record<string, { label: string; color: string }> = {
   memories: { label: 'Memories', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' },
   media: { label: 'Media', color: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300' },
   prompts: { label: 'Prompts', color: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300' },
+  morse: { label: 'Morse', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' },
   general: { label: 'General', color: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300' },
 };
 
@@ -106,6 +110,8 @@ export default function StatsPage() {
         mediaRes,
         placesRes,
         bookRes,
+        morseSignalsRes,
+        morseRunsRes,
       ] = await Promise.all([
         supabase.from('quiz_answers').select('id', { count: 'exact', head: true }),
         supabase.from('quiz_answers').select('id', { count: 'exact', head: true }).eq('is_correct', true),
@@ -116,6 +122,8 @@ export default function StatsPage() {
         supabase.from('media_items').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
         supabase.from('map_places').select('id', { count: 'exact', head: true }).or('daniel_status.eq.visited,huaiyao_status.eq.visited'),
         supabase.from('book_sentences').select('id', { count: 'exact', head: true }),
+        supabase.from('morse_messages').select('id', { count: 'exact', head: true }),
+        supabase.from('morse_runs').select('id', { count: 'exact', head: true }).eq('status', 'completed'),
       ]);
 
       // Build stats object with team data
@@ -132,6 +140,8 @@ export default function StatsPage() {
           media_completed: mediaRes.count || 0,
           places_visited: placesRes.count || 0,
           book_sentences: bookRes.count || 0,
+          morse_transmissions: morseSignalsRes.count || 0,
+          morse_runs_completed: morseRunsRes.count || 0,
         },
         team_stats: {
           quiz_correct: quizCorrectRes.count || 0,
@@ -139,6 +149,7 @@ export default function StatsPage() {
           memories_created: memoriesRes.count || 0,
           prompts_answered: promptsRes.count || 0,
           places_visited: placesRes.count || 0,
+          morse_signals: morseSignalsRes.count || 0,
         },
         recent_achievements: null,
       };
@@ -347,6 +358,12 @@ export default function StatsPage() {
                     </div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">Places Explored</div>
                   </div>
+                  <div className="text-center p-4 bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 rounded-xl">
+                    <div className="text-3xl font-bold text-orange-600 dark:text-orange-400">
+                      {stats?.team_stats.morse_signals || 0}
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Morse Signals</div>
+                  </div>
                 </div>
               </motion.div>
 
@@ -394,6 +411,8 @@ export default function StatsPage() {
                   { label: 'Memories', value: stats?.stats.memories_created || 0, emoji: '📸' },
                   { label: 'Gratitude Notes', value: stats?.stats.gratitude_notes_sent || 0, emoji: '💝' },
                   { label: 'Places Visited', value: stats?.stats.places_visited || 0, emoji: '🗺️' },
+                  { label: 'Morse Signals', value: stats?.stats.morse_transmissions || 0, emoji: '📡' },
+                  { label: 'Morse Runs', value: stats?.stats.morse_runs_completed || 0, emoji: '🏹' },
                 ].map((stat) => (
                   <div
                     key={stat.label}

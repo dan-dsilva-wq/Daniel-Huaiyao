@@ -169,6 +169,14 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     mode: 'together',
   },
   {
+    title: 'Morse Keep',
+    description: 'Learn Morse, send signals, defend the castle',
+    icon: '📡',
+    href: '/morse',
+    gradient: 'from-amber-500 to-orange-700',
+    mode: 'together',
+  },
+  {
     title: 'Hive',
     description: 'The buzzing strategy board game',
     icon: '🐝',
@@ -499,6 +507,8 @@ export default function Home() {
                                activity.action_type === 'memory_added' ? '📸' :
                                activity.action_type === 'question_answered' ? '🧠' :
                                activity.action_type === 'book_sentence' ? '📖' :
+                               activity.action_type === 'morse_room_invite' ? '📡' :
+                               activity.action_type === 'morse_run_started' ? '🏹' :
                                activity.action_type === 'media_added' ? '🎬' :
                                activity.action_type === 'place_added' ? '🗺️' : '✨'}
                             </span>
@@ -508,6 +518,8 @@ export default function Home() {
                                 {activity.action_type === 'memory_added' && `Added a memory${activity.action_title ? `: ${activity.action_title}` : ''}`}
                                 {activity.action_type === 'question_answered' && 'Answered your quiz question'}
                                 {activity.action_type === 'book_sentence' && 'Added to your story'}
+                                {activity.action_type === 'morse_room_invite' && 'Opened the Morse room for you'}
+                                {activity.action_type === 'morse_run_started' && `Started a Morse Keep run${activity.action_title ? `: ${activity.action_title}` : ''}`}
                                 {activity.action_type === 'media_added' && `Added ${activity.action_title || 'media'}`}
                                 {activity.action_type === 'place_added' && `Added ${activity.action_title || 'a place'}`}
                               </div>

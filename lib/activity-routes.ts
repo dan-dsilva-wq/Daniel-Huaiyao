@@ -20,6 +20,8 @@ export type ActivityActionType =
   | 'media_added'
   | 'stratego_new_game'
   | 'stratego_move'
+  | 'morse_room_invite'
+  | 'morse_run_started'
   | 'date_idea_edited'
   | 'event_plan_updated';
 
@@ -37,6 +39,7 @@ export const APP_ROUTE_BY_APP_NAME: Record<string, string> = {
   prompts: '/prompts',
   media: '/media',
   stratego: '/stratego',
+  morse: '/morse',
   hive: '/hive',
   profile: '/profile',
   stats: '/stats',
@@ -65,6 +68,8 @@ export const ACTION_ROUTE_OVERRIDES: Partial<Record<ActivityActionType, string>>
   media_added: '/media',
   stratego_new_game: '/stratego',
   stratego_move: '/stratego',
+  morse_room_invite: '/morse',
+  morse_run_started: '/morse',
   date_idea_edited: '/dates',
   event_plan_updated: '/countdown',
 };
