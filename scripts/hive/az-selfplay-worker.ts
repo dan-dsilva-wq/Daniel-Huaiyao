@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   applyHiveMove,
@@ -13,9 +13,13 @@ import {
   buildHiveTokenStateFeatureNames,
   extractHiveActionFeatures,
   extractHiveTokenStateFeatures,
+  parseHiveModel,
+  type HiveModel,
 } from '../../lib/hive/ml';
 import { getQueenSurroundCount } from '../../lib/hive/winCondition';
 import type { GameState, PlayerColor } from '../../lib/hive/types';
+
+type SelfPlaySampleOrigin = 'learner' | 'champion';
 
 interface WorkerOptions {
   games: number;
@@ -26,6 +30,8 @@ interface WorkerOptions {
   fastSimulations: number;
   fastRatio: number;
   seed: number;
+  modelPath: string | null;
+  sampleOrigin: SelfPlaySampleOrigin;
   outPath: string;
 }
 
@@ -39,6 +45,7 @@ interface PolicyTarget {
 interface SelfPlaySample {
   stateFeatures: number[];
   perspective: PlayerColor;
+  sampleOrigin?: SelfPlaySampleOrigin;
   policyTargets: PolicyTarget[];
   valueTarget: number;
   auxTargets: {
@@ -73,12 +80,13 @@ interface WorkerOutput {
     draws: number;
     totalMoves: number;
     totalSimulations: number;
+    sampleOrigin: SelfPlaySampleOrigin;
   };
 }
 
 function main(): void {
   const options = parseOptions(process.argv.slice(2));
-  const result = runSelfPlayChunk(options);
+  const result = runSelfPlayChunk(options, loadWorkerModel(options.modelPath));
   const payload: WorkerOutput = {
     version: 2,
     createdAt: new Date().toISOString(),
@@ -93,6 +101,7 @@ function main(): void {
       draws: result.draws,
       totalMoves: result.totalMoves,
       totalSimulations: result.totalSimulations,
+      sampleOrigin: options.sampleOrigin,
     },
   };
 
@@ -100,7 +109,10 @@ function main(): void {
   writeFileSync(options.outPath, `${JSON.stringify(payload)}\n`, 'utf8');
 }
 
-function runSelfPlayChunk(options: WorkerOptions): {
+function runSelfPlayChunk(
+  options: WorkerOptions,
+  modelOverride?: HiveModel,
+): {
   samples: SelfPlaySample[];
   whiteWins: number;
   blackWins: number;
@@ -133,15 +145,20 @@ function runSelfPlayChunk(options: WorkerOptions): {
         ? options.fastSimulations
         : options.simulations;
 
+      // Temperature controls policy target sharpness:
+      // - Higher temp (1.0) = softer distribution, more gradient signal for non-best moves
+      // - Lower temp (0.12) = nearly one-hot, only best move gets gradient
+      // We use higher temps to ensure the policy head actually learns
       const mctsConfig = {
         simulations: Math.max(4, sims),
         dirichletAlpha: state.turnNumber < 10 ? 0.35 : 0.22,
-        temperature: state.turnNumber < 20 ? 0.7 : 0.12,
+        temperature: state.turnNumber < 15 ? 1.0 : 0.5,
         maxDepth: options.maxTurns,
       };
 
       const search = runHiveMctsSearch(state, state.currentTurn, options.difficulty, {
         engine: 'alphazero',
+        modelOverride,
         mctsConfig,
         randomSeed: options.seed + gameIndex * 197 + state.turnNumber * 11,
       });
@@ -161,11 +178,12 @@ function runSelfPlayChunk(options: WorkerOptions): {
       perGame.push({
         stateFeatures: extractHiveTokenStateFeatures(state, state.currentTurn, HIVE_DEFAULT_TOKEN_SLOTS),
         perspective: state.currentTurn,
+        sampleOrigin: options.sampleOrigin,
         valueTarget: 0,
         policyTargets: search.policy.map((entry) => ({
           actionKey: entry.actionKey,
-          probability: entry.probability,
-          visitCount: entry.visits,
+          probability: entry.rawProbability ?? entry.probability,
+          visitCount: entry.rawVisits ?? entry.visits,
           actionFeatures: extractHiveActionFeatures(state, entry.move, state.currentTurn),
         })),
         auxTargets: {
@@ -248,6 +266,8 @@ function parseOptions(argv: string[]): WorkerOptions {
     fastSimulations: 72,
     fastRatio: 0.55,
     seed: 2026,
+    modelPath: null,
+    sampleOrigin: 'learner',
     outPath: '.hive-cache/async/chunks/chunk.json',
   };
 
@@ -263,6 +283,8 @@ function parseOptions(argv: string[]): WorkerOptions {
       case '--fast-simulations': options.fastSimulations = parsePositiveInt(next, arg); index += 1; break;
       case '--fast-ratio': options.fastRatio = parseRatio(next, arg); index += 1; break;
       case '--seed': options.seed = parseNonNegativeInt(next, arg); index += 1; break;
+      case '--model': if (!next) throw new Error('Missing value for --model'); options.modelPath = next; index += 1; break;
+      case '--sample-origin': options.sampleOrigin = parseSampleOrigin(next, arg); index += 1; break;
       case '--out': if (!next) throw new Error('Missing value for --out'); options.outPath = next; index += 1; break;
       default:
         throw new Error(`Unknown argument: ${arg}`);
@@ -270,12 +292,33 @@ function parseOptions(argv: string[]): WorkerOptions {
   }
 
   options.outPath = path.resolve(process.cwd(), options.outPath);
+  if (options.modelPath) {
+    options.modelPath = path.resolve(process.cwd(), options.modelPath);
+  }
   return options;
+}
+
+function loadWorkerModel(absolutePath: string | null): HiveModel | undefined {
+  if (!absolutePath) return undefined;
+  if (!existsSync(absolutePath)) {
+    throw new Error(`Model file not found: ${absolutePath}`);
+  }
+  const parsed = JSON.parse(readFileSync(absolutePath, 'utf8')) as unknown;
+  const model = parseHiveModel(parsed);
+  if (!model) {
+    throw new Error(`Invalid model file: ${absolutePath}`);
+  }
+  return model;
 }
 
 function parseDifficulty(value: string | undefined): HiveComputerDifficulty {
   if (value === 'medium' || value === 'hard' || value === 'extreme') return value;
   throw new Error(`Invalid --difficulty value: ${value}`);
+}
+
+function parseSampleOrigin(value: string | undefined, flag: string): SelfPlaySampleOrigin {
+  if (value === 'learner' || value === 'champion') return value;
+  throw new Error(`Invalid value for ${flag}: ${value}`);
 }
 
 function parsePositiveInt(value: string | undefined, flag: string): number {
@@ -295,7 +338,7 @@ function parseNonNegativeInt(value: string | undefined, flag: string): number {
 function parseRatio(value: string | undefined, flag: string): number {
   if (!value) throw new Error(`Missing value for ${flag}`);
   const parsed = Number.parseFloat(value);
-  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 1) throw new Error(`Invalid value for ${flag}: ${value}`);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) throw new Error(`Invalid value for ${flag}: ${value}`);
   return parsed;
 }
 
@@ -352,4 +395,3 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 main();
-

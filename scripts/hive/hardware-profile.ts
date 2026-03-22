@@ -9,12 +9,16 @@ export interface HiveHardwareProfile {
 }
 
 const DEFAULT_RESERVED_CPU = 1;
+const DEFAULT_SELF_PLAY_CPU_FRACTION = 0.8;
 
 export function getHiveHardwareProfile(): HiveHardwareProfile {
   const logicalCpuCount = Math.max(1, cpus().length || 1);
   const totalMemoryGiB = totalmem() / (1024 ** 3);
 
-  const computedSelfPlayWorkers = Math.max(1, logicalCpuCount - DEFAULT_RESERVED_CPU);
+  const computedSelfPlayWorkers = computeCpuBudgetWorkers(
+    logicalCpuCount,
+    DEFAULT_SELF_PLAY_CPU_FRACTION,
+  );
   const computedEvalWorkers = Math.max(1, logicalCpuCount - DEFAULT_RESERVED_CPU);
   const computedDeepBatchSize = pickDeepBatchSize(totalMemoryGiB, logicalCpuCount);
 
@@ -45,6 +49,7 @@ export function getHiveHardwareProfile(): HiveHardwareProfile {
 function pickDeepBatchSize(totalMemoryGiB: number, logicalCpuCount: number): number {
   if (totalMemoryGiB >= 48) return 4096;
   if (totalMemoryGiB >= 24) return 2048;
+  if (totalMemoryGiB >= 16) return 2048;
   if (totalMemoryGiB >= 12) return 1024;
   return logicalCpuCount >= 8 ? 1024 : 512;
 }
@@ -59,4 +64,8 @@ function readEnvPositiveInt(name: string): number | undefined {
 
 function clampInt(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function computeCpuBudgetWorkers(logicalCpuCount: number, cpuFraction: number): number {
+  return Math.max(1, Math.min(logicalCpuCount, Math.floor(logicalCpuCount * cpuFraction)));
 }

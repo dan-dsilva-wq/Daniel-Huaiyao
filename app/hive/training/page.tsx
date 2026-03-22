@@ -1,36 +1,35 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import Link from 'next/link';
+import {
+  BUNDLED_HIVE_METRICS_SNAPSHOT_PATH,
+  DEFAULT_HIVE_METRICS_LOG_PATH,
+} from '@/lib/hive/metricsSnapshot';
+import { readHiveTrainingMetricsSnapshot } from '@/lib/server/hive-training-metrics';
 import { AutoRefresh } from './AutoRefresh';
 
 export const dynamic = 'force-dynamic';
 
 type MetricEvent = {
   ts?: string;
-  source?: 'linear' | 'deep' | 'az' | 'eval';
+  source?: 'az' | 'eval' | 'deep' | 'linear';
   runId?: string;
   eventType?: string;
   [key: string]: unknown;
 };
 
-type TrainingRun = {
-  runId: string;
-  source: 'linear' | 'deep' | 'az';
-  startedAt: string | null;
-  endedAt: string | null;
-  status: string | null;
-  options: Record<string, unknown> | null;
-  epochs: EpochPoint[];
-  selfPlay: SelfPlayPoint[];
-  finalMetrics: Record<string, unknown> | null;
+type MetricsLoadResult = {
+  events: MetricEvent[];
+  source: 'local_file' | 'shared_snapshot' | 'bundled_snapshot' | 'none';
+  snapshotUpdatedAt: string | null;
+  snapshotEventCount: number | null;
 };
 
-type EpochPoint = {
+type TrainerEpoch = {
   epoch: number;
-  trainMse: number | null;
-  valMse: number | null;
-  trainAcc: number | null;
-  valAcc: number | null;
+  totalEpochs: number | null;
+  trainLoss: number | null;
+  valLoss: number | null;
   trainValueLoss: number | null;
   valValueLoss: number | null;
   trainPolicyLoss: number | null;
@@ -41,697 +40,417 @@ type EpochPoint = {
   valPolicyEntropy: number | null;
 };
 
-type SelfPlayPoint = {
-  completedGames: number;
-  whiteWins: number | null;
-  blackWins: number | null;
-  draws: number | null;
-};
-
-type CrossRunPoint = {
+type TrainerRun = {
   runId: string;
-  source: 'linear' | 'deep' | 'az';
+  step: number | null;
+  presetId: string | null;
   startedAt: string | null;
-  valMse: number | null;
-  valAcc: number | null;
+  endedAt: string | null;
+  status: string | null;
+  sampleCount: number | null;
+  batchSize: number | null;
+  epochs: TrainerEpoch[];
 };
 
-type BenchmarkPoint = {
+type ArenaResult = {
   runId: string;
   ts: string | null;
-  games: number;
-  difficulty: string | null;
-  candidateWins: number | null;
-  baselineWins: number | null;
-  draws: number | null;
-  candidateScore: number | null;
-  winRate: number | null;
-  drawRate: number | null;
-  lossRate: number | null;
-  avgTurns: number | null;
-  maxTurnsDraws: number | null;
-  noCaptureDraws: number | null;
-  baselineSource: string | null;
-  eloEstimate: number | null;
-  avgSimulationsPerMove: number | null;
-  searchNodesPerSec: number | null;
-  policyEntropy: number | null;
-  benchmarkSuite: string | null;
-};
-
-type PromotionPoint = {
-  runId: string;
-  ts: string | null;
-  promoted: boolean;
-  threshold: number | null;
+  step: number | null;
+  presetId: string | null;
+  games: number | null;
+  configuredGames: number | null;
   candidateScore: number | null;
   eloEstimate: number | null;
   scoreCiLow: number | null;
   scoreCiHigh: number | null;
   gateDecisionReason: string | null;
-  promoteOutPath: string | null;
-};
-
-type GenerationRow = {
-  runId: string;
-  ts: string | null;
   candidateHash: string | null;
   championHash: string | null;
-  candidateScore: number | null;
-  eloEstimate: number | null;
   promoted: boolean | null;
-  scoreDelta: number | null;
-  eloDelta: number | null;
+  stage2Triggered: boolean | null;
+  stage1Score: number | null;
+  stage2Score: number | null;
+  severeFailure: boolean | null;
 };
 
-type AzEfficiencyPoint = {
+type AsyncSummary = {
   runId: string;
+  lastTs: string | null;
+  replaySamples: number | null;
+  totalChunks: number | null;
+  totalGenerated: number | null;
+  latestTrainStep: number | null;
+  latestArenaStep: number | null;
+  bestCheckpointScore: number | null;
+  latestPhase: string | null;
+};
+
+type ReplayPoint = {
   ts: string | null;
-  positionsPerSecond: number | null;
-  avgSimulationsPerMove: number | null;
-  replayFreshnessRatio: number | null;
-  reanalysedSamples: number | null;
   replaySamples: number | null;
 };
 
-const DEFAULT_METRICS_LOG_PATH = '.hive-cache/metrics/training-metrics.jsonl';
+type ArenaPoint = {
+  ts: string | null;
+  candidateScore: number | null;
+};
 
-export default function HiveTrainingPage() {
+type StepRow = {
+  step: number;
+  presetId: string | null;
+  replaySamples: number | null;
+  reanalysedSamples: number | null;
+  sampleCount: number | null;
+  trainStatus: string | null;
+  arenaScore: number | null;
+  arenaPromoted: boolean | null;
+  arenaReason: string | null;
+};
+
+type PresetSummary = {
+  presetId: string;
+  runs: number;
+  promotions: number;
+  severeFailures: number;
+  avgScore: number | null;
+  avgCiLow: number | null;
+};
+
+type OverfittingWarning = {
+  severity: 'none' | 'watch' | 'high';
+  message: string;
+};
+
+export default async function HiveTrainingPage() {
   const logPath = resolveMetricsPath();
-  const events = readMetricEvents(logPath);
-  const runs = buildRuns(events);
-  const deepRuns = runs.filter((run) => run.source === 'deep');
-  const linearRuns = runs.filter((run) => run.source === 'linear');
-  const azRuns = runs.filter((run) => run.source === 'az');
-  const crossRunPoints = buildCrossRunPoints(runs);
-  const benchmarkPoints = buildBenchmarkPoints(events);
-  const promotionPoints = buildPromotionPoints(events);
-  const generationRows = buildGenerationRows(events);
-  const azEfficiencyPoints = buildAzEfficiencyPoints(events);
+  const metrics = await loadMetricEvents(logPath);
+  const azEvents = metrics.events.filter((event) => event.source === 'az' || event.source === 'eval');
+  const trainerRuns = buildTrainerRuns(azEvents);
+  const arenaResults = buildArenaResults(azEvents);
+  const asyncRuns = buildAsyncSummaries(azEvents);
+  const stepRows = buildStepRows(azEvents, trainerRuns);
+  const presetSummaries = buildPresetSummaries(azEvents);
+  const replayPoints = buildReplayPoints(azEvents);
+  const arenaPoints = arenaResults
+    .slice()
+    .reverse()
+    .map((result) => ({ ts: result.ts, candidateScore: result.candidateScore }));
 
-  const latestDeep = deepRuns[0] ?? null;
-  const latestLinear = linearRuns[0] ?? null;
-  const latestAz = azRuns[0] ?? null;
-  const latestGeneration = generationRows[0] ?? null;
-  const previousGeneration = generationRows[1] ?? null;
+  const latestTrainerRun = trainerRuns[0] ?? null;
+  const latestArena = arenaResults[0] ?? null;
+  const latestAsync = asyncRuns[0] ?? null;
+  const overfittingWarning = latestTrainerRun ? getOverfittingWarning(latestTrainerRun) : null;
+  const favoredPreset = presetSummaries[0]?.presetId ?? latestTrainerRun?.presetId ?? latestArena?.presetId ?? '-';
+  const recentConfirmedPromotions = arenaResults.filter((result) => result.promoted).slice(0, 5).length;
+  const recentSevereFailures = arenaResults.filter((result) => result.severeFailure).slice(0, 8).length;
 
   return (
     <main className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
       <AutoRefresh intervalMs={5000} />
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-8">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Hive Training Curves</h1>
+            <h1 className="text-2xl font-bold">Hive AlphaZero Training</h1>
             <p className="text-sm text-gray-600 dark:text-gray-300">
-              Validation and training metrics from local runs.
+              Current async training, replay growth, trainer metrics, and promotion arenas.
             </p>
           </div>
           <Link
             href="/hive"
-            className="px-3 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm"
+            className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-800"
           >
             Back To Game
           </Link>
         </div>
 
-        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 text-sm">
-          <p><span className="font-semibold">Metrics file:</span> <code>{logPath}</code></p>
-          <p><span className="font-semibold">Events loaded:</span> {events.length}</p>
-          <p><span className="font-semibold">Runs tracked:</span> {runs.length}</p>
-          <p><span className="font-semibold">Runs with validation metrics:</span> {crossRunPoints.length}</p>
-          <p><span className="font-semibold">Benchmark eval runs:</span> {benchmarkPoints.length}</p>
-          <p><span className="font-semibold">Promotion decisions:</span> {promotionPoints.length}</p>
+        <InfoCard metrics={metrics} logPath={logPath} />
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <SummaryCard
+            title="Current Async Run"
+            rows={[
+              ['Run', latestAsync?.runId ?? '-'],
+              ['Last Event', formatTimestamp(latestAsync?.lastTs)],
+              ['Replay Samples', formatCount(latestAsync?.replaySamples)],
+              ['Total Chunks', formatCount(latestAsync?.totalChunks)],
+              ['Generated Samples', formatCount(latestAsync?.totalGenerated)],
+              ['Latest Train Step', formatCount(latestAsync?.latestTrainStep)],
+              ['Latest Arena Step', formatCount(latestAsync?.latestArenaStep)],
+              ['Best Checkpoint', formatPercent(latestAsync?.bestCheckpointScore)],
+              ['Current Phase', latestAsync?.latestPhase ?? '-'],
+              ['Favored Preset', favoredPreset],
+            ]}
+          />
+          <SummaryCard
+            title="Latest Training Step"
+            rows={[
+              ['Run', latestTrainerRun?.runId ?? '-'],
+              ['Step', formatCount(latestTrainerRun?.step)],
+              ['Started', formatTimestamp(latestTrainerRun?.startedAt)],
+              ['Ended', formatTimestamp(latestTrainerRun?.endedAt)],
+              ['Status', latestTrainerRun?.status ?? '-'],
+              ['Samples', formatCount(latestTrainerRun?.sampleCount)],
+              ['Batch Size', formatCount(latestTrainerRun?.batchSize)],
+              ['Epochs', formatCount(latestTrainerRun?.epochs.length ?? null)],
+              ['Preset', latestTrainerRun?.presetId ?? '-'],
+            ]}
+          />
+          <SummaryCard
+            title="Latest Arena"
+            rows={[
+              ['Run', latestArena?.runId ?? '-'],
+              ['Completed', formatTimestamp(latestArena?.ts)],
+              ['Games', formatFraction(latestArena?.games, latestArena?.configuredGames)],
+              ['Score', formatPercent(latestArena?.candidateScore)],
+              ['Elo Vs Champion', formatMetric(latestArena?.eloEstimate, 1)],
+              ['CI Low', formatPercent(latestArena?.scoreCiLow)],
+              ['CI High', formatPercent(latestArena?.scoreCiHigh)],
+              ['Stage 2', latestArena?.stage2Triggered === null ? '-' : latestArena.stage2Triggered ? 'yes' : 'no'],
+              ['Result', latestArena?.promoted === null ? '-' : latestArena.promoted ? 'Promoted' : 'Rejected'],
+            ]}
+            footer={latestArena?.gateDecisionReason ? `Reason: ${latestArena.gateDecisionReason}` : null}
+          />
         </div>
 
-        <BenchmarkSection points={benchmarkPoints} />
-        <AzEfficiencySection points={azEfficiencyPoints} />
-        <PromotionSection points={promotionPoints} />
-        <GenerationSection rows={generationRows} />
-
-        {latestGeneration && previousGeneration && (
-          <GenerationCompareCard latest={latestGeneration} previous={previousGeneration} />
-        )}
-
-        <CrossRunSection points={crossRunPoints} />
-
-        {latestDeep ? (
-          <RunSection title="Latest Deep Run" run={latestDeep} />
-        ) : (
-          <EmptyCard label="No deep-training metrics found yet." />
-        )}
-
-        {latestAz ? (
-          <RunSection title="Latest AlphaZero Run" run={latestAz} />
-        ) : (
-          <EmptyCard label="No AlphaZero metrics found yet." />
-        )}
-
-        {latestLinear ? (
-          <RunSection title="Latest Linear Run" run={latestLinear} />
-        ) : (
-          <EmptyCard label="No linear-training metrics found yet." />
-        )}
-
-        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-          <h2 className="text-lg font-semibold mb-3">Recent Runs</h2>
-          {runs.length === 0 ? (
-            <p className="text-sm text-gray-600 dark:text-gray-300">No runs yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left border-b border-gray-200 dark:border-gray-700">
-                    <th className="py-2 pr-3">Source</th>
-                    <th className="py-2 pr-3">Run ID</th>
-                    <th className="py-2 pr-3">Started</th>
-                    <th className="py-2 pr-3">Status</th>
-                    <th className="py-2 pr-3">Epochs</th>
-                    <th className="py-2 pr-3">Last Val MSE</th>
-                    <th className="py-2 pr-3">Last Val Acc</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {runs.slice(0, 20).map((run) => {
-                    const lastEpoch = run.epochs[run.epochs.length - 1];
-                    return (
-                      <tr key={run.runId} className="border-b border-gray-100 dark:border-gray-800">
-                        <td className="py-2 pr-3">{run.source}</td>
-                        <td className="py-2 pr-3"><code>{run.runId}</code></td>
-                        <td className="py-2 pr-3">{formatTimestamp(run.startedAt)}</td>
-                        <td className="py-2 pr-3">{run.status ?? '-'}</td>
-                        <td className="py-2 pr-3">{run.epochs.length}</td>
-                        <td className="py-2 pr-3">{formatMetric(lastEpoch?.valMse)}</td>
-                        <td className="py-2 pr-3">{formatPercent(lastEpoch?.valAcc)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+        <div className="grid gap-4 lg:grid-cols-3">
+          <SummaryCard
+            title="Reliable Progress"
+            rows={[
+              ['Confirmed Promotions', String(recentConfirmedPromotions)],
+              ['Severe Failures', String(recentSevereFailures)],
+              ['Favored Preset', favoredPreset],
+              ['Current Phase', latestAsync?.latestPhase ?? '-'],
+            ]}
+            footer="Arena outcomes matter more than replay loss. Use this panel to judge whether the loop is becoming more reliable."
+          />
         </div>
+
+        {overfittingWarning && overfittingWarning.severity !== 'none' ? (
+          <WarningCard warning={overfittingWarning} />
+        ) : null}
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <LineChart
+            title="Replay Samples"
+            valueSuffix=""
+            series={[
+              { label: 'replay samples', color: '#2563eb', values: replayPoints.map((point) => point.replaySamples) },
+            ]}
+          />
+          <LineChart
+            title="Arena Score"
+            valueSuffix="%"
+            valueScale={100}
+            series={[
+              { label: 'candidate score', color: '#16a34a', values: arenaPoints.map((point) => point.candidateScore) },
+            ]}
+          />
+        </div>
+
+        {latestTrainerRun ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <LineChart
+              title="Latest Training Loss"
+              series={[
+                { label: 'train loss', color: '#0284c7', values: latestTrainerRun.epochs.map((epoch) => epoch.trainLoss) },
+                { label: 'val loss', color: '#dc2626', values: latestTrainerRun.epochs.map((epoch) => epoch.valLoss) },
+              ]}
+            />
+            <LineChart
+              title="Latest Policy Signals"
+              series={[
+                { label: 'val policy loss', color: '#7c3aed', values: latestTrainerRun.epochs.map((epoch) => epoch.valPolicyLoss) },
+                { label: 'val entropy', color: '#d97706', values: latestTrainerRun.epochs.map((epoch) => epoch.valPolicyEntropy) },
+              ]}
+            />
+          </div>
+        ) : (
+          <EmptyCard label="No AlphaZero trainer run found yet." />
+        )}
+
+        <SectionTable
+          title="Recent Steps"
+          description="One row per async train/arena step. This is the main view for whether the loop is actually progressing."
+          headers={['Step', 'Preset', 'Replay', 'Reanalysed', 'Train Samples', 'Train Status', 'Arena Score', 'Promoted', 'Arena Reason']}
+          rows={stepRows.slice(0, 12).map((row) => [
+            String(row.step),
+            row.presetId ?? '-',
+            formatCount(row.replaySamples),
+            formatCount(row.reanalysedSamples),
+            formatCount(row.sampleCount),
+            row.trainStatus ?? '-',
+            formatPercent(row.arenaScore),
+            row.arenaPromoted === null ? '-' : row.arenaPromoted ? 'yes' : 'no',
+            row.arenaReason ?? '-',
+          ])}
+          emptyLabel="No completed steps yet."
+        />
+
+        <SectionTable
+          title="Recent Arenas"
+          description="Arena stages confirm whether replay-fit improvements actually produce stronger play."
+          headers={['Completed', 'Preset', 'Games', 'Score', 'Stage 2', 'Promoted', 'Reason', 'Candidate', 'Champion']}
+          rows={arenaResults.slice(0, 12).map((result) => [
+            formatTimestamp(result.ts),
+            result.presetId ?? '-',
+            formatFraction(result.games, result.configuredGames),
+            formatPercent(result.candidateScore),
+            result.stage2Triggered === null ? '-' : result.stage2Triggered ? 'yes' : 'no',
+            result.promoted === null ? '-' : result.promoted ? 'yes' : 'no',
+            result.gateDecisionReason ?? '-',
+            result.candidateHash ?? '-',
+            result.championHash ?? '-',
+          ])}
+          emptyLabel="No arena results yet."
+        />
+
+        <SectionTable
+          title="Preset Experiments"
+          description="Preset ranking uses repeated arena outcomes, promotion rate, confidence-aware score, and severe failure rate."
+          headers={['Preset', 'Runs', 'Promotions', 'Severe Fails', 'Avg Score', 'Avg CI Low']}
+          rows={presetSummaries.slice(0, 8).map((row) => [
+            row.presetId,
+            String(row.runs),
+            String(row.promotions),
+            String(row.severeFailures),
+            formatPercent(row.avgScore),
+            formatPercent(row.avgCiLow),
+          ])}
+          emptyLabel="No preset experiment data yet."
+        />
+
+        <SectionTable
+          title="Recent Trainer Runs"
+          description="Focused on the current AlphaZero trainer only."
+          headers={['Step', 'Started', 'Status', 'Samples', 'Batch', 'Val Loss', 'Val Policy', 'Val Entropy']}
+          rows={trainerRuns.slice(0, 12).map((run) => {
+            const lastEpoch = run.epochs[run.epochs.length - 1];
+            return [
+              formatCount(run.step),
+              formatTimestamp(run.startedAt),
+              run.status ?? '-',
+              formatCount(run.sampleCount),
+              formatCount(run.batchSize),
+              formatMetric(lastEpoch?.valLoss),
+              formatMetric(lastEpoch?.valPolicyLoss),
+              formatMetric(lastEpoch?.valPolicyEntropy),
+            ];
+          })}
+          emptyLabel="No trainer runs yet."
+        />
       </div>
     </main>
   );
 }
 
-function RunSection({ title, run }: { title: string; run: TrainingRun }) {
-  const epochs = [...run.epochs].sort((a, b) => a.epoch - b.epoch);
-  const valMse = epochs.map((entry) => entry.valMse);
-  const trainMse = epochs.map((entry) => entry.trainMse);
-  const valAcc = epochs.map((entry) => entry.valAcc === null ? null : entry.valAcc * 100);
-  const trainAcc = epochs.map((entry) => entry.trainAcc === null ? null : entry.trainAcc * 100);
-  const valValueLoss = epochs.map((entry) => entry.valValueLoss);
-  const valPolicyLoss = epochs.map((entry) => entry.valPolicyLoss);
-  const valAuxLoss = epochs.map((entry) => entry.valAuxLoss);
-  const valPolicyEntropy = epochs.map((entry) => entry.valPolicyEntropy);
-  const trainPolicyEntropy = epochs.map((entry) => entry.trainPolicyEntropy);
-  const games = run.selfPlay.map((entry) => entry.completedGames);
-  const whiteWins = run.selfPlay.map((entry) => entry.whiteWins);
-  const blackWins = run.selfPlay.map((entry) => entry.blackWins);
-  const draws = run.selfPlay.map((entry) => entry.draws);
-
+function InfoCard({ metrics, logPath }: { metrics: MetricsLoadResult; logPath: string }) {
   return (
-    <section className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">{title}</h2>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Run <code>{run.runId}</code> | started {formatTimestamp(run.startedAt)} | status {run.status ?? 'unknown'}
-        </p>
-      </div>
-
-      {run.source === 'az' ? (
-        <div className="grid md:grid-cols-2 gap-4">
-          <LineChart
-            title="Total Loss By Epoch"
-            series={[
-              { label: 'validation loss', color: '#e11d48', values: valMse },
-              { label: 'train loss', color: '#0284c7', values: trainMse },
-            ]}
-          />
-          <LineChart
-            title="Policy Entropy By Epoch"
-            series={[
-              { label: 'validation entropy', color: '#16a34a', values: valPolicyEntropy },
-              { label: 'train entropy', color: '#a855f7', values: trainPolicyEntropy },
-            ]}
-          />
-          <LineChart
-            title="Validation Head Losses"
-            series={[
-              { label: 'value loss', color: '#7c3aed', values: valValueLoss },
-              { label: 'policy loss', color: '#0ea5e9', values: valPolicyLoss },
-              { label: 'aux loss', color: '#d97706', values: valAuxLoss },
-            ]}
-          />
-        </div>
-      ) : (
-        <div className="grid md:grid-cols-2 gap-4">
-          <LineChart
-            title="MSE By Epoch"
-            series={[
-              { label: 'validation mse', color: '#e11d48', values: valMse },
-              { label: 'train mse', color: '#0284c7', values: trainMse },
-            ]}
-          />
-          <LineChart
-            title="Accuracy % By Epoch"
-            series={[
-              { label: 'validation acc', color: '#16a34a', values: valAcc },
-              { label: 'train acc', color: '#a855f7', values: trainAcc },
-            ]}
-          />
-        </div>
+    <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm dark:border-gray-700 dark:bg-gray-800">
+      <p><span className="font-semibold">Metrics file:</span> <code>{logPath}</code></p>
+      <p><span className="font-semibold">Events loaded:</span> {metrics.events.length}</p>
+      <p><span className="font-semibold">Data source:</span> {formatDataSource(metrics.source)}</p>
+      {metrics.snapshotUpdatedAt && (
+        <p><span className="font-semibold">Snapshot updated:</span> {formatTimestamp(metrics.snapshotUpdatedAt)}</p>
       )}
-
-      {games.length > 0 ? (
-        <LineChart
-          title="Self-Play W/L/D Over Games"
-          series={[
-            { label: 'games completed', color: '#2563eb', values: games },
-            { label: 'white wins', color: '#9f1239', values: whiteWins },
-            { label: 'black wins', color: '#1f2937', values: blackWins },
-            { label: 'draws', color: '#6b7280', values: draws },
-          ]}
-        />
-      ) : (
-        <p className="text-sm text-gray-600 dark:text-gray-300">No self-play progress events logged for this run.</p>
+      {metrics.snapshotEventCount !== null && (
+        <p><span className="font-semibold">Snapshot events:</span> {metrics.snapshotEventCount}</p>
       )}
-    </section>
-  );
-}
-
-function CrossRunSection({ points }: { points: CrossRunPoint[] }) {
-  if (points.length === 0) {
-    return <EmptyCard label="No cross-run curve data yet. Complete at least one run with epoch metrics." />;
-  }
-
-  const allValMse = points.map((point) => point.valMse);
-  const deepValMse = points.map((point) => point.source === 'deep' ? point.valMse : null);
-  const linearValMse = points.map((point) => point.source === 'linear' ? point.valMse : null);
-  const azValMse = points.map((point) => point.source === 'az' ? point.valMse : null);
-
-  const allValAcc = points.map((point) => point.valAcc === null ? null : point.valAcc * 100);
-  const deepValAcc = points.map((point) => (
-    point.source === 'deep' && point.valAcc !== null ? point.valAcc * 100 : null
-  ));
-  const linearValAcc = points.map((point) => (
-    point.source === 'linear' && point.valAcc !== null ? point.valAcc * 100 : null
-  ));
-  const azValAcc = points.map((point) => (
-    point.source === 'az' && point.valAcc !== null ? point.valAcc * 100 : null
-  ));
-
-  return (
-    <section className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Overall Cross-Run Curves</h2>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Tracks one point per run (oldest to newest), so you can see long-term trend.
-        </p>
-      </div>
-      <div className="grid md:grid-cols-2 gap-4">
-        <LineChart
-          title="Validation MSE Across Runs"
-          series={[
-            { label: 'all runs', color: '#e11d48', values: allValMse },
-            { label: 'deep runs', color: '#7c3aed', values: deepValMse },
-            { label: 'linear runs', color: '#0284c7', values: linearValMse },
-            { label: 'az runs', color: '#f59e0b', values: azValMse },
-          ]}
-        />
-        <LineChart
-          title="Validation Accuracy % Across Runs"
-          series={[
-            { label: 'all runs', color: '#16a34a', values: allValAcc },
-            { label: 'deep runs', color: '#a855f7', values: deepValAcc },
-            { label: 'linear runs', color: '#0ea5e9', values: linearValAcc },
-            { label: 'az runs', color: '#d97706', values: azValAcc },
-          ]}
-        />
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left border-b border-gray-200 dark:border-gray-700">
-              <th className="py-2 pr-3">Run</th>
-              <th className="py-2 pr-3">Source</th>
-              <th className="py-2 pr-3">Started</th>
-              <th className="py-2 pr-3">Val MSE</th>
-              <th className="py-2 pr-3">Val Acc</th>
-            </tr>
-          </thead>
-          <tbody>
-            {points.map((point, index) => (
-              <tr key={point.runId} className="border-b border-gray-100 dark:border-gray-800">
-                <td className="py-2 pr-3">#{index + 1}</td>
-                <td className="py-2 pr-3">{point.source}</td>
-                <td className="py-2 pr-3">{formatTimestamp(point.startedAt)}</td>
-                <td className="py-2 pr-3">{formatMetric(point.valMse)}</td>
-                <td className="py-2 pr-3">{formatPercent(point.valAcc)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function BenchmarkSection({ points }: { points: BenchmarkPoint[] }) {
-  if (points.length === 0) {
-    return (
-      <EmptyCard label="No benchmark eval data yet. Run `npm run hive:eval -- --games 60 --difficulty extreme` to add fixed-opponent progress points." />
-    );
-  }
-
-  const scoreSeries = points.map((point) => (
-    point.candidateScore === null ? null : point.candidateScore * 100
-  ));
-  const winRateSeries = points.map((point) => (
-    point.winRate === null ? null : point.winRate * 100
-  ));
-  const drawRateSeries = points.map((point) => (
-    point.drawRate === null ? null : point.drawRate * 100
-  ));
-  const lossRateSeries = points.map((point) => (
-    point.lossRate === null ? null : point.lossRate * 100
-  ));
-  const avgTurnsSeries = points.map((point) => point.avgTurns);
-  const eloSeries = points.map((point) => point.eloEstimate);
-  const simsSeries = points.map((point) => point.avgSimulationsPerMove);
-  const nodesSeries = points.map((point) => point.searchNodesPerSec);
-  const entropySeries = points.map((point) => point.policyEntropy);
-
-  return (
-    <section className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Fixed Benchmark Curves</h2>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Each point is one `hive:eval` run against the same baseline policy.
-        </p>
-      </div>
-      <div className="grid md:grid-cols-2 gap-4">
-        <LineChart
-          title="Benchmark Score % Across Runs"
-          series={[
-            { label: 'candidate score %', color: '#16a34a', values: scoreSeries },
-            { label: 'win rate %', color: '#1d4ed8', values: winRateSeries },
-            { label: 'draw rate %', color: '#6b7280', values: drawRateSeries },
-            { label: 'loss rate %', color: '#dc2626', values: lossRateSeries },
-          ]}
-        />
-        <LineChart
-          title="Average Turns Across Runs"
-          series={[
-            { label: 'avg turns', color: '#7c3aed', values: avgTurnsSeries },
-          ]}
-        />
-        <LineChart
-          title="Elo Estimate Across Runs"
-          series={[
-            { label: 'elo estimate', color: '#f97316', values: eloSeries },
-          ]}
-        />
-        <LineChart
-          title="Search Quality Across Runs"
-          series={[
-            { label: 'avg sims/move', color: '#f59e0b', values: simsSeries },
-            { label: 'nodes/sec', color: '#0ea5e9', values: nodesSeries },
-            { label: 'policy entropy', color: '#a855f7', values: entropySeries },
-          ]}
-        />
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left border-b border-gray-200 dark:border-gray-700">
-              <th className="py-2 pr-3">Run</th>
-              <th className="py-2 pr-3">Started</th>
-              <th className="py-2 pr-3">Games</th>
-              <th className="py-2 pr-3">Difficulty</th>
-              <th className="py-2 pr-3">Score</th>
-              <th className="py-2 pr-3">W/D/L</th>
-              <th className="py-2 pr-3">Avg Turns</th>
-              <th className="py-2 pr-3">Elo</th>
-              <th className="py-2 pr-3">Sims/Move</th>
-              <th className="py-2 pr-3">Draw Causes</th>
-              <th className="py-2 pr-3">Suite</th>
-              <th className="py-2 pr-3">Baseline</th>
-            </tr>
-          </thead>
-          <tbody>
-            {points.map((point, index) => {
-              const wins = point.candidateWins ?? (
-                point.winRate === null ? null : Math.round(point.winRate * point.games)
-              );
-              const draws = point.draws ?? (
-                point.drawRate === null ? null : Math.round(point.drawRate * point.games)
-              );
-              const losses = point.baselineWins ?? (
-                point.lossRate === null ? null : Math.round(point.lossRate * point.games)
-              );
-              const drawCause = [
-                `max-turns=${point.maxTurnsDraws ?? 0}`,
-                `no-progress=${point.noCaptureDraws ?? 0}`,
-              ].join(' ');
-
-              return (
-                <tr key={point.runId} className="border-b border-gray-100 dark:border-gray-800">
-                  <td className="py-2 pr-3">#{index + 1}</td>
-                  <td className="py-2 pr-3">{formatTimestamp(point.ts)}</td>
-                  <td className="py-2 pr-3">{point.games}</td>
-                  <td className="py-2 pr-3">{point.difficulty ?? '-'}</td>
-                  <td className="py-2 pr-3">{point.candidateScore === null ? '-' : `${(point.candidateScore * 100).toFixed(1)}%`}</td>
-                  <td className="py-2 pr-3">{wins === null || draws === null || losses === null ? '-' : `${wins}/${draws}/${losses}`}</td>
-                  <td className="py-2 pr-3">{point.avgTurns === null ? '-' : point.avgTurns.toFixed(1)}</td>
-                  <td className="py-2 pr-3">{point.eloEstimate === null ? '-' : point.eloEstimate.toFixed(1)}</td>
-                  <td className="py-2 pr-3">{point.avgSimulationsPerMove === null ? '-' : point.avgSimulationsPerMove.toFixed(2)}</td>
-                  <td className="py-2 pr-3">{drawCause}</td>
-                  <td className="py-2 pr-3">{point.benchmarkSuite ?? '-'}</td>
-                  <td className="py-2 pr-3">{point.baselineSource ?? '-'}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function AzEfficiencySection({ points }: { points: AzEfficiencyPoint[] }) {
-  if (points.length === 0) {
-    return <EmptyCard label="No AlphaZero efficiency metrics yet. Run `npm run hive:train:az` to log throughput and replay freshness." />;
-  }
-
-  const posSeries = points.map((point) => point.positionsPerSecond);
-  const simsSeries = points.map((point) => point.avgSimulationsPerMove);
-  const freshnessSeries = points.map((point) => (
-    point.replayFreshnessRatio === null ? null : point.replayFreshnessRatio * 100
-  ));
-
-  return (
-    <section className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">AlphaZero Efficiency + Replay Freshness</h2>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Throughput and replay refresh quality by generation/run.
-        </p>
-      </div>
-      <div className="grid md:grid-cols-2 gap-4">
-        <LineChart
-          title="Throughput Across AZ Runs"
-          series={[
-            { label: 'positions/sec', color: '#16a34a', values: posSeries },
-            { label: 'avg sims/move', color: '#2563eb', values: simsSeries },
-          ]}
-        />
-        <LineChart
-          title="Replay Freshness % Across AZ Runs"
-          series={[
-            { label: 'reanalyzed ratio %', color: '#d97706', values: freshnessSeries },
-          ]}
-        />
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left border-b border-gray-200 dark:border-gray-700">
-              <th className="py-2 pr-3">Run</th>
-              <th className="py-2 pr-3">Timestamp</th>
-              <th className="py-2 pr-3">Positions/Sec</th>
-              <th className="py-2 pr-3">Sims/Move</th>
-              <th className="py-2 pr-3">Replay Freshness</th>
-              <th className="py-2 pr-3">Reanalyzed</th>
-              <th className="py-2 pr-3">Replay Samples</th>
-            </tr>
-          </thead>
-          <tbody>
-            {points.map((point, index) => (
-              <tr key={`${point.runId}-${index}`} className="border-b border-gray-100 dark:border-gray-800">
-                <td className="py-2 pr-3">#{index + 1}</td>
-                <td className="py-2 pr-3">{formatTimestamp(point.ts)}</td>
-                <td className="py-2 pr-3">{point.positionsPerSecond === null ? '-' : point.positionsPerSecond.toFixed(2)}</td>
-                <td className="py-2 pr-3">{point.avgSimulationsPerMove === null ? '-' : point.avgSimulationsPerMove.toFixed(2)}</td>
-                <td className="py-2 pr-3">{point.replayFreshnessRatio === null ? '-' : `${(point.replayFreshnessRatio * 100).toFixed(1)}%`}</td>
-                <td className="py-2 pr-3">{point.reanalysedSamples === null ? '-' : point.reanalysedSamples}</td>
-                <td className="py-2 pr-3">{point.replaySamples === null ? '-' : point.replaySamples}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function PromotionSection({ points }: { points: PromotionPoint[] }) {
-  if (points.length === 0) {
-    return <EmptyCard label="No promotion decisions yet. Run `npm run hive:eval:arena` or `npm run hive:train:az`." />;
-  }
-
-  return (
-    <section className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Promotion Decisions</h2>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Arena gate decisions (candidate vs champion).
-        </p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left border-b border-gray-200 dark:border-gray-700">
-              <th className="py-2 pr-3">Run</th>
-              <th className="py-2 pr-3">Timestamp</th>
-              <th className="py-2 pr-3">Promoted</th>
-              <th className="py-2 pr-3">Score</th>
-              <th className="py-2 pr-3">CI</th>
-              <th className="py-2 pr-3">Threshold</th>
-              <th className="py-2 pr-3">Elo</th>
-              <th className="py-2 pr-3">Reason</th>
-              <th className="py-2 pr-3">Output</th>
-            </tr>
-          </thead>
-          <tbody>
-            {points.map((point, index) => (
-              <tr key={`${point.runId}-${index}`} className="border-b border-gray-100 dark:border-gray-800">
-                <td className="py-2 pr-3">#{index + 1}</td>
-                <td className="py-2 pr-3">{formatTimestamp(point.ts)}</td>
-                <td className="py-2 pr-3">{point.promoted ? 'yes' : 'no'}</td>
-                <td className="py-2 pr-3">{point.candidateScore === null ? '-' : `${(point.candidateScore * 100).toFixed(1)}%`}</td>
-                <td className="py-2 pr-3">
-                  {point.scoreCiLow === null || point.scoreCiHigh === null
-                    ? '-'
-                    : `${(point.scoreCiLow * 100).toFixed(1)}%-${(point.scoreCiHigh * 100).toFixed(1)}%`}
-                </td>
-                <td className="py-2 pr-3">{point.threshold === null ? '-' : `${(point.threshold * 100).toFixed(1)}%`}</td>
-                <td className="py-2 pr-3">{point.eloEstimate === null ? '-' : point.eloEstimate.toFixed(1)}</td>
-                <td className="py-2 pr-3">{point.gateDecisionReason ?? '-'}</td>
-                <td className="py-2 pr-3"><code>{point.promoteOutPath ?? '-'}</code></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function GenerationSection({ rows }: { rows: GenerationRow[] }) {
-  if (rows.length === 0) {
-    return <EmptyCard label="No generation arena rows yet. Run `hive:train:az` or `hive:eval:arena`." />;
-  }
-
-  return (
-    <section className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold">Generation Table</h2>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Candidate/champion hashes, arena score, Elo, promotion, and deltas.
-        </p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left border-b border-gray-200 dark:border-gray-700">
-              <th className="py-2 pr-3">Gen</th>
-              <th className="py-2 pr-3">Timestamp</th>
-              <th className="py-2 pr-3">Candidate Hash</th>
-              <th className="py-2 pr-3">Champion Hash</th>
-              <th className="py-2 pr-3">Score</th>
-              <th className="py-2 pr-3">Elo</th>
-              <th className="py-2 pr-3">Promoted</th>
-              <th className="py-2 pr-3">Score Δ</th>
-              <th className="py-2 pr-3">Elo Δ</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <tr key={`${row.runId}-${index}`} className="border-b border-gray-100 dark:border-gray-800">
-                <td className="py-2 pr-3">#{rows.length - index}</td>
-                <td className="py-2 pr-3">{formatTimestamp(row.ts)}</td>
-                <td className="py-2 pr-3"><code>{row.candidateHash ?? '-'}</code></td>
-                <td className="py-2 pr-3"><code>{row.championHash ?? '-'}</code></td>
-                <td className="py-2 pr-3">{row.candidateScore === null ? '-' : `${(row.candidateScore * 100).toFixed(1)}%`}</td>
-                <td className="py-2 pr-3">{row.eloEstimate === null ? '-' : row.eloEstimate.toFixed(1)}</td>
-                <td className="py-2 pr-3">{row.promoted === null ? '-' : row.promoted ? 'yes' : 'no'}</td>
-                <td className="py-2 pr-3">{row.scoreDelta === null ? '-' : `${(row.scoreDelta * 100).toFixed(1)}%`}</td>
-                <td className="py-2 pr-3">{row.eloDelta === null ? '-' : row.eloDelta.toFixed(1)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-function GenerationCompareCard(
-  { latest, previous }: { latest: GenerationRow; previous: GenerationRow },
-) {
-  const scoreDelta = latest.scoreDelta ?? (
-    latest.candidateScore !== null && previous.candidateScore !== null
-      ? latest.candidateScore - previous.candidateScore
-      : null
-  );
-  const eloDelta = latest.eloDelta ?? (
-    latest.eloEstimate !== null && previous.eloEstimate !== null
-      ? latest.eloEstimate - previous.eloEstimate
-      : null
-  );
-
-  return (
-    <section className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 space-y-2">
-      <h2 className="text-lg font-semibold">Run Compare (Latest Vs Previous)</h2>
-      <p className="text-sm text-gray-600 dark:text-gray-300">
-        Latest run <code>{latest.runId}</code> vs previous <code>{previous.runId}</code>.
-      </p>
-      <div className="grid md:grid-cols-4 gap-3 text-sm">
-        <MetricPill label="Latest Score" value={latest.candidateScore === null ? '-' : `${(latest.candidateScore * 100).toFixed(1)}%`} />
-        <MetricPill label="Previous Score" value={previous.candidateScore === null ? '-' : `${(previous.candidateScore * 100).toFixed(1)}%`} />
-        <MetricPill label="Score Delta" value={scoreDelta === null ? '-' : `${(scoreDelta * 100).toFixed(1)}%`} />
-        <MetricPill label="Elo Delta" value={eloDelta === null ? '-' : eloDelta.toFixed(1)} />
-      </div>
-    </section>
-  );
-}
-
-function MetricPill({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2">
-      <p className="text-xs text-gray-600 dark:text-gray-300">{label}</p>
-      <p className="font-semibold">{value}</p>
     </div>
+  );
+}
+
+function SummaryCard(
+  {
+    title,
+    rows,
+    footer,
+  }: {
+    title: string;
+    rows: Array<[string, string]>;
+    footer?: string | null;
+  },
+) {
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+      <h2 className="mb-3 text-lg font-semibold">{title}</h2>
+      <div className="space-y-2 text-sm">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex justify-between gap-4">
+            <span className="text-gray-600 dark:text-gray-300">{label}</span>
+            <span className="text-right font-medium">{value}</span>
+          </div>
+        ))}
+      </div>
+      {footer ? <p className="mt-3 text-sm text-gray-600 dark:text-gray-300">{footer}</p> : null}
+    </section>
+  );
+}
+
+function SectionTable(
+  {
+    title,
+    description,
+    headers,
+    rows,
+    emptyLabel,
+  }: {
+    title: string;
+    description: string;
+    headers: string[];
+    rows: string[][];
+    emptyLabel: string;
+  },
+) {
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">{description}</p>
+      {rows.length === 0 ? (
+        <p className="text-sm text-gray-600 dark:text-gray-300">{emptyLabel}</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200 text-left dark:border-gray-700">
+                {headers.map((header) => (
+                  <th key={header} className="py-2 pr-3">{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, index) => (
+                <tr key={`${title}-${index}`} className="border-b border-gray-100 dark:border-gray-800">
+                  {row.map((cell, cellIndex) => (
+                    <td key={`${title}-${index}-${cellIndex}`} className="py-2 pr-3">{cell}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
 function EmptyCard({ label }: { label: string }) {
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+    <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
       <p className="text-sm text-gray-600 dark:text-gray-300">{label}</p>
     </div>
+  );
+}
+
+function WarningCard({ warning }: { warning: OverfittingWarning }) {
+  const className = warning.severity === 'high'
+    ? 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-100'
+    : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100';
+
+  return (
+    <section className={`rounded-xl border p-4 ${className}`}>
+      <h2 className="text-lg font-semibold">Overfitting Warning</h2>
+      <p className="mt-1 text-sm">{warning.message}</p>
+    </section>
   );
 }
 
@@ -739,20 +458,25 @@ function LineChart(
   {
     title,
     series,
+    valueScale = 1,
+    valueSuffix = '',
   }: {
     title: string;
     series: Array<{ label: string; color: string; values: Array<number | null> }>;
+    valueScale?: number;
+    valueSuffix?: string;
   },
 ) {
   const maxLength = Math.max(0, ...series.map((line) => line.values.length));
-  const finiteValues = series.flatMap((line) => line.values).filter((value): value is number => (
-    typeof value === 'number' && Number.isFinite(value)
-  ));
+  const finiteValues = series
+    .flatMap((line) => line.values)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    .map((value) => value * valueScale);
 
   if (maxLength < 2 || finiteValues.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-        <h3 className="font-semibold mb-2">{title}</h3>
+      <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+        <h3 className="mb-2 font-semibold">{title}</h3>
         <p className="text-sm text-gray-600 dark:text-gray-300">Not enough data.</p>
       </div>
     );
@@ -778,20 +502,18 @@ function LineChart(
   const toY = (value: number) => top + ((yMax - value) / (yMax - yMin)) * plotHeight;
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-      <h3 className="font-semibold mb-2">{title}</h3>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-56 rounded bg-gray-50 dark:bg-gray-900">
+    <div className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+      <h3 className="mb-2 font-semibold">{title}</h3>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-56 w-full rounded bg-gray-50 dark:bg-gray-900">
         <line x1={left} y1={height - bottom} x2={width - right} y2={height - bottom} stroke="#94a3b8" strokeWidth="1" />
         <line x1={left} y1={top} x2={left} y2={height - bottom} stroke="#94a3b8" strokeWidth="1" />
-
         {series.map((line) => {
           const points = line.values
             .map((value, index) => {
               if (value === null || !Number.isFinite(value)) return null;
-              return `${toX(index)},${toY(value)}`;
+              return `${toX(index)},${toY(value * valueScale)}`;
             })
             .filter((value): value is string => value !== null);
-
           if (points.length < 2) return null;
           return (
             <polyline
@@ -807,29 +529,84 @@ function LineChart(
       <div className="mt-2 flex flex-wrap gap-3 text-xs">
         {series.map((line) => (
           <div key={line.label} className="flex items-center gap-1">
-            <span className="inline-block w-3 h-0.5" style={{ background: line.color }} />
+            <span className="inline-block h-0.5 w-3" style={{ background: line.color }} />
             <span>{line.label}</span>
           </div>
         ))}
       </div>
       <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">
-        min={yMin.toFixed(4)} max={yMax.toFixed(4)} points={maxLength}
+        min={yMin.toFixed(2)}{valueSuffix} max={yMax.toFixed(2)}{valueSuffix} points={maxLength}
       </p>
     </div>
   );
 }
 
 function resolveMetricsPath(): string {
-  const configured = process.env.HIVE_METRICS_LOG_PATH ?? DEFAULT_METRICS_LOG_PATH;
+  const configured = process.env.HIVE_METRICS_LOG_PATH ?? DEFAULT_HIVE_METRICS_LOG_PATH;
   return path.resolve(process.cwd(), configured);
+}
+
+function resolveBundledSnapshotPath(): string {
+  return path.resolve(process.cwd(), BUNDLED_HIVE_METRICS_SNAPSHOT_PATH);
+}
+
+async function loadMetricEvents(logPath: string): Promise<MetricsLoadResult> {
+  const localEvents = readMetricEvents(logPath);
+  if (localEvents.length > 0) {
+    return {
+      events: localEvents,
+      source: 'local_file',
+      snapshotUpdatedAt: null,
+      snapshotEventCount: null,
+    };
+  }
+
+  const snapshot = await readHiveTrainingMetricsSnapshot();
+  if (snapshot) {
+    return {
+      events: parseMetricEvents(snapshot.content),
+      source: 'shared_snapshot',
+      snapshotUpdatedAt: snapshot.updated_at,
+      snapshotEventCount: snapshot.event_count,
+    };
+  }
+
+  const bundledSnapshotPath = resolveBundledSnapshotPath();
+  const bundledEvents = readMetricEvents(bundledSnapshotPath);
+  if (bundledEvents.length > 0) {
+    return {
+      events: bundledEvents,
+      source: 'bundled_snapshot',
+      snapshotUpdatedAt: readSnapshotUpdatedAt(bundledSnapshotPath),
+      snapshotEventCount: bundledEvents.length,
+    };
+  }
+
+  return {
+    events: [],
+    source: 'none',
+    snapshotUpdatedAt: null,
+    snapshotEventCount: null,
+  };
+}
+
+function readSnapshotUpdatedAt(absolutePath: string): string | null {
+  if (!existsSync(absolutePath)) return null;
+  try {
+    return statSync(absolutePath).mtime.toISOString();
+  } catch {
+    return null;
+  }
 }
 
 function readMetricEvents(absolutePath: string): MetricEvent[] {
   if (!existsSync(absolutePath)) return [];
-  const raw = readFileSync(absolutePath, 'utf8');
+  return parseMetricEvents(readFileSync(absolutePath, 'utf8'));
+}
+
+function parseMetricEvents(raw: string): MetricEvent[] {
   const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
   const events: MetricEvent[] = [];
-
   for (const line of lines) {
     try {
       const parsed = JSON.parse(line) as MetricEvent;
@@ -837,321 +614,323 @@ function readMetricEvents(absolutePath: string): MetricEvent[] {
         events.push(parsed);
       }
     } catch {
-      // Skip malformed lines.
+      // Ignore malformed lines.
     }
   }
-
   return events;
 }
 
-function buildRuns(events: MetricEvent[]): TrainingRun[] {
-  const map = new Map<string, TrainingRun>();
+function buildTrainerRuns(events: MetricEvent[]): TrainerRun[] {
+  const runs = new Map<string, TrainerRun>();
 
   for (const event of events) {
-    const runId = typeof event.runId === 'string' ? event.runId : null;
-    const source = event.source === 'deep' || event.source === 'linear' || event.source === 'az'
-      ? event.source
-      : null;
-    if (!runId || !source) continue;
+    if (event.source !== 'az' || typeof event.runId !== 'string') continue;
+    if (!event.runId.startsWith('az-train-stream-') && event.eventType !== 'run_start' && event.eventType !== 'epoch' && event.eventType !== 'run_end') {
+      continue;
+    }
 
-    let run = map.get(runId);
+    let run = runs.get(event.runId);
     if (!run) {
       run = {
-        runId,
-        source,
+        runId: event.runId,
+        step: null,
+        presetId: null,
         startedAt: null,
         endedAt: null,
         status: null,
-        options: null,
+        sampleCount: null,
+        batchSize: null,
         epochs: [],
-        selfPlay: [],
-        finalMetrics: null,
       };
-      map.set(runId, run);
+      runs.set(event.runId, run);
     }
 
     if (event.eventType === 'run_start') {
-      run.startedAt = typeof event.ts === 'string' ? event.ts : run.startedAt;
-      run.options = isRecord(event.options) ? event.options : run.options;
+      run.startedAt = asString(event.ts);
+      run.step = asNumber(event.step);
+      run.presetId = asString(event.presetId) ?? run.presetId;
+      run.sampleCount = asNumber(event.sampleCount);
+      run.batchSize = asNumber(event.batchSize);
       continue;
     }
 
     if (event.eventType === 'epoch') {
       const epoch = asNumber(event.epoch);
       if (epoch === null) continue;
-      const trainLoss = asNumber(event.trainMse) ?? asNumber(event.trainLoss);
-      const valLoss = asNumber(event.valMse) ?? asNumber(event.valLoss);
-      const trainEntropy = asNumber(event.trainPolicyEntropy);
-      const valEntropy = asNumber(event.valPolicyEntropy);
+      run.step = run.step ?? asNumber(event.step);
+      run.presetId = run.presetId ?? asString(event.presetId);
       run.epochs.push({
         epoch,
-        trainMse: trainLoss,
-        valMse: valLoss,
-        trainAcc: asNumber(event.trainAcc) ?? trainEntropy,
-        valAcc: asNumber(event.valAcc) ?? valEntropy,
+        totalEpochs: asNumber(event.totalEpochs),
+        trainLoss: asNumber(event.trainLoss),
+        valLoss: asNumber(event.valLoss),
         trainValueLoss: asNumber(event.trainValueLoss),
         valValueLoss: asNumber(event.valValueLoss),
         trainPolicyLoss: asNumber(event.trainPolicyLoss),
         valPolicyLoss: asNumber(event.valPolicyLoss),
         trainAuxLoss: asNumber(event.trainAuxLoss),
         valAuxLoss: asNumber(event.valAuxLoss),
-        trainPolicyEntropy: trainEntropy,
-        valPolicyEntropy: valEntropy,
-      });
-      continue;
-    }
-
-    if (event.eventType === 'self_play_progress') {
-      const completed = asNumber(event.completedGames);
-      if (completed === null) continue;
-      run.selfPlay.push({
-        completedGames: completed,
-        whiteWins: asNumber(event.whiteWins),
-        blackWins: asNumber(event.blackWins),
-        draws: asNumber(event.draws),
+        trainPolicyEntropy: asNumber(event.trainPolicyEntropy),
+        valPolicyEntropy: asNumber(event.valPolicyEntropy),
       });
       continue;
     }
 
     if (event.eventType === 'run_end') {
-      run.endedAt = typeof event.ts === 'string' ? event.ts : run.endedAt;
-      run.status = typeof event.status === 'string' ? event.status : run.status;
-      run.finalMetrics = event;
+      run.endedAt = asString(event.ts);
+      run.status = asString(event.status);
+      run.step = run.step ?? asNumber(event.step);
+      run.sampleCount = run.sampleCount ?? asNumber(event.sampleCount);
+      run.presetId = run.presetId ?? asString(event.presetId);
     }
   }
 
-  for (const run of map.values()) {
-    if (run.startedAt && !run.endedAt && !run.status) {
-      run.status = 'running';
-    }
-  }
-
-  return [...map.values()].sort((left, right) => {
+  return [...runs.values()].sort((left, right) => {
     const leftTs = left.startedAt ? Date.parse(left.startedAt) : 0;
     const rightTs = right.startedAt ? Date.parse(right.startedAt) : 0;
     return rightTs - leftTs;
   });
 }
 
-function buildCrossRunPoints(runs: TrainingRun[]): CrossRunPoint[] {
-  const chronological = [...runs].sort((left, right) => {
-    const leftTs = left.startedAt ? Date.parse(left.startedAt) : 0;
-    const rightTs = right.startedAt ? Date.parse(right.startedAt) : 0;
-    return leftTs - rightTs;
-  });
+function buildArenaResults(events: MetricEvent[]): ArenaResult[] {
+  const asyncRows = events
+    .filter((event) => event.source === 'az' && event.eventType === 'async_arena_result' && typeof event.runId === 'string')
+    .map((event) => ({
+      runId: event.runId as string,
+      ts: asString(event.ts),
+      step: asNumber(event.step),
+      presetId: asString(event.presetId),
+      games: asNumber(event.stage2Games) ?? asNumber(event.stage1Games),
+      configuredGames: asNumber(event.stage2ConfiguredGames) ?? asNumber(event.stage1ConfiguredGames),
+      candidateScore: asNumber(event.arenaScore),
+      eloEstimate: null,
+      scoreCiLow: asNumber(event.finalScoreCiLow),
+      scoreCiHigh: asNumber(event.finalScoreCiHigh),
+      gateDecisionReason: asString(event.arenaDecisionReason),
+      candidateHash: null,
+      championHash: null,
+      promoted: asBoolean(event.promoted),
+      stage2Triggered: asBoolean(event.stage2Triggered),
+      stage1Score: asNumber(event.stage1Score),
+      stage2Score: asNumber(event.stage2Score),
+      severeFailure: asBoolean(event.finalSevereFailure),
+    }));
 
-  const points: CrossRunPoint[] = [];
-
-  for (const run of chronological) {
-    const sortedEpochs = [...run.epochs].sort((left, right) => left.epoch - right.epoch);
-    const lastEpoch = sortedEpochs[sortedEpochs.length - 1];
-    const endValMse = lastEpoch?.valMse ?? asNumber(run.finalMetrics?.valMse);
-    const endValAcc = lastEpoch?.valAcc ?? asNumber(run.finalMetrics?.valAcc);
-    if (endValMse === null && endValAcc === null) continue;
-
-    points.push({
-      runId: run.runId,
-      source: run.source,
-      startedAt: run.startedAt,
-      valMse: endValMse,
-      valAcc: endValAcc,
-    });
-  }
-
-  return points;
-}
-
-function buildBenchmarkPoints(events: MetricEvent[]): BenchmarkPoint[] {
-  const points: BenchmarkPoint[] = [];
-
-  for (const event of events) {
-    if (event.source !== 'eval') continue;
-    if (event.eventType !== 'benchmark_result') continue;
-
-    const runId = typeof event.runId === 'string' ? event.runId : null;
-    if (!runId) continue;
-
-    const games = asNumber(event.games);
-    if (games === null || games <= 0) continue;
-
-    points.push({
-      runId,
-      ts: typeof event.ts === 'string' ? event.ts : null,
-      games,
-      difficulty: typeof event.difficulty === 'string' ? event.difficulty : null,
-      candidateWins: asNumber(event.candidateWins),
-      baselineWins: asNumber(event.baselineWins),
-      draws: asNumber(event.draws),
-      candidateScore: asNumber(event.candidateScore),
-      winRate: asNumber(event.winRate),
-      drawRate: asNumber(event.drawRate),
-      lossRate: asNumber(event.lossRate),
-      avgTurns: asNumber(event.avgTurns),
-      maxTurnsDraws: asNumber(event.maxTurnsDraws),
-      noCaptureDraws: asNumber(event.noCaptureDraws),
-      baselineSource: typeof event.baselineSource === 'string' ? event.baselineSource : null,
-      eloEstimate: asNumber(event.eloEstimate),
-      avgSimulationsPerMove: asNumber(event.avgSimulationsPerMove),
-      searchNodesPerSec: asNumber(event.searchNodesPerSec),
-      policyEntropy: asNumber(event.policyEntropy),
-      benchmarkSuite: typeof event.benchmarkSuite === 'string' ? event.benchmarkSuite : null,
-    });
-  }
-
-  points.sort((left, right) => {
-    const leftTs = left.ts ? Date.parse(left.ts) : 0;
-    const rightTs = right.ts ? Date.parse(right.ts) : 0;
-    return leftTs - rightTs;
-  });
-  return points;
-}
-
-function buildPromotionPoints(events: MetricEvent[]): PromotionPoint[] {
-  const points: PromotionPoint[] = [];
-
-  for (const event of events) {
-    if (event.eventType !== 'promotion_decision' && event.eventType !== 'promotion_result') continue;
-    const runId = typeof event.runId === 'string' ? event.runId : null;
-    if (!runId) continue;
-
-    points.push({
-      runId,
-      ts: typeof event.ts === 'string' ? event.ts : null,
-      promoted: event.promoted === true,
-      threshold: asNumber(event.threshold),
-      candidateScore: asNumber(event.candidateScore),
-      eloEstimate: asNumber(event.eloEstimate),
-      scoreCiLow: asNumber(event.scoreCiLow),
-      scoreCiHigh: asNumber(event.scoreCiHigh),
-      gateDecisionReason: typeof event.gateDecisionReason === 'string' ? event.gateDecisionReason : null,
-      promoteOutPath: typeof event.promoteOutPath === 'string' ? event.promoteOutPath : null,
-    });
-  }
-
-  points.sort((left, right) => {
-    const leftTs = left.ts ? Date.parse(left.ts) : 0;
-    const rightTs = right.ts ? Date.parse(right.ts) : 0;
-    return rightTs - leftTs;
-  });
-
-  return points;
-}
-
-function buildGenerationRows(events: MetricEvent[]): GenerationRow[] {
-  const arenaCompleted = events.filter((event) => (
+  const completed = events.filter((event) => (
     event.source === 'eval'
     && event.eventType === 'arena_match'
     && event.status === 'completed'
     && typeof event.runId === 'string'
   ));
-  arenaCompleted.sort((left, right) => {
-    const leftTs = typeof left.ts === 'string' ? Date.parse(left.ts) : 0;
-    const rightTs = typeof right.ts === 'string' ? Date.parse(right.ts) : 0;
+  const promotionByRun = new Map<string, boolean>();
+  for (const event of events) {
+    if ((event.eventType === 'promotion_result' || event.eventType === 'promotion_decision') && typeof event.runId === 'string' && typeof event.promoted === 'boolean') {
+      promotionByRun.set(event.runId, event.promoted);
+    }
+  }
+  const evalRows = completed.map((event) => ({
+    runId: event.runId as string,
+    ts: asString(event.ts),
+    step: null,
+    presetId: null,
+    games: asNumber(event.games),
+    configuredGames: asNumber(event.configuredGames),
+    candidateScore: asNumber(event.candidateScore),
+    eloEstimate: asNumber(event.eloEstimate),
+    scoreCiLow: asNumber(event.scoreCiLow),
+    scoreCiHigh: asNumber(event.scoreCiHigh),
+    gateDecisionReason: asString(event.gateDecisionReason),
+    candidateHash: asString(event.candidateHash),
+    championHash: asString(event.championHash),
+    promoted: promotionByRun.get(event.runId as string) ?? null,
+    stage2Triggered: null,
+    stage1Score: null,
+    stage2Score: null,
+    severeFailure: null,
+  }));
+  const rows = [...asyncRows, ...evalRows];
+
+  rows.sort((left, right) => {
+    const leftTs = left.ts ? Date.parse(left.ts) : 0;
+    const rightTs = right.ts ? Date.parse(right.ts) : 0;
     return rightTs - leftTs;
   });
-
-  const promotionByRun = new Map<string, MetricEvent>();
-  for (const event of events) {
-    if (event.eventType !== 'promotion_decision') continue;
-    if (typeof event.runId !== 'string') continue;
-    promotionByRun.set(event.runId, event);
-  }
-
-  const rows: GenerationRow[] = arenaCompleted.map((event) => {
-    const runId = event.runId as string;
-    const promotion = promotionByRun.get(runId);
-    return {
-      runId,
-      ts: typeof event.ts === 'string' ? event.ts : null,
-      candidateHash: typeof event.candidateHash === 'string' ? event.candidateHash : null,
-      championHash: typeof event.championHash === 'string' ? event.championHash : null,
-      candidateScore: asNumber(event.candidateScore),
-      eloEstimate: asNumber(event.eloEstimate),
-      promoted: promotion?.promoted === true ? true : promotion?.promoted === false ? false : null,
-      scoreDelta: null,
-      eloDelta: null,
-    };
-  });
-
-  for (let index = 0; index < rows.length; index += 1) {
-    const current = rows[index];
-    const previous = rows[index + 1];
-    if (!previous) continue;
-    if (current.candidateScore !== null && previous.candidateScore !== null) {
-      current.scoreDelta = current.candidateScore - previous.candidateScore;
-    }
-    if (current.eloEstimate !== null && previous.eloEstimate !== null) {
-      current.eloDelta = current.eloEstimate - previous.eloEstimate;
-    }
-  }
-
   return rows;
 }
 
-function buildAzEfficiencyPoints(events: MetricEvent[]): AzEfficiencyPoint[] {
-  const map = new Map<string, AzEfficiencyPoint>();
+function buildAsyncSummaries(events: MetricEvent[]): AsyncSummary[] {
+  const map = new Map<string, AsyncSummary>();
 
-  const getPoint = (runId: string): AzEfficiencyPoint => {
+  const getSummary = (runId: string): AsyncSummary => {
     const existing = map.get(runId);
     if (existing) return existing;
-    const created: AzEfficiencyPoint = {
+    const created: AsyncSummary = {
       runId,
-      ts: null,
-      positionsPerSecond: null,
-      avgSimulationsPerMove: null,
-      replayFreshnessRatio: null,
-      reanalysedSamples: null,
+      lastTs: null,
       replaySamples: null,
-    };
+      totalChunks: null,
+      totalGenerated: null,
+        latestTrainStep: null,
+        latestArenaStep: null,
+        bestCheckpointScore: null,
+        latestPhase: null,
+      };
     map.set(runId, created);
     return created;
   };
 
   for (const event of events) {
-    if (event.source !== 'az') continue;
-    if (typeof event.runId !== 'string') continue;
-
-    const point = getPoint(event.runId);
+    if (event.source !== 'az' || typeof event.runId !== 'string' || !event.runId.startsWith('az-async-')) continue;
+    const summary = getSummary(event.runId);
     if (typeof event.ts === 'string') {
-      point.ts = point.ts ?? event.ts;
+      if (!summary.lastTs || Date.parse(event.ts) >= Date.parse(summary.lastTs)) {
+        summary.lastTs = event.ts;
+      }
     }
 
-    if (event.eventType === 'self_play_summary') {
-      point.positionsPerSecond = asNumber(event.positionsPerSecond) ?? point.positionsPerSecond;
-      point.avgSimulationsPerMove = asNumber(event.avgSimulationsPerMove) ?? point.avgSimulationsPerMove;
-      continue;
-    }
-
-    if (event.eventType === 'reanalyze_pass') {
-      point.replayFreshnessRatio = asNumber(event.replayFreshnessRatio) ?? point.replayFreshnessRatio;
-      point.reanalysedSamples = asNumber(event.reanalysedSamples) ?? point.reanalysedSamples;
-      point.replaySamples = asNumber(event.replaySamples) ?? point.replaySamples;
-      continue;
-    }
-
-    if (event.eventType === 'run_end') {
-      point.positionsPerSecond = asNumber(event.positionsPerSecond) ?? point.positionsPerSecond;
-      point.avgSimulationsPerMove = asNumber(event.avgSimulationsPerMove) ?? point.avgSimulationsPerMove;
-      point.replayFreshnessRatio = asNumber(event.replayFreshnessRatio) ?? point.replayFreshnessRatio;
-      point.reanalysedSamples = asNumber(event.reanalysedSamples) ?? point.reanalysedSamples;
-      point.replaySamples = asNumber(event.replaySamples) ?? point.replaySamples;
+    if (event.eventType === 'async_selfplay_chunk') {
+      summary.replaySamples = asNumber(event.replaySamples) ?? summary.replaySamples;
+      summary.totalChunks = asNumber(event.totalChunks) ?? summary.totalChunks;
+      summary.totalGenerated = asNumber(event.totalGenerated) ?? summary.totalGenerated;
+    } else if (event.eventType === 'async_train_step') {
+      summary.latestTrainStep = asNumber(event.step) ?? summary.latestTrainStep;
+      summary.latestPhase = asString(event.budgetPhase) ?? summary.latestPhase;
+    } else if (event.eventType === 'async_arena_result') {
+      summary.latestArenaStep = asNumber(event.step) ?? summary.latestArenaStep;
+      summary.bestCheckpointScore = asNumber(event.bestCheckpointScore) ?? summary.bestCheckpointScore;
+      summary.latestPhase = asString(event.budgetPhase) ?? summary.latestPhase;
     }
   }
 
   return [...map.values()].sort((left, right) => {
-    const leftTs = left.ts ? Date.parse(left.ts) : 0;
-    const rightTs = right.ts ? Date.parse(right.ts) : 0;
-    return leftTs - rightTs;
+    const leftTs = left.lastTs ? Date.parse(left.lastTs) : 0;
+    const rightTs = right.lastTs ? Date.parse(right.lastTs) : 0;
+    return rightTs - leftTs;
+  });
+}
+
+function buildReplayPoints(events: MetricEvent[]): ReplayPoint[] {
+  return events
+    .filter((event) => event.source === 'az' && event.eventType === 'async_selfplay_chunk')
+    .map((event) => ({
+      ts: asString(event.ts),
+      replaySamples: asNumber(event.replaySamples),
+    }))
+    .sort((left, right) => {
+      const leftTs = left.ts ? Date.parse(left.ts) : 0;
+      const rightTs = right.ts ? Date.parse(right.ts) : 0;
+      return leftTs - rightTs;
+    });
+}
+
+function buildStepRows(events: MetricEvent[], trainerRuns: TrainerRun[]): StepRow[] {
+  const rows = new Map<number, StepRow>();
+
+  const getRow = (step: number): StepRow => {
+    const existing = rows.get(step);
+    if (existing) return existing;
+    const created: StepRow = {
+      step,
+      presetId: null,
+      replaySamples: null,
+      reanalysedSamples: null,
+      sampleCount: null,
+      trainStatus: null,
+      arenaScore: null,
+      arenaPromoted: null,
+      arenaReason: null,
+    };
+    rows.set(step, created);
+    return created;
+  };
+
+  for (const event of events) {
+    if (event.source !== 'az') continue;
+    const step = asNumber(event.step);
+    if (step === null) continue;
+    const row = getRow(step);
+
+    if (event.eventType === 'async_train_trigger') {
+      row.presetId = asString(event.presetId) ?? row.presetId;
+      row.replaySamples = asNumber(event.replaySamples) ?? row.replaySamples;
+      row.reanalysedSamples = asNumber(event.reanalysedSamples) ?? row.reanalysedSamples;
+    } else if (event.eventType === 'async_train_step') {
+      row.trainStatus = asString(event.status) ?? row.trainStatus;
+      row.replaySamples = asNumber(event.replaySamplesSnapshot) ?? row.replaySamples;
+    } else if (event.eventType === 'async_arena_result') {
+      row.presetId = asString(event.presetId) ?? row.presetId;
+      row.arenaScore = asNumber(event.arenaScore) ?? row.arenaScore;
+      row.arenaPromoted = typeof event.promoted === 'boolean' ? event.promoted : row.arenaPromoted;
+      row.arenaReason = asString(event.arenaDecisionReason) ?? row.arenaReason;
+    }
+  }
+
+  for (const run of trainerRuns) {
+    if (run.step === null) continue;
+    const row = getRow(run.step);
+    row.presetId = row.presetId ?? run.presetId;
+    row.sampleCount = run.sampleCount;
+    row.trainStatus = run.status ?? row.trainStatus;
+  }
+
+  return [...rows.values()].sort((left, right) => right.step - left.step);
+}
+
+function buildPresetSummaries(events: MetricEvent[]): PresetSummary[] {
+  const map = new Map<string, { runs: number; promotions: number; severeFailures: number; scoreSum: number; ciLowSum: number; scoredRuns: number; ciRuns: number }>();
+  for (const event of events) {
+    if (event.source !== 'az' || event.eventType !== 'async_arena_result') continue;
+    const presetId = asString(event.presetId);
+    if (!presetId) continue;
+    const entry = map.get(presetId) ?? {
+      runs: 0,
+      promotions: 0,
+      severeFailures: 0,
+      scoreSum: 0,
+      ciLowSum: 0,
+      scoredRuns: 0,
+      ciRuns: 0,
+    };
+    entry.runs += 1;
+    if (event.promoted === true) entry.promotions += 1;
+    if (event.finalSevereFailure === true) entry.severeFailures += 1;
+    const score = asNumber(event.arenaScore);
+    const ciLow = asNumber(event.finalScoreCiLow);
+    if (score !== null) {
+      entry.scoreSum += score;
+      entry.scoredRuns += 1;
+    }
+    if (ciLow !== null) {
+      entry.ciLowSum += ciLow;
+      entry.ciRuns += 1;
+    }
+    map.set(presetId, entry);
+  }
+
+  return [...map.entries()].map(([presetId, entry]) => ({
+    presetId,
+    runs: entry.runs,
+    promotions: entry.promotions,
+    severeFailures: entry.severeFailures,
+    avgScore: entry.scoredRuns > 0 ? entry.scoreSum / entry.scoredRuns : null,
+    avgCiLow: entry.ciRuns > 0 ? entry.ciLowSum / entry.ciRuns : null,
+  })).sort((left, right) => {
+    const leftScore = (left.promotions / Math.max(1, left.runs)) * 0.45 + (left.avgScore ?? 0) * 0.2 + (left.avgCiLow ?? 0) * 0.3 - (left.severeFailures / Math.max(1, left.runs)) * 0.55;
+    const rightScore = (right.promotions / Math.max(1, right.runs)) * 0.45 + (right.avgScore ?? 0) * 0.2 + (right.avgCiLow ?? 0) * 0.3 - (right.severeFailures / Math.max(1, right.runs)) * 0.55;
+    return rightScore - leftScore;
   });
 }
 
 function asNumber(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  return value;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
+function asString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -1161,12 +940,74 @@ function formatTimestamp(value: string | null | undefined): string {
   return new Date(parsed).toLocaleString();
 }
 
-function formatMetric(value: number | null | undefined): string {
+function formatMetric(value: number | null | undefined, decimals = 4): string {
   if (value === null || value === undefined) return '-';
-  return value.toFixed(4);
+  return value.toFixed(decimals);
 }
 
 function formatPercent(value: number | null | undefined): string {
   if (value === null || value === undefined) return '-';
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatCount(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '-';
+  return Math.round(value).toLocaleString();
+}
+
+function formatFraction(left: number | null | undefined, right: number | null | undefined): string {
+  if (left === null || left === undefined) return '-';
+  if (right === null || right === undefined) return formatCount(left);
+  return `${formatCount(left)}/${formatCount(right)}`;
+}
+
+function formatDataSource(value: MetricsLoadResult['source']): string {
+  if (value === 'local_file') return 'Local metrics file';
+  if (value === 'shared_snapshot') return 'Shared Supabase snapshot';
+  if (value === 'bundled_snapshot') return 'Bundled deployment snapshot';
+  return 'No metrics found';
+}
+
+function getOverfittingWarning(run: TrainerRun): OverfittingWarning {
+  const lastEpoch = run.epochs[run.epochs.length - 1];
+  if (!lastEpoch) {
+    return { severity: 'none', message: '' };
+  }
+
+  const policyGap = difference(lastEpoch.valPolicyLoss, lastEpoch.trainPolicyLoss);
+  const lossGap = difference(lastEpoch.valLoss, lastEpoch.trainLoss);
+  const entropyGap = difference(lastEpoch.valPolicyEntropy, lastEpoch.trainPolicyEntropy);
+
+  if (policyGap !== null && lossGap !== null && policyGap >= 0.08 && lossGap >= 0.08) {
+    return {
+      severity: 'high',
+      message: `Replay-fit validation is lagging training on this step. Train-vs-val gaps are policy ${policyGap.toFixed(3)}, total loss ${lossGap.toFixed(3)}, entropy ${formatSigned(entropyGap)}. This means replay imitation may be overfitting; confirm with arena results before trusting the update.`,
+    };
+  }
+
+  if (
+    (policyGap !== null && policyGap >= 0.04)
+    || (lossGap !== null && lossGap >= 0.04)
+    || (entropyGap !== null && entropyGap >= 0.04)
+  ) {
+    return {
+      severity: 'watch',
+      message: `Training is pulling ahead of replay-fit validation. Current train-vs-val gaps are policy ${formatSigned(policyGap)}, total loss ${formatSigned(lossGap)}, entropy ${formatSigned(entropyGap)}. This is a replay-fit warning, not proof of weaker play; check staged arena outcomes before changing trainer aggressiveness.`,
+    };
+  }
+
+  return {
+    severity: 'none',
+    message: '',
+  };
+}
+
+function difference(later: number | null | undefined, earlier: number | null | undefined): number | null {
+  if (later === null || later === undefined || earlier === null || earlier === undefined) return null;
+  return later - earlier;
+}
+
+function formatSigned(value: number | null): string {
+  if (value === null) return '-';
+  return `${value >= 0 ? '+' : ''}${value.toFixed(3)}`;
 }

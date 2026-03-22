@@ -18,7 +18,7 @@ interface WorkerSample {
 
 interface WorkerPayload {
   samples: WorkerSample[];
-  championModelPath: string;
+  modelPath: string;
   difficulty: HiveComputerDifficulty;
   fastSimulations: number;
   maxTurns: number;
@@ -55,7 +55,7 @@ interface WorkerResult {
 function main(): void {
   const options = parseOptions(process.argv.slice(2));
   const payload = readPayload(options.inputPath);
-  const championModel = readChampionModel(payload.championModelPath);
+  const model = readModel(payload.modelPath);
   const updates: WorkerUpdate[] = [];
 
   for (let index = 0; index < payload.samples.length; index += 1) {
@@ -64,11 +64,14 @@ function main(): void {
     const legal = getLegalMovesForColor(state, state.currentTurn);
     if (legal.length === 0) continue;
 
+    // Use higher temperature (0.5) for reanalysis to produce softer policy targets
+    // that provide gradient signal to non-best moves
     const search = runHiveMctsSearch(state, state.currentTurn, payload.difficulty, {
       engine: 'alphazero',
-      modelOverride: championModel,
+      modelOverride: model,
       mctsConfig: {
         simulations: Math.max(48, Math.floor(payload.fastSimulations * 0.8)),
+        temperature: 0.5,
       },
       randomSeed: 7701 + index * 31 + sample.index * 7,
     });
@@ -78,8 +81,8 @@ function main(): void {
       index: sample.index,
       policyTargets: search.policy.map((entry) => ({
         actionKey: entry.actionKey,
-        probability: entry.probability,
-        visitCount: entry.visits,
+        probability: entry.rawProbability ?? entry.probability,
+        visitCount: entry.rawVisits ?? entry.visits,
         actionFeatures: extractHiveActionFeatures(state, entry.move, state.currentTurn),
       })),
       searchMeta: {
@@ -112,14 +115,14 @@ function readPayload(inputPath: string): WorkerPayload {
   return parsed;
 }
 
-function readChampionModel(absolutePath: string) {
+function readModel(absolutePath: string) {
   if (!existsSync(absolutePath)) {
-    throw new Error(`Champion model file not found: ${absolutePath}`);
+    throw new Error(`Model file not found: ${absolutePath}`);
   }
   const parsed = JSON.parse(readFileSync(absolutePath, 'utf8')) as unknown;
   const model = parseHiveModel(parsed);
   if (!model) {
-    throw new Error(`Invalid champion model file: ${absolutePath}`);
+    throw new Error(`Invalid model file: ${absolutePath}`);
   }
   return model;
 }
@@ -154,4 +157,3 @@ function parseOptions(argv: string[]): { inputPath: string; outputPath: string }
 }
 
 main();
-

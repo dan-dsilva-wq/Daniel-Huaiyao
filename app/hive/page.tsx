@@ -1,6 +1,14 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
+} from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -32,12 +40,18 @@ import {
   type HiveSearchEngine,
   type HiveSearchStats,
 } from '@/lib/hive/ai';
-import { getActiveHiveModel } from '@/lib/hive/ml';
+import { getActiveHiveModel, parseHiveModel, type HiveModel } from '@/lib/hive/ml';
 
 const HEX_SIZE = 40;
 const COMPUTER_COLOR: PlayerColor = 'black';
+const MIN_BOARD_ZOOM = 0.45;
+const MAX_BOARD_ZOOM = 2.5;
+const BOARD_PADDING = HEX_SIZE * 3.5;
+const DRAG_THRESHOLD = 8;
 
 type MatchMode = 'hotseat' | 'computer';
+type CameraMode = 'auto' | 'manual';
+type ViewPoint = { x: number; y: number };
 
 const DIFFICULTY_LABELS: Record<HiveComputerDifficulty, string> = {
   medium: 'Medium',
@@ -61,6 +75,18 @@ const PIECE_EMOJIS: Record<string, string> = {
   mosquito: '🦟',
   pillbug: '🐛',
 };
+
+function clampValue(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function pointsEqual(a: ViewPoint, b: ViewPoint): boolean {
+  return a.x === b.x && a.y === b.y;
+}
+
+function getDistance(a: ViewPoint, b: ViewPoint): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
 
 function HexTile({
   coord,
@@ -126,6 +152,14 @@ function getHexPoints(size: number): string {
     points.push(`${size * Math.cos(angle)},${size * Math.sin(angle)}`);
   }
   return points.join(' ');
+}
+
+function formatModelKind(model: HiveModel): string {
+  return model.kind === 'mlp'
+    ? `MLP ${model.layers.slice(0, -1).map((layer) => layer.outputSize).join('x')}`
+    : model.kind === 'policy_value'
+      ? `PolicyValue ${model.stateTrunk.map((layer) => layer.outputSize).join('x')}`
+      : 'Linear';
 }
 
 function PlayerHand({
@@ -213,13 +247,38 @@ export default function HivePage() {
     source: 'hand' | 'board';
   } | null>(null);
   const [validMoves, setValidMoves] = useState<HexCoord[]>([]);
-  const [viewOffset] = useState({ x: 0, y: 0 });
+  const [cameraMode, setCameraMode] = useState<CameraMode>('auto');
+  const [cameraCenter, setCameraCenter] = useState<ViewPoint>({ x: 0, y: 0 });
+  const [boardViewportSize, setBoardViewportSize] = useState({ width: 0, height: 0 });
   const [zoom, setZoom] = useState(1);
   const [awaitingComputerMove, setAwaitingComputerMove] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSearchStats, setLastSearchStats] = useState<HiveSearchStats | null>(null);
+  const bundledModel = useMemo(() => getActiveHiveModel(), []);
+  const [activeModel, setActiveModel] = useState<HiveModel>(bundledModel);
+  const [activeModelHash, setActiveModelHash] = useState<string | null>(null);
+  const [isLiveModelLoaded, setIsLiveModelLoaded] = useState(false);
+  const boardViewportRef = useRef<HTMLDivElement | null>(null);
+  const cameraStateRef = useRef({ center: { x: 0, y: 0 }, zoom: 1 });
+  const suppressBoardClickRef = useRef(false);
+  const gestureStateRef = useRef<{
+    pointers: Map<number, ViewPoint>;
+    startPoint: ViewPoint | null;
+    startCenter: ViewPoint;
+    startZoom: number;
+    startDistance: number | null;
+    anchorWorld: ViewPoint | null;
+    moved: boolean;
+  }>({
+    pointers: new Map<number, ViewPoint>(),
+    startPoint: null,
+    startCenter: { x: 0, y: 0 },
+    startZoom: 1,
+    startDistance: null,
+    anchorWorld: null,
+    moved: false,
+  });
 
-  const activeModel = useMemo(() => getActiveHiveModel(), []);
   const computerModelHandle = useMemo<HiveModelHandle>(() => ({
     model: activeModel,
     graphCache: createHiveMctsGraphCache({
@@ -231,6 +290,38 @@ export default function HivePage() {
     100,
     Math.round((activeModel.training.positionSamples / 400000) * 100),
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLiveModel = async () => {
+      try {
+        const response = await fetch('/api/hive/model', { cache: 'no-store' });
+        if (!response.ok) return;
+        const payload = await response.json() as {
+          hash?: string;
+          model?: unknown;
+        };
+        const parsedModel = parseHiveModel(payload.model);
+        if (!parsedModel || cancelled) return;
+        setActiveModel(parsedModel);
+        setActiveModelHash(payload.hash ?? null);
+        setIsLiveModelLoaded(true);
+      } catch {
+        // Keep using the bundled model if the live model endpoint is unavailable.
+      }
+    };
+
+    void loadLiveModel();
+    const intervalId = window.setInterval(() => {
+      void loadLiveModel();
+    }, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   const startNewGame = useCallback((mode: MatchMode) => {
     const expansions = { ladybug: false, mosquito: false, pillbug: false };
@@ -256,6 +347,13 @@ export default function HivePage() {
     setGameState(newGame);
     setSelectedPiece(null);
     setValidMoves([]);
+    setCameraMode('auto');
+    setCameraCenter({ x: 0, y: 0 });
+    setZoom(1);
+    cameraStateRef.current = {
+      center: { x: 0, y: 0 },
+      zoom: 1,
+    };
     setAwaitingComputerMove(false);
     setLastSearchStats(null);
     setError(null);
@@ -284,6 +382,39 @@ export default function HivePage() {
     const moves = getValidMoves(gameState, selectedPiece.piece as PlacedPiece);
     setValidMoves(moves);
   }, [gameState, selectedPiece]);
+
+  useEffect(() => {
+    cameraStateRef.current = {
+      center: cameraCenter,
+      zoom,
+    };
+  }, [cameraCenter, zoom]);
+
+  useEffect(() => {
+    const viewport = boardViewportRef.current;
+    if (!viewport) return;
+
+    const syncSize = () => {
+      setBoardViewportSize({
+        width: viewport.clientWidth,
+        height: viewport.clientHeight,
+      });
+    };
+
+    syncSize();
+    const observer = new ResizeObserver(syncSize);
+    observer.observe(viewport);
+
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', syncSize);
+    visualViewport?.addEventListener('scroll', syncSize);
+
+    return () => {
+      observer.disconnect();
+      visualViewport?.removeEventListener('resize', syncSize);
+      visualViewport?.removeEventListener('scroll', syncSize);
+    };
+  }, []);
 
   useEffect(() => {
     if (!gameState || matchMode !== 'computer') return;
@@ -361,6 +492,11 @@ export default function HivePage() {
   );
 
   const handleHexClick = (coord: HexCoord) => {
+    if (suppressBoardClickRef.current) {
+      suppressBoardClickRef.current = false;
+      return;
+    }
+
     if (!gameState || gameState.status !== 'playing') return;
     if (matchMode === 'computer' && gameState.currentTurn === COMPUTER_COLOR) return;
 
@@ -431,6 +567,360 @@ export default function HivePage() {
     });
   }, [gameState, validMoves]);
 
+  const boardBounds = useMemo(() => {
+    if (renderCoords.length === 0) {
+      return {
+        minX: -HEX_SIZE * 2,
+        maxX: HEX_SIZE * 2,
+        minY: -HEX_SIZE * 2,
+        maxY: HEX_SIZE * 2,
+        centerX: 0,
+        centerY: 0,
+        width: HEX_SIZE * 4,
+        height: HEX_SIZE * 4,
+      };
+    }
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    renderCoords.forEach((coord) => {
+      const { x, y } = axialToPixel(coord, HEX_SIZE);
+      minX = Math.min(minX, x - HEX_SIZE);
+      maxX = Math.max(maxX, x + HEX_SIZE);
+      minY = Math.min(minY, y - HEX_SIZE);
+      maxY = Math.max(maxY, y + HEX_SIZE);
+    });
+
+    return {
+      minX,
+      maxX,
+      minY,
+      maxY,
+      centerX: (minX + maxX) / 2,
+      centerY: (minY + maxY) / 2,
+      width: maxX - minX,
+      height: maxY - minY,
+    };
+  }, [renderCoords]);
+
+  const clampCameraCenter = useCallback((center: ViewPoint, targetZoom: number) => {
+    if (!boardViewportSize.width || !boardViewportSize.height) {
+      return center;
+    }
+
+    const visibleWidth = boardViewportSize.width / targetZoom;
+    const visibleHeight = boardViewportSize.height / targetZoom;
+    const minCenterX = boardBounds.minX - BOARD_PADDING + visibleWidth / 2;
+    const maxCenterX = boardBounds.maxX + BOARD_PADDING - visibleWidth / 2;
+    const minCenterY = boardBounds.minY - BOARD_PADDING + visibleHeight / 2;
+    const maxCenterY = boardBounds.maxY + BOARD_PADDING - visibleHeight / 2;
+
+    return {
+      x:
+        minCenterX <= maxCenterX
+          ? clampValue(center.x, minCenterX, maxCenterX)
+          : boardBounds.centerX,
+      y:
+        minCenterY <= maxCenterY
+          ? clampValue(center.y, minCenterY, maxCenterY)
+          : boardBounds.centerY,
+    };
+  }, [boardBounds, boardViewportSize]);
+
+  useEffect(() => {
+    if (!boardViewportSize.width || !boardViewportSize.height) return;
+
+    const fitZoom = clampValue(
+      Math.min(
+        1,
+        boardViewportSize.width / (boardBounds.width + BOARD_PADDING * 2),
+        boardViewportSize.height / (boardBounds.height + BOARD_PADDING * 2),
+      ),
+      MIN_BOARD_ZOOM,
+      1,
+    );
+
+    if (cameraMode === 'auto') {
+      const nextCenter = clampCameraCenter(
+        { x: boardBounds.centerX, y: boardBounds.centerY },
+        fitZoom,
+      );
+
+      setCameraCenter((current) => (pointsEqual(current, nextCenter) ? current : nextCenter));
+      setZoom((current) => (Math.abs(current - fitZoom) < 0.001 ? current : fitZoom));
+      return;
+    }
+
+    setCameraCenter((current) => {
+      const nextCenter = clampCameraCenter(current, zoom);
+      return pointsEqual(current, nextCenter) ? current : nextCenter;
+    });
+  }, [boardBounds, boardViewportSize, cameraMode, clampCameraCenter, zoom]);
+
+  const getLocalPoint = useCallback((clientX: number, clientY: number): ViewPoint | null => {
+    const rect = boardViewportRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top,
+    };
+  }, []);
+
+  const projectClientToWorld = useCallback((
+    clientX: number,
+    clientY: number,
+    center: ViewPoint,
+    targetZoom: number,
+  ): ViewPoint | null => {
+    const localPoint = getLocalPoint(clientX, clientY);
+    if (!localPoint || !boardViewportSize.width || !boardViewportSize.height) {
+      return null;
+    }
+
+    const visibleWidth = boardViewportSize.width / targetZoom;
+    const visibleHeight = boardViewportSize.height / targetZoom;
+
+    return {
+      x: center.x - visibleWidth / 2 + localPoint.x / targetZoom,
+      y: center.y - visibleHeight / 2 + localPoint.y / targetZoom,
+    };
+  }, [boardViewportSize, getLocalPoint]);
+
+  const getCenterForAnchor = useCallback((
+    anchorWorld: ViewPoint,
+    clientX: number,
+    clientY: number,
+    targetZoom: number,
+  ): ViewPoint => {
+    const localPoint = getLocalPoint(clientX, clientY);
+    if (!localPoint || !boardViewportSize.width || !boardViewportSize.height) {
+      return clampCameraCenter(cameraStateRef.current.center, targetZoom);
+    }
+
+    return clampCameraCenter(
+      {
+        x: anchorWorld.x + (boardViewportSize.width / 2 - localPoint.x) / targetZoom,
+        y: anchorWorld.y + (boardViewportSize.height / 2 - localPoint.y) / targetZoom,
+      },
+      targetZoom,
+    );
+  }, [boardViewportSize, clampCameraCenter, getLocalPoint]);
+
+  const applyZoom = useCallback((
+    targetZoom: number,
+    anchor?: { clientX: number; clientY: number },
+  ) => {
+    const current = cameraStateRef.current;
+    const nextZoom = clampValue(targetZoom, MIN_BOARD_ZOOM, MAX_BOARD_ZOOM);
+    if (Math.abs(nextZoom - current.zoom) < 0.001) return;
+
+    let nextCenter = clampCameraCenter(current.center, nextZoom);
+
+    if (anchor) {
+      const anchorWorld = projectClientToWorld(
+        anchor.clientX,
+        anchor.clientY,
+        current.center,
+        current.zoom,
+      );
+
+      if (anchorWorld) {
+        nextCenter = getCenterForAnchor(
+          anchorWorld,
+          anchor.clientX,
+          anchor.clientY,
+          nextZoom,
+        );
+      }
+    }
+
+    setCameraMode('manual');
+    setZoom(nextZoom);
+    setCameraCenter(nextCenter);
+    cameraStateRef.current = {
+      center: nextCenter,
+      zoom: nextZoom,
+    };
+  }, [clampCameraCenter, getCenterForAnchor, projectClientToWorld]);
+
+  const resetBoardView = useCallback(() => {
+    setCameraMode('auto');
+  }, []);
+
+  const handleBoardWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    applyZoom(cameraStateRef.current.zoom * factor, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+  }, [applyZoom]);
+
+  const handleBoardPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!boardViewportSize.width || !boardViewportSize.height) return;
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const gesture = gestureStateRef.current;
+    const point = { x: event.clientX, y: event.clientY };
+    gesture.pointers.set(event.pointerId, point);
+    suppressBoardClickRef.current = false;
+
+    if (gesture.pointers.size === 1) {
+      gesture.startPoint = point;
+      gesture.startCenter = cameraStateRef.current.center;
+      gesture.startZoom = cameraStateRef.current.zoom;
+      gesture.startDistance = null;
+      gesture.anchorWorld = projectClientToWorld(
+        event.clientX,
+        event.clientY,
+        cameraStateRef.current.center,
+        cameraStateRef.current.zoom,
+      );
+      gesture.moved = false;
+      return;
+    }
+
+    if (gesture.pointers.size === 2) {
+      const [first, second] = Array.from(gesture.pointers.values());
+      const midpoint = {
+        x: (first.x + second.x) / 2,
+        y: (first.y + second.y) / 2,
+      };
+
+      gesture.startPoint = midpoint;
+      gesture.startCenter = cameraStateRef.current.center;
+      gesture.startZoom = cameraStateRef.current.zoom;
+      gesture.startDistance = Math.max(getDistance(first, second), 1);
+      gesture.anchorWorld = projectClientToWorld(
+        midpoint.x,
+        midpoint.y,
+        cameraStateRef.current.center,
+        cameraStateRef.current.zoom,
+      );
+      gesture.moved = true;
+      suppressBoardClickRef.current = true;
+    }
+  }, [boardViewportSize, projectClientToWorld]);
+
+  const handleBoardPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const gesture = gestureStateRef.current;
+    if (!gesture.pointers.has(event.pointerId)) return;
+
+    const point = { x: event.clientX, y: event.clientY };
+    gesture.pointers.set(event.pointerId, point);
+
+    if (gesture.pointers.size === 1 && gesture.startPoint) {
+      const dx = point.x - gesture.startPoint.x;
+      const dy = point.y - gesture.startPoint.y;
+
+      if (!gesture.moved && Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
+        gesture.moved = true;
+        suppressBoardClickRef.current = true;
+      }
+
+      if (!gesture.moved) return;
+
+      const currentZoom = cameraStateRef.current.zoom;
+      const nextCenter = clampCameraCenter(
+        {
+          x: gesture.startCenter.x - dx / currentZoom,
+          y: gesture.startCenter.y - dy / currentZoom,
+        },
+        currentZoom,
+      );
+
+      setCameraMode('manual');
+      setCameraCenter(nextCenter);
+      cameraStateRef.current = {
+        center: nextCenter,
+        zoom: currentZoom,
+      };
+      return;
+    }
+
+    if (gesture.pointers.size >= 2 && gesture.startDistance && gesture.anchorWorld) {
+      const [first, second] = Array.from(gesture.pointers.values());
+      const midpoint = {
+        x: (first.x + second.x) / 2,
+        y: (first.y + second.y) / 2,
+      };
+      const nextZoom = clampValue(
+        gesture.startZoom * (Math.max(getDistance(first, second), 1) / gesture.startDistance),
+        MIN_BOARD_ZOOM,
+        MAX_BOARD_ZOOM,
+      );
+
+      setCameraMode('manual');
+      setZoom(nextZoom);
+      const nextCenter = getCenterForAnchor(gesture.anchorWorld, midpoint.x, midpoint.y, nextZoom);
+      setCameraCenter(nextCenter);
+      cameraStateRef.current = {
+        center: nextCenter,
+        zoom: nextZoom,
+      };
+      suppressBoardClickRef.current = true;
+    }
+  }, [clampCameraCenter, getCenterForAnchor]);
+
+  const handleBoardPointerEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const gesture = gestureStateRef.current;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    gesture.pointers.delete(event.pointerId);
+
+    if (gesture.pointers.size === 1) {
+      const [remainingPoint] = Array.from(gesture.pointers.values());
+      gesture.startPoint = remainingPoint;
+      gesture.startCenter = cameraStateRef.current.center;
+      gesture.startZoom = cameraStateRef.current.zoom;
+      gesture.startDistance = null;
+      gesture.anchorWorld = projectClientToWorld(
+        remainingPoint.x,
+        remainingPoint.y,
+        cameraStateRef.current.center,
+        cameraStateRef.current.zoom,
+      );
+      gesture.moved = false;
+      return;
+    }
+
+    if (gesture.pointers.size === 0) {
+      gesture.startPoint = null;
+      gesture.startDistance = null;
+      gesture.anchorWorld = null;
+      gesture.moved = false;
+    }
+  }, [projectClientToWorld]);
+
+  const boardViewBox = useMemo(() => {
+    if (!boardViewportSize.width || !boardViewportSize.height) {
+      return {
+        minX: -200,
+        minY: -200,
+        width: 400,
+        height: 400,
+      };
+    }
+
+    const width = boardViewportSize.width / zoom;
+    const height = boardViewportSize.height / zoom;
+
+    return {
+      minX: cameraCenter.x - width / 2,
+      minY: cameraCenter.y - height / 2,
+      width,
+      height,
+    };
+  }, [boardViewportSize, cameraCenter, zoom]);
+
   if (!gameState) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 to-yellow-100 dark:from-stone-900 dark:to-amber-950 flex items-center justify-center">
@@ -443,11 +933,8 @@ export default function HivePage() {
     );
   }
 
-  const modelKind = activeModel.kind === 'mlp'
-    ? `MLP ${activeModel.layers.slice(0, -1).map((layer) => layer.outputSize).join('x')}`
-    : activeModel.kind === 'policy_value'
-      ? `PolicyValue ${activeModel.stateTrunk.map((layer) => layer.outputSize).join('x')}`
-      : 'Linear';
+  const modelKind = formatModelKind(activeModel);
+  const modelTimestampLabel = activeModel.training.generatedAt;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 to-yellow-100 dark:from-stone-900 dark:to-amber-950">
@@ -559,7 +1046,11 @@ export default function HivePage() {
           </div>
           <div className="mt-2 flex items-center justify-between text-xs text-amber-900/80 dark:text-amber-200/80">
             <span>Training Progress (samples target): {modelProgressPercent}%</span>
-            <span>{new Date(activeModel.training.generatedAt).toLocaleString()}</span>
+            <span>{new Date(modelTimestampLabel).toLocaleString()}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-[11px] text-amber-900/70 dark:text-amber-200/70">
+            <span>{activeModelHash ? `Champion ${activeModelHash}` : 'Champion bundled with app'}</span>
+            <span>{isLiveModelLoaded ? 'Live model loaded' : 'Bundled fallback'}</span>
           </div>
           {lastSearchStats && (
             <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-amber-900/80 dark:text-amber-200/80">
@@ -610,53 +1101,78 @@ export default function HivePage() {
         />
       </div>
 
-      <div className="flex-1 overflow-hidden p-4">
-        <div
-          className="w-full h-[400px] bg-gradient-to-br from-green-100 to-emerald-200 dark:from-green-900 dark:to-emerald-950 rounded-xl overflow-hidden"
-          style={{ touchAction: 'none' }}
-        >
-          <svg
-            width="100%"
-            height="100%"
-            viewBox="-200 -200 400 400"
-            style={{ transform: `scale(${zoom}) translate(${viewOffset.x}px, ${viewOffset.y}px)` }}
+      <div className="p-4">
+        <div className="mx-auto w-full max-w-5xl rounded-[28px] border border-emerald-300/60 bg-white/60 p-2 shadow-sm dark:border-emerald-800/60 dark:bg-stone-950/40 sm:p-3">
+          <div
+            ref={boardViewportRef}
+            className="relative h-[clamp(20rem,56vh,38rem)] w-full overflow-hidden rounded-[22px] bg-gradient-to-br from-green-100 via-lime-100 to-emerald-200 dark:from-green-950 dark:via-emerald-950 dark:to-stone-950"
+            style={{ touchAction: 'none' }}
+            onWheel={handleBoardWheel}
+            onPointerDown={handleBoardPointerDown}
+            onPointerMove={handleBoardPointerMove}
+            onPointerUp={handleBoardPointerEnd}
+            onPointerCancel={handleBoardPointerEnd}
           >
-            {renderCoords.map((coord) => {
-              const topPiece = getTopPieceAt(gameState.board, coord);
-              const isSelected =
-                selectedPiece?.source === 'board'
-                && coordsEqual((selectedPiece.piece as PlacedPiece).position, coord);
-              const isValidMove = validMoves.some((move) => coordsEqual(move, coord));
+            <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.24em] text-emerald-900/70 dark:text-emerald-100/65">
+              <span>Drag to pan</span>
+              <span>Wheel or pinch to zoom</span>
+            </div>
 
-              return (
-                <HexTile
-                  key={coordKey(coord)}
-                  coord={coord}
-                  piece={topPiece || undefined}
-                  isSelected={isSelected}
-                  isValidMove={isValidMove}
-                  onClick={() => handleHexClick(coord)}
-                  hexSize={HEX_SIZE}
-                />
-              );
-            })}
-          </svg>
-        </div>
+            <svg
+              width="100%"
+              height="100%"
+              className="select-none"
+              viewBox={`${boardViewBox.minX} ${boardViewBox.minY} ${boardViewBox.width} ${boardViewBox.height}`}
+            >
+              {renderCoords.map((coord) => {
+                const topPiece = getTopPieceAt(gameState.board, coord);
+                const isSelected =
+                  selectedPiece?.source === 'board'
+                  && coordsEqual((selectedPiece.piece as PlacedPiece).position, coord);
+                const isValidMove = validMoves.some((move) => coordsEqual(move, coord));
 
-        <div className="flex justify-center gap-2 mt-2">
-          <button
-            onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
-            className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded"
-          >
-            -
-          </button>
-          <span className="px-3 py-1">{Math.round(zoom * 100)}%</span>
-          <button
-            onClick={() => setZoom((value) => Math.min(2, value + 0.25))}
-            className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded"
-          >
-            +
-          </button>
+                return (
+                  <HexTile
+                    key={coordKey(coord)}
+                    coord={coord}
+                    piece={topPiece || undefined}
+                    isSelected={isSelected}
+                    isValidMove={isValidMove}
+                    onClick={() => handleHexClick(coord)}
+                    hexSize={HEX_SIZE}
+                  />
+                );
+              })}
+            </svg>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-emerald-50/90 px-3 py-2 text-sm text-emerald-950 dark:bg-stone-900/80 dark:text-emerald-100">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-900/70 dark:text-emerald-100/70">
+              Zoom {Math.round(zoom * 100)}%
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => applyZoom(cameraStateRef.current.zoom - 0.2)}
+                className="rounded-lg bg-white px-3 py-1.5 font-semibold shadow-sm transition hover:bg-emerald-100 dark:bg-stone-800 dark:hover:bg-stone-700"
+                aria-label="Zoom out Hive board"
+              >
+                -
+              </button>
+              <button
+                onClick={resetBoardView}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-white font-semibold shadow-sm transition hover:bg-emerald-700"
+              >
+                Reset view
+              </button>
+              <button
+                onClick={() => applyZoom(cameraStateRef.current.zoom + 0.2)}
+                className="rounded-lg bg-white px-3 py-1.5 font-semibold shadow-sm transition hover:bg-emerald-100 dark:bg-stone-800 dark:hover:bg-stone-700"
+                aria-label="Zoom in Hive board"
+              >
+                +
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

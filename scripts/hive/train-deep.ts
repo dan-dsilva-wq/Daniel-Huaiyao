@@ -3,6 +3,7 @@ import path from 'node:path';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { HiveComputerDifficulty } from '../../lib/hive/ai';
 import { getHiveHardwareProfile } from './hardware-profile';
+import { publishHiveMetricsSnapshotSafely } from './sharedMetrics';
 
 interface DeepTrainOptions {
   games: number;
@@ -206,6 +207,7 @@ async function main(): Promise<void> {
   const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
   logStage('done', `Deep model training complete in ${elapsedSeconds}s`);
   logStage('done', 'Restart `npm run dev` (or rebuild) so the app picks up the new model.');
+  await publishHiveMetricsSnapshotSafely();
 }
 
 function mergeIntoReplayBuffer(input: {
@@ -436,10 +438,22 @@ function readOptionalDifficulty(value: unknown): HiveComputerDifficulty | undefi
 }
 
 async function runPythonWithFallback(args: string[]): Promise<void> {
-  const attempts: Array<{ command: string; commandArgs: string[]; label: string }> = [
-    { command: 'python', commandArgs: args, label: 'python' },
-    { command: 'py', commandArgs: ['-3', ...args], label: 'py -3' },
-  ];
+  const localVenvPython = path.resolve(
+    process.cwd(),
+    '.venv-hive',
+    process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
+  );
+  const attempts: Array<{ command: string; commandArgs: string[]; label: string }> = process.platform === 'win32'
+    ? [
+        { command: localVenvPython, commandArgs: args, label: '.venv-hive python' },
+        { command: 'python', commandArgs: args, label: 'python' },
+        { command: 'py', commandArgs: ['-3', ...args], label: 'py -3' },
+      ]
+    : [
+        { command: localVenvPython, commandArgs: args, label: '.venv-hive python' },
+        { command: 'python3', commandArgs: args, label: 'python3' },
+        { command: 'python', commandArgs: args, label: 'python' },
+      ];
 
   let lastError: Error | null = null;
   for (const attempt of attempts) {

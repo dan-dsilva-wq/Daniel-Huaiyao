@@ -1,13 +1,14 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { getCurrentUser, setCurrentUser, type CurrentUser } from '@/lib/user-session';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { MorseToneManager } from '@/lib/morse/audio';
-import { MORSE_CAMPAIGN_LEVELS, MORSE_LESSONS, MORSE_POWER_CATALOG, MORSE_TOWER_CATALOG } from '@/lib/morse/content';
+import { MORSE_CAMPAIGN_LEVELS, MORSE_LESSONS } from '@/lib/morse/content';
 import {
   PLAYER_PROGRESS_STORAGE_PREFIX,
   TEAM_PROGRESS_STORAGE_KEY,
@@ -27,16 +28,9 @@ import {
   updatePlayerProgress,
 } from '@/lib/morse/core';
 import {
-  activatePower,
   applyDefenseTransmission,
-  buildRunSummary,
-  buyPowerCharge,
-  buyTower,
-  createInitialRunSnapshot,
-  startNextWave,
   stepRunSnapshot,
   unlockArmoryUpgrade,
-  upgradeTower,
 } from '@/lib/morse/game';
 import type {
   MorseHelperSettings,
@@ -91,7 +85,7 @@ const ARMORY_POWER_UNLOCKS = [
     category: 'power' as const,
     id: 'freeze',
     label: 'Frost Bell',
-    description: 'Unlock a panic button that freezes every lane.',
+    description: 'Unlock a panic button that freezes the whole road.',
     cost: 22,
   },
   {
@@ -251,6 +245,7 @@ function SignalPad({
 
 export default function MorsePage() {
   useMarkAppViewed('morse');
+  const router = useRouter();
 
   const [currentUserState, setCurrentUserState] = useState<CurrentUser | null>(() =>
     typeof window === 'undefined' ? null : getCurrentUser()
@@ -278,9 +273,9 @@ export default function MorsePage() {
   const [partnerIsHolding, setPartnerIsHolding] = useState(false);
   const [waitingRuns, setWaitingRuns] = useState<MorseRun[]>([]);
   const [recentRuns, setRecentRuns] = useState<MorseRun[]>([]);
-  const [activeRun, setActiveRun] = useState<MorseRun | null>(null);
+  const [activeRun] = useState<MorseRun | null>(null);
   const [runSnapshot, setRunSnapshot] = useState<MorseRunSnapshot | null>(null);
-  const [isRunHost, setIsRunHost] = useState(false);
+  const [isRunHost] = useState(false);
   const [selectedLevel, setSelectedLevel] = useState(1);
   const [defenseStatus, setDefenseStatus] = useState('No active defense run.');
 
@@ -290,16 +285,6 @@ export default function MorsePage() {
   const selectedLesson = MORSE_LESSONS[selectedLessonIndex] ?? MORSE_LESSONS[0];
   const storagePlayerKey = currentUser ? `${PLAYER_PROGRESS_STORAGE_PREFIX}${currentUser}` : null;
   const hasRunSnapshot = runSnapshot !== null;
-  const canManageRun = isRunHost || !activeRun;
-  const waitingForPartner = Boolean(activeRun && runSnapshot?.phase === 'waiting' && !runSnapshot.partnerJoined);
-  const unlockedTowerCatalog = useMemo(
-    () => MORSE_TOWER_CATALOG.filter((tower) => teamProgress.unlockedTowers.includes(tower.type)),
-    [teamProgress.unlockedTowers],
-  );
-  const unlockedPowerCatalog = useMemo(
-    () => MORSE_POWER_CATALOG.filter((power) => teamProgress.unlockedPowers.includes(power.type)),
-    [teamProgress.unlockedPowers],
-  );
 
   const toneRef = useRef<MorseToneManager | null>(null);
   const pressStartRef = useRef<number | null>(null);
@@ -623,48 +608,6 @@ export default function MorsePage() {
     });
   }, [currentUser, isRunHost]);
 
-  const applyLocalTeamReward = useCallback((snapshot: MorseRunSnapshot) => {
-    const summary = buildRunSummary(snapshot);
-    const next: MorseTeamProgress = mergeTeamProgress({
-      ...teamProgress,
-      metaCurrency: teamProgress.metaCurrency + snapshot.metaReward,
-      unlockedCampaignLevel:
-        summary.outcome === 'victory' && snapshot.mode === 'campaign'
-          ? Math.max(teamProgress.unlockedCampaignLevel, Math.min(MORSE_CAMPAIGN_LEVELS.length, snapshot.levelNumber + 1))
-          : teamProgress.unlockedCampaignLevel,
-      endlessUnlocked:
-        teamProgress.endlessUnlocked
-        || (summary.outcome === 'victory' && snapshot.mode === 'campaign' && snapshot.levelNumber >= MORSE_CAMPAIGN_LEVELS.length),
-      records: {
-        bestCampaignLevel:
-          snapshot.mode === 'campaign' && summary.outcome === 'victory'
-            ? Math.max(teamProgress.records.bestCampaignLevel, snapshot.levelNumber)
-            : teamProgress.records.bestCampaignLevel,
-        bestEndlessWave:
-          snapshot.mode === 'endless'
-            ? Math.max(teamProgress.records.bestEndlessWave, snapshot.waveNumber)
-            : teamProgress.records.bestEndlessWave,
-        bestScore: Math.max(teamProgress.records.bestScore, snapshot.score),
-        totalSignals: teamProgress.records.totalSignals + snapshot.signalsUsed,
-        totalRuns: teamProgress.records.totalRuns + 1,
-        recentRuns: [
-          {
-            id: makeTransmissionId('run'),
-            mode: snapshot.mode,
-            levelNumber: snapshot.levelNumber,
-            wave: snapshot.waveNumber,
-            score: snapshot.score,
-            outcome: summary.outcome as 'victory' | 'defeat',
-            completedAt: new Date().toISOString(),
-          },
-          ...teamProgress.records.recentRuns,
-        ].slice(0, 8),
-      },
-    });
-    setTeamProgress(next);
-    void persistTeam(next);
-  }, [persistTeam, teamProgress]);
-
   const startRun = useCallback(async (mode: 'campaign' | 'endless', coOp: boolean) => {
     if (!currentUser) return;
     if (mode === 'endless' && !teamProgress.endlessUnlocked) {
@@ -672,77 +615,12 @@ export default function MorsePage() {
       return;
     }
 
-    if (!coOp || !isSupabaseConfigured) {
-      setActiveRun(null);
-      setIsRunHost(true);
-      setRunSnapshot(createInitialRunSnapshot(mode, selectedLevel, teamProgress, false, true));
-      setDefenseStatus(coOp ? 'Realtime needs Supabase, so this run is local only.' : 'Local run started.');
-      return;
-    }
-
-    const waitingSnapshot = createInitialRunSnapshot(mode, selectedLevel, teamProgress, false, false);
-    const { data, error } = await supabase.rpc('start_morse_run', {
-      p_host_player: currentUser,
-      p_mode: mode,
-      p_level_number: selectedLevel,
-      p_expect_partner: true,
-      p_checkpoint: waitingSnapshot,
-    });
-
-    if (error) {
-      setDefenseStatus(`Could not create co-op run: ${error.message}`);
-      return;
-    }
-
-    setActiveRun(data as MorseRun);
-    setRunSnapshot(waitingSnapshot);
-    setIsRunHost(true);
-    setDefenseStatus(`Waiting for ${partnerName} to join the battlements.`);
-    await notifyPartner('morse_run_started', `${mode === 'campaign' ? 'Campaign' : 'Endless'} level ${selectedLevel}`);
-    await loadRuns();
-  }, [currentUser, loadRuns, notifyPartner, partnerName, selectedLevel, teamProgress]);
+    router.push(`/morse/defense?mode=${mode}&level=${selectedLevel}&coop=${coOp ? '1' : '0'}`);
+  }, [currentUser, router, selectedLevel, teamProgress.endlessUnlocked]);
 
   const joinRun = useCallback(async (run: MorseRun) => {
-    if (!currentUser || !isSupabaseConfigured) return;
-    const { data, error } = await supabase.rpc('join_morse_run', {
-      p_run_id: run.id,
-      p_guest_player: currentUser,
-    });
-    if (error) {
-      setDefenseStatus(`Could not join run: ${error.message}`);
-      return;
-    }
-    const joined = data as MorseRun;
-    setActiveRun(joined);
-    setRunSnapshot(joined.checkpoint ?? createInitialRunSnapshot(joined.mode, joined.level_number, teamProgress, true, false));
-    setIsRunHost(false);
-    setDefenseStatus(`Joined ${partnerName}'s run.`);
-    await loadRuns();
-  }, [currentUser, loadRuns, partnerName, teamProgress]);
-
-  const finishRun = useCallback(async () => {
-    if (!runSnapshot) return;
-    applyLocalTeamReward(runSnapshot);
-    if (isSupabaseConfigured && activeRun?.id && isRunHost && currentUser) {
-      await supabase.rpc('complete_morse_run', {
-        p_run_id: activeRun.id,
-        p_completed_by: currentUser,
-        p_score: runSnapshot.score,
-        p_wave: runSnapshot.waveNumber,
-        p_currency_earned: runSnapshot.metaReward,
-        p_summary: buildRunSummary(runSnapshot),
-      });
-      await loadRuns();
-    }
-    setDefenseStatus(`Run banked. ${runSnapshot.phase === 'victory' ? 'Victory' : 'Defeat'} with ${runSnapshot.score} score.`);
-    setActiveRun(null);
-    setRunSnapshot(null);
-  }, [activeRun?.id, applyLocalTeamReward, currentUser, isRunHost, loadRuns, runSnapshot]);
-
-  const launchWave = useCallback(() => {
-    if (!runSnapshot) return;
-    setRunSnapshot(startNextWave({ ...runSnapshot, phase: 'shop' }, teamProgress));
-  }, [runSnapshot, teamProgress]);
+    router.push(`/morse/defense?run=${run.id}&join=1`);
+  }, [router]);
 
   const finalizeCharacter = useCallback(() => {
     const symbols = [...currentSymbolsRef.current];
@@ -1277,15 +1155,21 @@ export default function MorsePage() {
             )}
 
             {activeTab === 'defense' && (
-              <div className="space-y-4">
-                <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
+              <div className="space-y-5">
+                <div className="grid gap-4 xl:grid-cols-[0.95fr,1.05fr]">
                   <div className="rounded-[2rem] border border-white/10 bg-black/15 p-5">
-                    <div className="text-xs uppercase tracking-[0.3em] text-amber-200/70">Defense Setup</div>
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <div className="text-xs uppercase tracking-[0.3em] text-amber-200/70">Battle Launch</div>
+                    <h3 className="mt-3 text-3xl font-serif font-bold text-white">Defend the keep on a real battlefield.</h3>
+                    <p className="mt-3 text-sm text-amber-100/75">
+                      Defense now opens in a full-screen side-view siege. Enemies march from the right toward your
+                      castle, arrows visibly fire from the wall, and the Morse key stays pinned to the battle HUD.
+                    </p>
+                    <div className="mt-5 rounded-[1.5rem] border border-white/10 bg-white/6 p-4">
+                      <div className="text-xs uppercase tracking-[0.2em] text-amber-100/60">Campaign Level</div>
                       <select
                         value={selectedLevel}
                         onChange={(event) => setSelectedLevel(Number(event.target.value))}
-                        className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-white outline-none"
+                        className="mt-3 w-full rounded-full border border-white/10 bg-black/25 px-4 py-3 text-sm text-white outline-none"
                       >
                         {MORSE_CAMPAIGN_LEVELS.map((level) => (
                           <option key={level.id} value={level.number}>
@@ -1293,248 +1177,136 @@ export default function MorsePage() {
                           </option>
                         ))}
                       </select>
-                      <button
-                        onClick={() => void startRun('campaign', false)}
-                        className="rounded-full bg-gradient-to-r from-amber-400 to-orange-400 px-4 py-2 text-sm font-black uppercase tracking-[0.2em] text-slate-950"
-                      >
+                      <div className="mt-3 text-sm text-amber-100/70">
+                        {MORSE_CAMPAIGN_LEVELS[selectedLevel - 1]?.narrative}
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <button onClick={() => void startRun('campaign', false)} className="rounded-[1.5rem] bg-gradient-to-r from-amber-400 to-orange-400 px-5 py-4 text-left text-sm font-black uppercase tracking-[0.2em] text-slate-950">
                         Solo Campaign
                       </button>
-                      <button
-                        onClick={() => void startRun('campaign', true)}
-                        className="rounded-full border border-amber-300/25 bg-white/6 px-4 py-2 text-sm text-amber-50"
-                      >
-                        Start Co-op
+                      <button onClick={() => void startRun('campaign', true)} className="rounded-[1.5rem] border border-amber-300/25 bg-white/6 px-5 py-4 text-left text-sm font-semibold text-amber-50">
+                        Co-op Campaign
                       </button>
-                      <button
-                        onClick={() => void startRun('endless', false)}
-                        className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-amber-50"
-                      >
-                        Endless
+                      <button onClick={() => void startRun('endless', false)} className="rounded-[1.5rem] border border-white/10 bg-white/6 px-5 py-4 text-left text-sm font-semibold text-amber-50">
+                        Endless Solo
                       </button>
-                      <button
-                        onClick={() => void startRun('endless', true)}
-                        className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-amber-50"
-                      >
+                      <button onClick={() => void startRun('endless', true)} className="rounded-[1.5rem] border border-white/10 bg-white/6 px-5 py-4 text-left text-sm font-semibold text-amber-50">
                         Endless Co-op
                       </button>
                     </div>
                     <div className="mt-4 rounded-[1.5rem] bg-white/6 p-4 text-sm text-amber-100/80">{defenseStatus}</div>
-                    {activeRun && runSnapshot && (
-                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                        <div className="rounded-[1.25rem] bg-white/6 p-4">
-                          <div className="text-xs uppercase tracking-[0.2em] text-amber-100/60">Partner Status</div>
-                          <div className="mt-2 text-sm text-white">
-                            {runSnapshot.partnerJoined
-                              ? runSnapshot.partnerOnline
-                                ? `${partnerName} is on the wall.`
-                                : `${partnerName} joined, but the channel looks quiet.`
-                              : `Waiting for ${partnerName} to join.`}
-                          </div>
-                        </div>
-                        <div className="rounded-[1.25rem] bg-white/6 p-4">
-                          <div className="text-xs uppercase tracking-[0.2em] text-amber-100/60">Run Control</div>
-                          <div className="mt-2 text-sm text-white">
-                            {canManageRun ? 'You are controlling the shop and wave flow.' : `${partnerName} is controlling the shop and wave flow.`}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    {waitingRuns.length > 0 && !activeRun && (
-                      <div className="mt-4 space-y-2">
-                        {waitingRuns.map((run) => (
-                          <button
-                            key={run.id}
-                            onClick={() => void joinRun(run)}
-                            className="w-full rounded-[1.5rem] border border-white/10 bg-white/6 px-4 py-4 text-left"
-                          >
-                            <div className="font-semibold text-white">{run.mode === 'campaign' ? 'Campaign' : 'Endless'} level {run.level_number}</div>
-                            <div className="mt-1 text-sm text-amber-100/70">Host: {run.host_player === 'daniel' ? 'Daniel' : 'Huaiyao'}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <SignalPad
-                    title="Combat Key"
-                    subtitle="Every decoded character becomes an attack. Bosses need chained confirmations."
-                    liveSymbols={liveSymbols}
-                    liveOutput={liveOutput}
-                    decodedPreview={decodedPreview}
-                    isHolding={isHolding}
-                    unitMs={unitMs}
-                    onStart={() => void startSignal()}
-                    onStop={() => void stopSignal()}
-                    disabled={!runSnapshot}
-                  />
-                </div>
-                {runSnapshot && (
-                  <div className="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
-                    <div className="rounded-[2rem] border border-white/10 bg-black/15 p-5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="text-xs uppercase tracking-[0.3em] text-amber-200/70">Castle Defense</div>
-                          <div className="mt-2 text-2xl font-bold text-white">Wave {runSnapshot.waveNumber}</div>
-                          {runSnapshot.currentComboPrompt && (
-                            <div className="mt-2 text-sm text-amber-100/75">{runSnapshot.currentComboPrompt}</div>
-                          )}
-                        </div>
-                        <div className="text-sm text-amber-100/80">
-                          Health {runSnapshot.castleHealth}/{runSnapshot.maxCastleHealth} · Score {runSnapshot.score} · Supplies {runSnapshot.resources}
-                        </div>
-                      </div>
-                      <div className="mt-4 grid gap-3 md:grid-cols-2">
-                        <div className="rounded-[1.25rem] bg-white/6 p-4">
-                          <div className="text-xs uppercase tracking-[0.2em] text-amber-100/60">Towers</div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {runSnapshot.towers.map((tower) => (
-                              <button
-                                key={tower.id}
-                                disabled={!canManageRun}
-                                onClick={() => setRunSnapshot((prev) => prev ? upgradeTower(prev, tower.id) : prev)}
-                                className={`rounded-full border px-3 py-2 text-left text-sm ${canManageRun ? 'border-white/10 bg-black/20 text-white' : 'border-white/10 bg-black/10 text-white/50'}`}
-                              >
-                                {tower.type} L{tower.level} · lane {tower.lane + 1}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="rounded-[1.25rem] bg-white/6 p-4">
-                          <div className="text-xs uppercase tracking-[0.2em] text-amber-100/60">Arrow Watch</div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {runSnapshot.shots.length > 0 ? runSnapshot.shots.slice(-6).map((shot) => (
-                              <span key={shot.id} className="rounded-full bg-amber-400/15 px-3 py-2 text-sm text-amber-100">
-                                Lane {shot.lane + 1} {'->'} {shot.targetChar}
-                              </span>
-                            )) : (
-                              <span className="text-sm text-amber-100/60">Clean Morse kills call arrows from the tower.</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="mt-4 space-y-3">
-                        {[0, 1, 2].map((lane) => {
-                          const enemies = runSnapshot.enemies.filter((enemy) => enemy.lane === lane).sort((left, right) => right.progress - left.progress);
-                          return (
-                            <div key={lane} className="rounded-[1.5rem] border border-white/10 bg-white/6 p-4">
-                              <div className="mb-3 flex items-center justify-between">
-                                <div className="text-xs uppercase tracking-[0.25em] text-amber-200/70">Lane {lane + 1}</div>
-                                <div className="text-xs text-amber-100/60">Pressure {runSnapshot.lanePressure[lane].toFixed(1)}</div>
+                    {waitingRuns.length > 0 && (
+                      <div className="mt-5">
+                        <div className="text-xs uppercase tracking-[0.24em] text-amber-200/70">Open Co-op Battles</div>
+                        <div className="mt-3 space-y-2">
+                          {waitingRuns.map((run) => (
+                            <button
+                              key={run.id}
+                              onClick={() => void joinRun(run)}
+                              className="w-full rounded-[1.4rem] border border-white/10 bg-white/6 px-4 py-4 text-left transition hover:bg-white/10"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="font-semibold text-white">{run.mode === 'campaign' ? 'Campaign' : 'Endless'} level {run.level_number}</div>
+                                <div className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs uppercase tracking-[0.2em] text-emerald-200">Join</div>
                               </div>
-                              <div className="min-h-24 rounded-[1.25rem] border border-amber-200/10 bg-gradient-to-r from-amber-950/25 via-black/10 to-slate-950/45 p-3">
-                                <div className="flex flex-wrap gap-3">
-                                  {enemies.length === 0 && <div className="text-sm text-amber-100/55">No enemies in this lane.</div>}
-                                  {enemies.map((enemy) => (
-                                    <div key={enemy.id} className="rounded-2xl border border-amber-300/20 bg-black/30 px-3 py-2 text-center">
-                                      <div className="text-xs uppercase tracking-[0.18em] text-amber-100/60">{enemy.kind}</div>
-                                      <div className="mt-1 text-xl font-black text-white">{enemy.targetChar}</div>
-                                      <div className="mt-1 font-mono text-sm text-amber-200">{helpers.showCheatSheet || enemy.revealed ? enemy.code : 'hidden'}</div>
-                                      <div className="mt-1 text-xs text-amber-100/60">{enemy.health}/{enemy.maxHealth}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <div className="space-y-4">
-                      <div className="rounded-[2rem] border border-white/10 bg-black/15 p-5">
-                        <div className="text-xs uppercase tracking-[0.3em] text-amber-200/70">Field Log</div>
-                        <div className="mt-4 space-y-2 text-sm text-amber-50/80">
-                          {runSnapshot.recentEvents.map((entry, index) => (
-                            <div key={`${entry}-${index}`} className="rounded-2xl bg-white/6 px-3 py-2">{entry}</div>
+                              <div className="mt-1 text-sm text-amber-100/70">Host: {run.host_player === 'daniel' ? 'Daniel' : 'Huaiyao'}</div>
+                            </button>
                           ))}
                         </div>
                       </div>
-                      <div className="rounded-[2rem] border border-white/10 bg-black/15 p-5">
-                        <div className="text-xs uppercase tracking-[0.3em] text-amber-200/70">Run Shop</div>
-                        {!canManageRun && (
-                          <div className="mt-4 rounded-[1.25rem] bg-white/6 p-4 text-sm text-amber-100/70">
-                            {partnerName} is driving the shop for this co-op run.
-                          </div>
-                        )}
-                        <div className="mt-4 space-y-4">
-                          <div className="grid gap-2">
-                            {unlockedTowerCatalog.map((tower) => (
-                              <button
-                                key={tower.type}
-                                disabled={!canManageRun}
-                                onClick={() => setRunSnapshot((prev) => prev ? buyTower(prev, tower.type, teamProgress) : prev)}
-                                className={`rounded-2xl border px-4 py-3 text-left ${canManageRun ? 'border-white/10 bg-white/6' : 'border-white/10 bg-white/4 text-white/50'}`}
-                              >
-                                <div className="flex items-center justify-between gap-3">
-                                  <div className="font-semibold text-white">{tower.label}</div>
-                                  <div className="text-sm text-amber-200">{tower.cost}</div>
-                                </div>
-                                <div className="mt-1 text-sm text-amber-100/70">{tower.short}</div>
-                              </button>
-                            ))}
-                          </div>
-                          <div className="grid gap-2">
-                            {unlockedPowerCatalog.map((power) => {
-                              const currentPower = runSnapshot.powers.find((entry) => entry.type === power.type);
-                              return (
-                                <div key={power.type} className="grid grid-cols-[1fr,auto,auto] gap-2">
-                                  <div className="rounded-2xl border border-white/10 bg-white/6 px-4 py-3">
-                                    <div className="flex items-center justify-between gap-3">
-                                      <div className="font-semibold text-white">{power.label}</div>
-                                      <div className="text-sm text-amber-200">{currentPower?.charges ?? 0} ready</div>
-                                    </div>
-                                    <div className="mt-1 text-sm text-amber-100/70">{power.description}</div>
-                                  </div>
-                                  <button
-                                    disabled={!canManageRun}
-                                    onClick={() => setRunSnapshot((prev) => prev ? buyPowerCharge(prev, power.type, teamProgress) : prev)}
-                                    className={`rounded-2xl border px-4 py-3 text-left ${canManageRun ? 'border-white/10 bg-white/6 text-white' : 'border-white/10 bg-white/4 text-white/50'}`}
-                                  >
-                                    Buy
-                                  </button>
-                                  <button
-                                    disabled={!canManageRun}
-                                    onClick={() => setRunSnapshot((prev) => prev ? activatePower(prev, power.type) : prev)}
-                                    className={`rounded-2xl border px-4 py-3 text-left ${canManageRun ? 'border-white/10 bg-white/6 text-white' : 'border-white/10 bg-white/4 text-white/50'}`}
-                                  >
-                                    Use
-                                  </button>
-                                </div>
-                              );
-                            })}
-                          </div>
-                          <div className="grid gap-2 md:grid-cols-2">
-                            {runSnapshot.towers.map((tower) => (
-                              <button
-                                key={`upgrade-${tower.id}`}
-                                disabled={!canManageRun}
-                                onClick={() => setRunSnapshot((prev) => prev ? upgradeTower(prev, tower.id) : prev)}
-                                className={`rounded-2xl border px-4 py-3 text-left ${canManageRun ? 'border-white/10 bg-white/6 text-white' : 'border-white/10 bg-white/4 text-white/50'}`}
-                              >
-                                Upgrade {tower.type} lane {tower.lane + 1} to L{tower.level + 1}
-                              </button>
+                    )}
+                  </div>
+
+                  <div className="overflow-hidden rounded-[2rem] border border-amber-300/15 bg-[radial-gradient(circle_at_top,#805228,transparent_35%),linear-gradient(180deg,#22130d,#0f0a08_60%,#080706)] p-5">
+                    <div className="relative min-h-[420px] overflow-hidden rounded-[1.6rem] border border-white/10 bg-black/20">
+                      <div className="absolute inset-x-10 top-8 h-28 rounded-full bg-amber-300/10 blur-3xl" />
+                      <div className="absolute left-[10%] top-[8%] h-[48%] w-[26%] rounded-[42%] bg-[linear-gradient(180deg,rgba(146,94,48,0.76),rgba(71,42,22,0.94))]" />
+                      <div className="absolute left-1/2 top-[4%] h-[54%] w-[12%] -translate-x-1/2 rounded-[40%] bg-[linear-gradient(180deg,rgba(146,94,48,0.76),rgba(71,42,22,0.94))]" />
+                      <div className="absolute right-[10%] top-[8%] h-[48%] w-[26%] rounded-[42%] bg-[linear-gradient(180deg,rgba(146,94,48,0.76),rgba(71,42,22,0.94))]" />
+                      <div className="absolute left-1/2 top-[52%] h-32 w-64 -translate-x-1/2 rounded-[2rem_2rem_1rem_1rem] border border-amber-200/20 bg-[linear-gradient(180deg,rgba(132,76,37,0.92),rgba(62,35,19,0.98))]" />
+                      <div className="absolute left-[25%] top-[57%] h-1 w-[24%] rotate-[27deg] rounded-full bg-amber-100/80 shadow-[0_0_18px_rgba(253,224,71,0.45)]" />
+                      <div className="absolute left-[50%] top-[53%] h-1 w-[16%] -rotate-[34deg] rounded-full bg-amber-100/80 shadow-[0_0_18px_rgba(253,224,71,0.45)]" />
+                      <div className="absolute left-[18%] top-[37%] h-12 w-12 rounded-full border-4 border-slate-200/80 bg-slate-700/80" />
+                      <div className="absolute left-[56%] top-[22%] h-12 w-12 rounded-full border-4 border-slate-200/80 bg-slate-700/80" />
+                      <div className="absolute right-[18%] top-[30%] h-16 w-16 rounded-full border-4 border-rose-200/80 bg-rose-900/70" />
+                      <div className="relative z-10 max-w-md p-5">
+                        <div className="rounded-[1.5rem] border border-white/10 bg-black/35 p-5 backdrop-blur">
+                          <div className="text-xs uppercase tracking-[0.28em] text-amber-200/70">Battlefield Preview</div>
+                          <h3 className="mt-3 text-3xl font-serif font-bold text-white">A side-view castle siege, not a dashboard.</h3>
+                          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                            {[
+                              'Animated marching enemies',
+                              'Visible arrow and catapult shots',
+                              'Shared co-op battlefield',
+                              'Wave-break shop overlay',
+                            ].map((feature) => (
+                              <div key={feature} className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-amber-50/85">
+                                {feature}
+                              </div>
                             ))}
                           </div>
                         </div>
                       </div>
-                      {(runSnapshot.phase === 'waiting' || runSnapshot.phase === 'shop') && (
-                        <button
-                          onClick={launchWave}
-                          disabled={!canManageRun || waitingForPartner}
-                          className={`w-full rounded-[2rem] px-6 py-4 text-sm font-black uppercase tracking-[0.25em] ${!canManageRun || waitingForPartner ? 'bg-white/10 text-white/45' : 'bg-gradient-to-r from-amber-400 to-orange-400 text-slate-950'}`}
-                        >
-                          {waitingForPartner ? `Waiting for ${partnerName}` : runSnapshot.phase === 'waiting' ? 'Launch Wave' : 'Start Next Wave'}
-                        </button>
-                      )}
                     </div>
                   </div>
-                )}
-                {runSnapshot && (runSnapshot.phase === 'victory' || runSnapshot.phase === 'defeat') && (
-                  <button
-                    onClick={() => void finishRun()}
-                    className="w-full rounded-[2rem] bg-gradient-to-r from-amber-400 to-orange-400 px-6 py-4 text-sm font-black uppercase tracking-[0.25em] text-slate-950"
-                  >
-                    Bank Rewards and Close Run
-                  </button>
-                )}
+                </div>
+
+                <div className="grid gap-4 lg:grid-cols-[1.02fr,0.98fr]">
+                  <div className="rounded-[2rem] border border-white/10 bg-black/15 p-5">
+                    <div className="text-xs uppercase tracking-[0.3em] text-amber-200/70">Battle Systems</div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      {[
+                        ['Shared map', 'Both of you attack the same enemies on one battlefield.'],
+                        ['Live Morse dock', 'Hold-to-tone input stays available during every wave.'],
+                        ['Animated defenses', 'Correct letters trigger visible arrows and tower shots.'],
+                        ['War economy', 'Spend supplies between waves on towers, upgrades, and powers.'],
+                      ].map(([title, copy]) => (
+                        <div key={title} className="rounded-[1.4rem] border border-white/10 bg-white/6 p-4">
+                          <div className="text-sm font-semibold text-white">{title}</div>
+                          <div className="mt-2 text-sm text-amber-100/70">{copy}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-[2rem] border border-white/10 bg-black/15 p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.3em] text-amber-200/70">War Records</div>
+                        <h3 className="mt-3 text-2xl font-bold text-white">Progression feeds every future siege.</h3>
+                      </div>
+                      <Link href="/morse/defense?mode=campaign&level=1&coop=0" className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-amber-100/80">
+                        Open Battle Route
+                      </Link>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-[1.3rem] bg-white/6 p-4"><div className="text-xs uppercase tracking-[0.2em] text-amber-100/60">Best Campaign</div><div className="mt-2 text-3xl font-black text-white">{teamProgress.records.bestCampaignLevel}</div></div>
+                      <div className="rounded-[1.3rem] bg-white/6 p-4"><div className="text-xs uppercase tracking-[0.2em] text-amber-100/60">Best Endless</div><div className="mt-2 text-3xl font-black text-white">{teamProgress.records.bestEndlessWave}</div></div>
+                      <div className="rounded-[1.3rem] bg-white/6 p-4"><div className="text-xs uppercase tracking-[0.2em] text-amber-100/60">Best Score</div><div className="mt-2 text-3xl font-black text-white">{teamProgress.records.bestScore}</div></div>
+                      <div className="rounded-[1.3rem] bg-white/6 p-4"><div className="text-xs uppercase tracking-[0.2em] text-amber-100/60">Signal Cache</div><div className="mt-2 text-3xl font-black text-amber-200">{teamProgress.metaCurrency}</div></div>
+                    </div>
+                    <div className="mt-5 space-y-2">
+                      {recentRuns.length === 0 && (
+                        <div className="rounded-[1.3rem] bg-white/6 px-4 py-4 text-sm text-amber-100/70">
+                          No battles recorded yet. Launch one to start the record book.
+                        </div>
+                      )}
+                      {recentRuns.slice(0, 4).map((run) => (
+                        <div key={run.id} className="rounded-[1.3rem] border border-white/10 bg-white/6 px-4 py-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="font-semibold text-white">{run.mode === 'campaign' ? `Campaign ${run.level_number}` : `Endless wave ${run.endless_wave}`}</div>
+                            <div className="text-sm text-amber-200">{run.score} pts</div>
+                          </div>
+                          <div className="mt-1 text-sm text-amber-100/70">
+                            {run.host_player === 'daniel' ? 'Daniel' : 'Huaiyao'}
+                            {run.guest_player ? ` + ${run.guest_player === 'daniel' ? 'Daniel' : 'Huaiyao'}` : ' solo'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 

@@ -26,7 +26,10 @@ export interface HiveModelTrainingInfo {
 
 export const HIVE_LINEAR_MODEL_VERSION = 1;
 export const HIVE_MLP_MODEL_VERSION = 2;
-export const HIVE_POLICY_VALUE_MODEL_VERSION = 3;
+export const HIVE_POLICY_VALUE_MODEL_VERSION = 6;
+export const HIVE_POLICY_VALUE_MODEL_PREVIOUS_VERSION = 5;
+export const HIVE_POLICY_VALUE_MODEL_LEGACY_VERSION = 4;
+export const HIVE_POLICY_VALUE_MODEL_OLDEST_VERSION = 3;
 
 export type HiveActivation = 'linear' | 'tanh' | 'relu';
 
@@ -63,14 +66,25 @@ export interface HivePolicyValueLinearHead {
 }
 
 export interface HivePolicyHead {
-  stateWeights: readonly number[];
-  actionWeights: readonly number[];
+  actionWeights?: readonly number[];
+  contextWeights?: readonly number[];
+  stateWeights?: readonly number[];
+  inputHiddenSize?: number;
+  hiddenSize?: number;
+  inputWeights?: readonly number[];
+  inputBias?: readonly number[];
+  hiddenWeights?: readonly number[];
+  hiddenLayerBias?: readonly number[];
+  stateHiddenWeights?: readonly number[];
+  actionHiddenWeights?: readonly number[];
+  hiddenBias?: readonly number[];
+  outputWeights?: readonly number[];
   bias: number;
   actionScale?: number;
 }
 
 export interface HivePolicyValueModel {
-  version: typeof HIVE_POLICY_VALUE_MODEL_VERSION;
+  version: number;
   kind: 'policy_value';
   stateFeatureNames: readonly string[];
   actionFeatureNames: readonly string[];
@@ -144,6 +158,18 @@ export const HIVE_ACTION_FEATURE_NAMES = [
   'my_queen_surround',
   'opp_queen_surround',
   'turn_phase',
+  'from_q',
+  'from_r',
+  'from_dist_origin',
+  'from_dist_enemy_queen',
+  'from_dist_my_queen',
+  'move_distance',
+  'to_neighbor_mine',
+  'to_neighbor_opp',
+  'to_neighbor_empty',
+  'to_adj_my_queen',
+  'to_adj_opp_queen',
+  'to_stack_height',
 ] as const;
 
 export const HIVE_DEFAULT_TOKEN_SLOTS = 32;
@@ -261,6 +287,40 @@ export function extractHiveActionFeatures(
   const distCenter = hexDistance(move.to, { q: 0, r: 0 });
   const distEnemyQueen = oppQueen ? hexDistance(move.to, oppQueen.position) : 6;
   const distMyQueen = myQueen ? hexDistance(move.to, myQueen.position) : 6;
+  const fromCoord = move.type === 'move' && move.from ? move.from : null;
+  const fromDistCenter = fromCoord ? hexDistance(fromCoord, { q: 0, r: 0 }) : 0;
+  const fromDistEnemyQueen = fromCoord && oppQueen ? hexDistance(fromCoord, oppQueen.position) : 0;
+  const fromDistMyQueen = fromCoord && myQueen ? hexDistance(fromCoord, myQueen.position) : 0;
+  const moveDistance = fromCoord ? hexDistance(fromCoord, move.to) : 0;
+  const stacksByPosition = new Map<string, { count: number; topColor: PlayerColor }>();
+  for (const piece of state.board) {
+    const key = `${piece.position.q},${piece.position.r}`;
+    const existing = stacksByPosition.get(key);
+    if (!existing) {
+      stacksByPosition.set(key, { count: 1, topColor: piece.color });
+      continue;
+    }
+    existing.count += 1;
+    if (piece.stackOrder >= existing.count - 1) {
+      existing.topColor = piece.color;
+    }
+  }
+  let toNeighborMine = 0;
+  let toNeighborOpp = 0;
+  let toNeighborEmpty = 0;
+  for (const neighbor of getNeighbors(move.to)) {
+    const stack = stacksByPosition.get(`${neighbor.q},${neighbor.r}`);
+    if (!stack) {
+      toNeighborEmpty += 1;
+    } else if (stack.topColor === perspective) {
+      toNeighborMine += 1;
+    } else {
+      toNeighborOpp += 1;
+    }
+  }
+  const toStackHeight = stacksByPosition.get(`${move.to.q},${move.to.r}`)?.count ?? 0;
+  const toAdjMyQueen = myQueen && hexDistance(move.to, myQueen.position) === 1 ? 1 : 0;
+  const toAdjOppQueen = oppQueen && hexDistance(move.to, oppQueen.position) === 1 ? 1 : 0;
 
   return [
     move.type === 'place' ? 1 : 0,
@@ -275,6 +335,18 @@ export function extractHiveActionFeatures(
     getQueenSurroundCount(state.board, perspective) / 6,
     getQueenSurroundCount(state.board, flipColor(perspective)) / 6,
     Math.tanh((state.turnNumber - 18) / 10),
+    fromCoord ? Math.tanh(fromCoord.q / 5) : 0,
+    fromCoord ? Math.tanh(fromCoord.r / 5) : 0,
+    clamp(1 - fromDistCenter / 10, -1, 1),
+    clamp(1 - fromDistEnemyQueen / 8, -1, 1),
+    clamp(1 - fromDistMyQueen / 8, -1, 1),
+    clamp(moveDistance / 6, 0, 1),
+    toNeighborMine / 6,
+    toNeighborOpp / 6,
+    toNeighborEmpty / 6,
+    toAdjMyQueen,
+    toAdjOppQueen,
+    clamp(toStackHeight / 4, 0, 1),
   ];
 }
 
@@ -400,8 +472,14 @@ export function parseHiveModel(input: unknown): HiveModel | null {
   if (!input || typeof input !== 'object') return null;
   const candidate = input as Record<string, unknown>;
 
-  if (candidate.kind === 'policy_value' || candidate.version === HIVE_POLICY_VALUE_MODEL_VERSION) {
-    return parseV3(candidate);
+  if (
+    candidate.kind === 'policy_value'
+    || candidate.version === HIVE_POLICY_VALUE_MODEL_VERSION
+    || candidate.version === HIVE_POLICY_VALUE_MODEL_PREVIOUS_VERSION
+    || candidate.version === HIVE_POLICY_VALUE_MODEL_LEGACY_VERSION
+    || candidate.version === HIVE_POLICY_VALUE_MODEL_OLDEST_VERSION
+  ) {
+    return parseV6(candidate) ?? parseV5(candidate) ?? parseV4(candidate) ?? parseV3(candidate);
   }
   if (candidate.kind === 'mlp' || candidate.version === HIVE_MLP_MODEL_VERSION) {
     return parseV2(candidate);
@@ -464,7 +542,7 @@ function parseV2(candidate: Record<string, unknown>): HiveMlpModel | null {
 }
 
 function parseV3(candidate: Record<string, unknown>): HivePolicyValueModel | null {
-  if (candidate.version !== HIVE_POLICY_VALUE_MODEL_VERSION) return null;
+  if (candidate.version !== HIVE_POLICY_VALUE_MODEL_OLDEST_VERSION) return null;
   if (candidate.kind !== 'policy_value') return null;
   if (!Array.isArray(candidate.stateFeatureNames)) return null;
   if (!Array.isArray(candidate.actionFeatureNames)) return null;
@@ -510,7 +588,7 @@ function parseV3(candidate: Record<string, unknown>): HivePolicyValueModel | nul
   if (!training) return null;
 
   return {
-    version: HIVE_POLICY_VALUE_MODEL_VERSION,
+    version: HIVE_POLICY_VALUE_MODEL_OLDEST_VERSION,
     kind: 'policy_value',
     stateFeatureNames: [...stateFeatureNames] as string[],
     actionFeatureNames: [...actionFeatureNames] as string[],
@@ -519,6 +597,210 @@ function parseV3(candidate: Record<string, unknown>): HivePolicyValueModel | nul
     policyHead: {
       stateWeights: [...policyHeadRaw.stateWeights] as number[],
       actionWeights: [...policyHeadRaw.actionWeights] as number[],
+      bias: policyHeadRaw.bias,
+      actionScale,
+    },
+    training,
+  };
+}
+
+function parseV4(candidate: Record<string, unknown>): HivePolicyValueModel | null {
+  if (candidate.version !== HIVE_POLICY_VALUE_MODEL_LEGACY_VERSION) return null;
+  if (candidate.kind !== 'policy_value') return null;
+  if (!Array.isArray(candidate.stateFeatureNames)) return null;
+  if (!Array.isArray(candidate.actionFeatureNames)) return null;
+  if (!Array.isArray(candidate.stateTrunk)) return null;
+  if (!candidate.valueHead || typeof candidate.valueHead !== 'object') return null;
+  if (!candidate.policyHead || typeof candidate.policyHead !== 'object') return null;
+
+  const stateFeatureNames = candidate.stateFeatureNames;
+  const actionFeatureNames = candidate.actionFeatureNames;
+  if (!stateFeatureNames.every((entry) => typeof entry === 'string')) return null;
+  if (!actionFeatureNames.every((entry) => typeof entry === 'string')) return null;
+
+  const trunk = parseLayers(candidate.stateTrunk, stateFeatureNames.length);
+  if (!trunk || trunk.length === 0) return null;
+  const embeddingSize = trunk[trunk.length - 1].outputSize;
+
+  const valueHead = parseLinearHead(candidate.valueHead as Record<string, unknown>, embeddingSize);
+  if (!valueHead) return null;
+
+  const policyHeadRaw = candidate.policyHead as Record<string, unknown>;
+  if (!Array.isArray(policyHeadRaw.actionWeights) || !Array.isArray(policyHeadRaw.contextWeights)) {
+    return null;
+  }
+  if (policyHeadRaw.actionWeights.length !== actionFeatureNames.length) return null;
+  if (policyHeadRaw.contextWeights.length !== embeddingSize * actionFeatureNames.length) return null;
+  if (typeof policyHeadRaw.bias !== 'number' || !Number.isFinite(policyHeadRaw.bias)) return null;
+  if (!policyHeadRaw.actionWeights.every((entry) => typeof entry === 'number' && Number.isFinite(entry))) {
+    return null;
+  }
+  if (!policyHeadRaw.contextWeights.every((entry) => typeof entry === 'number' && Number.isFinite(entry))) {
+    return null;
+  }
+
+  let actionScale: number | undefined;
+  if (policyHeadRaw.actionScale !== undefined) {
+    if (typeof policyHeadRaw.actionScale !== 'number' || !Number.isFinite(policyHeadRaw.actionScale)) {
+      return null;
+    }
+    actionScale = policyHeadRaw.actionScale;
+  }
+
+  const training = parseTrainingInfo(candidate.training);
+  if (!training) return null;
+
+  return {
+    version: HIVE_POLICY_VALUE_MODEL_LEGACY_VERSION,
+    kind: 'policy_value',
+    stateFeatureNames: [...stateFeatureNames] as string[],
+    actionFeatureNames: [...actionFeatureNames] as string[],
+    stateTrunk: trunk,
+    valueHead,
+    policyHead: {
+      actionWeights: [...policyHeadRaw.actionWeights] as number[],
+      contextWeights: [...policyHeadRaw.contextWeights] as number[],
+      bias: policyHeadRaw.bias,
+      actionScale,
+    },
+    training,
+  };
+}
+
+function parseV5(candidate: Record<string, unknown>): HivePolicyValueModel | null {
+  if (candidate.version !== HIVE_POLICY_VALUE_MODEL_PREVIOUS_VERSION) return null;
+  if (candidate.kind !== 'policy_value') return null;
+  if (!Array.isArray(candidate.stateFeatureNames)) return null;
+  if (!Array.isArray(candidate.actionFeatureNames)) return null;
+  if (!Array.isArray(candidate.stateTrunk)) return null;
+  if (!candidate.valueHead || typeof candidate.valueHead !== 'object') return null;
+  if (!candidate.policyHead || typeof candidate.policyHead !== 'object') return null;
+
+  const stateFeatureNames = candidate.stateFeatureNames;
+  const actionFeatureNames = candidate.actionFeatureNames;
+  if (!stateFeatureNames.every((entry) => typeof entry === 'string')) return null;
+  if (!actionFeatureNames.every((entry) => typeof entry === 'string')) return null;
+
+  const trunk = parseLayers(candidate.stateTrunk, stateFeatureNames.length);
+  if (!trunk || trunk.length === 0) return null;
+  const embeddingSize = trunk[trunk.length - 1].outputSize;
+
+  const valueHead = parseLinearHead(candidate.valueHead as Record<string, unknown>, embeddingSize);
+  if (!valueHead) return null;
+
+  const policyHeadRaw = candidate.policyHead as Record<string, unknown>;
+  const hiddenSize = policyHeadRaw.hiddenSize;
+  if (!Number.isInteger(hiddenSize) || (hiddenSize as number) <= 0) return null;
+  if (!Array.isArray(policyHeadRaw.stateHiddenWeights) || !Array.isArray(policyHeadRaw.actionHiddenWeights)) return null;
+  if (!Array.isArray(policyHeadRaw.hiddenBias) || !Array.isArray(policyHeadRaw.outputWeights)) return null;
+  if ((policyHeadRaw.stateHiddenWeights as unknown[]).length !== embeddingSize * (hiddenSize as number)) return null;
+  if ((policyHeadRaw.actionHiddenWeights as unknown[]).length !== actionFeatureNames.length * (hiddenSize as number)) return null;
+  if ((policyHeadRaw.hiddenBias as unknown[]).length !== (hiddenSize as number)) return null;
+  if ((policyHeadRaw.outputWeights as unknown[]).length !== (hiddenSize as number)) return null;
+  if (typeof policyHeadRaw.bias !== 'number' || !Number.isFinite(policyHeadRaw.bias)) return null;
+  if (!(policyHeadRaw.stateHiddenWeights as unknown[]).every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return null;
+  if (!(policyHeadRaw.actionHiddenWeights as unknown[]).every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return null;
+  if (!(policyHeadRaw.hiddenBias as unknown[]).every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return null;
+  if (!(policyHeadRaw.outputWeights as unknown[]).every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return null;
+
+  let actionScale: number | undefined;
+  if (policyHeadRaw.actionScale !== undefined) {
+    if (typeof policyHeadRaw.actionScale !== 'number' || !Number.isFinite(policyHeadRaw.actionScale)) {
+      return null;
+    }
+    actionScale = policyHeadRaw.actionScale;
+  }
+
+  const training = parseTrainingInfo(candidate.training);
+  if (!training) return null;
+
+  return {
+    version: HIVE_POLICY_VALUE_MODEL_PREVIOUS_VERSION,
+    kind: 'policy_value',
+    stateFeatureNames: [...stateFeatureNames] as string[],
+    actionFeatureNames: [...actionFeatureNames] as string[],
+    stateTrunk: trunk,
+    valueHead,
+    policyHead: {
+      hiddenSize: hiddenSize as number,
+      stateHiddenWeights: [...policyHeadRaw.stateHiddenWeights] as number[],
+      actionHiddenWeights: [...policyHeadRaw.actionHiddenWeights] as number[],
+      hiddenBias: [...policyHeadRaw.hiddenBias] as number[],
+      outputWeights: [...policyHeadRaw.outputWeights] as number[],
+      bias: policyHeadRaw.bias,
+      actionScale,
+    },
+    training,
+  };
+}
+
+function parseV6(candidate: Record<string, unknown>): HivePolicyValueModel | null {
+  if (candidate.version !== HIVE_POLICY_VALUE_MODEL_VERSION) return null;
+  if (candidate.kind !== 'policy_value') return null;
+  if (!Array.isArray(candidate.stateFeatureNames)) return null;
+  if (!Array.isArray(candidate.actionFeatureNames)) return null;
+  if (!Array.isArray(candidate.stateTrunk)) return null;
+  if (!candidate.valueHead || typeof candidate.valueHead !== 'object') return null;
+  if (!candidate.policyHead || typeof candidate.policyHead !== 'object') return null;
+
+  const stateFeatureNames = candidate.stateFeatureNames;
+  const actionFeatureNames = candidate.actionFeatureNames;
+  if (!stateFeatureNames.every((entry) => typeof entry === 'string')) return null;
+  if (!actionFeatureNames.every((entry) => typeof entry === 'string')) return null;
+
+  const trunk = parseLayers(candidate.stateTrunk, stateFeatureNames.length);
+  if (!trunk || trunk.length === 0) return null;
+  const embeddingSize = trunk[trunk.length - 1].outputSize;
+
+  const valueHead = parseLinearHead(candidate.valueHead as Record<string, unknown>, embeddingSize);
+  if (!valueHead) return null;
+
+  const policyHeadRaw = candidate.policyHead as Record<string, unknown>;
+  const inputHiddenSize = policyHeadRaw.inputHiddenSize;
+  const hiddenSize = policyHeadRaw.hiddenSize;
+  if (!Number.isInteger(inputHiddenSize) || (inputHiddenSize as number) <= 0) return null;
+  if (!Number.isInteger(hiddenSize) || (hiddenSize as number) <= 0) return null;
+  if (!Array.isArray(policyHeadRaw.inputWeights) || !Array.isArray(policyHeadRaw.inputBias)) return null;
+  if (!Array.isArray(policyHeadRaw.hiddenWeights) || !Array.isArray(policyHeadRaw.hiddenLayerBias)) return null;
+  if (!Array.isArray(policyHeadRaw.outputWeights)) return null;
+  if ((policyHeadRaw.inputWeights as unknown[]).length !== (embeddingSize + actionFeatureNames.length) * (inputHiddenSize as number)) return null;
+  if ((policyHeadRaw.inputBias as unknown[]).length !== (inputHiddenSize as number)) return null;
+  if ((policyHeadRaw.hiddenWeights as unknown[]).length !== (inputHiddenSize as number) * (hiddenSize as number)) return null;
+  if ((policyHeadRaw.hiddenLayerBias as unknown[]).length !== (hiddenSize as number)) return null;
+  if ((policyHeadRaw.outputWeights as unknown[]).length !== (hiddenSize as number)) return null;
+  if (typeof policyHeadRaw.bias !== 'number' || !Number.isFinite(policyHeadRaw.bias)) return null;
+  if (!(policyHeadRaw.inputWeights as unknown[]).every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return null;
+  if (!(policyHeadRaw.inputBias as unknown[]).every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return null;
+  if (!(policyHeadRaw.hiddenWeights as unknown[]).every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return null;
+  if (!(policyHeadRaw.hiddenLayerBias as unknown[]).every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return null;
+  if (!(policyHeadRaw.outputWeights as unknown[]).every((entry) => typeof entry === 'number' && Number.isFinite(entry))) return null;
+
+  let actionScale: number | undefined;
+  if (policyHeadRaw.actionScale !== undefined) {
+    if (typeof policyHeadRaw.actionScale !== 'number' || !Number.isFinite(policyHeadRaw.actionScale)) {
+      return null;
+    }
+    actionScale = policyHeadRaw.actionScale;
+  }
+
+  const training = parseTrainingInfo(candidate.training);
+  if (!training) return null;
+
+  return {
+    version: HIVE_POLICY_VALUE_MODEL_VERSION,
+    kind: 'policy_value',
+    stateFeatureNames: [...stateFeatureNames] as string[],
+    actionFeatureNames: [...actionFeatureNames] as string[],
+    stateTrunk: trunk,
+    valueHead,
+    policyHead: {
+      inputHiddenSize: inputHiddenSize as number,
+      hiddenSize: hiddenSize as number,
+      inputWeights: [...policyHeadRaw.inputWeights] as number[],
+      inputBias: [...policyHeadRaw.inputBias] as number[],
+      hiddenWeights: [...policyHeadRaw.hiddenWeights] as number[],
+      hiddenLayerBias: [...policyHeadRaw.hiddenLayerBias] as number[],
+      outputWeights: [...policyHeadRaw.outputWeights] as number[],
       bias: policyHeadRaw.bias,
       actionScale,
     },
@@ -637,12 +919,140 @@ function evaluateV3PolicyValue(
   const valueRaw = dot(model.valueHead.weights, embedding) + model.valueHead.bias;
   const value = clamp(applyActivation(valueRaw, model.valueHead.activation ?? 'tanh'), -1, 1);
 
-  const stateBias = dot(model.policyHead.stateWeights, embedding);
   const logits: Record<string, number> = {};
+  const inputHiddenSize = model.policyHead.inputHiddenSize;
+  const hiddenSize = model.policyHead.hiddenSize;
+  if (
+    typeof inputHiddenSize === 'number'
+    && typeof hiddenSize === 'number'
+    && Array.isArray(model.policyHead.inputWeights)
+    && Array.isArray(model.policyHead.inputBias)
+    && Array.isArray(model.policyHead.hiddenWeights)
+    && Array.isArray(model.policyHead.hiddenLayerBias)
+    && Array.isArray(model.policyHead.outputWeights)
+  ) {
+    const inputWeights = model.policyHead.inputWeights;
+    const inputBias = model.policyHead.inputBias;
+    const hiddenWeights = model.policyHead.hiddenWeights;
+    const hiddenLayerBias = model.policyHead.hiddenLayerBias;
+    const outputWeights = model.policyHead.outputWeights;
+    const actionScale = model.policyHead.actionScale ?? 1;
+    for (const move of legalMoves) {
+      const actionFeatures = extractHiveActionFeatures(state, move, perspective)
+        .slice(0, model.actionFeatureNames.length);
+      const joint = [...embedding, ...actionFeatures];
+      const inputHidden = new Array(inputHiddenSize).fill(0);
+      for (let hiddenIndex = 0; hiddenIndex < inputHiddenSize; hiddenIndex += 1) {
+        let sum = inputBias[hiddenIndex] ?? 0;
+        const offset = hiddenIndex * joint.length;
+        for (let inputIndex = 0; inputIndex < joint.length; inputIndex += 1) {
+          sum += (inputWeights[offset + inputIndex] ?? 0) * (joint[inputIndex] ?? 0);
+        }
+        inputHidden[hiddenIndex] = Math.tanh(sum);
+      }
+      const hidden = new Array(hiddenSize).fill(0);
+      for (let hiddenIndex = 0; hiddenIndex < hiddenSize; hiddenIndex += 1) {
+        let sum = hiddenLayerBias[hiddenIndex] ?? 0;
+        const offset = hiddenIndex * inputHidden.length;
+        for (let inputIndex = 0; inputIndex < inputHidden.length; inputIndex += 1) {
+          sum += (hiddenWeights[offset + inputIndex] ?? 0) * (inputHidden[inputIndex] ?? 0);
+        }
+        hidden[hiddenIndex] = Math.tanh(sum);
+      }
+      const logit = (dot(outputWeights, hidden) + model.policyHead.bias) * actionScale;
+      logits[moveToActionKey(move)] = Number.isFinite(logit) ? logit : 0;
+    }
+    return {
+      value,
+      actionLogitsByKey: logits,
+      policyEntropy: softmaxEntropy(Object.values(logits)),
+      auxiliary: {
+        queenSurroundDelta: clamp(
+          (getQueenSurroundCount(state.board, flipColor(perspective))
+            - getQueenSurroundCount(state.board, perspective)) / 6,
+          -1,
+          1,
+        ),
+        mobility: estimateMobility(state, perspective),
+        lengthBucketLogits: [0, 0, 0],
+      },
+    };
+  }
+
+  if (
+    typeof hiddenSize === 'number'
+    && Array.isArray(model.policyHead.stateHiddenWeights)
+    && Array.isArray(model.policyHead.actionHiddenWeights)
+    && Array.isArray(model.policyHead.hiddenBias)
+    && Array.isArray(model.policyHead.outputWeights)
+  ) {
+    const stateHiddenWeights = model.policyHead.stateHiddenWeights;
+    const actionHiddenWeights = model.policyHead.actionHiddenWeights;
+    const hiddenBias = model.policyHead.hiddenBias;
+    const outputWeights = model.policyHead.outputWeights;
+    const actionScale = model.policyHead.actionScale ?? 1;
+    for (const move of legalMoves) {
+      const actionFeatures = extractHiveActionFeatures(state, move, perspective)
+        .slice(0, model.actionFeatureNames.length);
+      const hidden = new Array(hiddenSize).fill(0);
+      for (let hiddenIndex = 0; hiddenIndex < hiddenSize; hiddenIndex += 1) {
+        let sum = hiddenBias[hiddenIndex] ?? 0;
+        const stateOffset = hiddenIndex * embedding.length;
+        const actionOffset = hiddenIndex * actionFeatures.length;
+        for (let embedIndex = 0; embedIndex < embedding.length; embedIndex += 1) {
+          sum += (stateHiddenWeights[stateOffset + embedIndex] ?? 0) * (embedding[embedIndex] ?? 0);
+        }
+        for (let actionIndex = 0; actionIndex < actionFeatures.length; actionIndex += 1) {
+          sum += (actionHiddenWeights[actionOffset + actionIndex] ?? 0) * (actionFeatures[actionIndex] ?? 0);
+        }
+        hidden[hiddenIndex] = Math.tanh(sum);
+      }
+      const logit = (dot(outputWeights, hidden) + model.policyHead.bias) * actionScale;
+      logits[moveToActionKey(move)] = Number.isFinite(logit) ? logit : 0;
+    }
+    return {
+      value,
+      actionLogitsByKey: logits,
+      policyEntropy: softmaxEntropy(Object.values(logits)),
+      auxiliary: {
+        queenSurroundDelta: clamp(
+          (getQueenSurroundCount(state.board, flipColor(perspective))
+            - getQueenSurroundCount(state.board, perspective)) / 6,
+          -1,
+          1,
+        ),
+        mobility: estimateMobility(state, perspective),
+        lengthBucketLogits: [0, 0, 0],
+      },
+    };
+  }
+
+  const contextWeights = model.policyHead.contextWeights;
+  const actionWeights = model.policyHead.actionWeights ?? [];
+  const actionScale = model.policyHead.actionScale ?? 1;
+  let dynamicActionWeights: number[] | null = null;
+  if (Array.isArray(contextWeights) && contextWeights.length === embedding.length * model.actionFeatureNames.length) {
+    dynamicActionWeights = new Array(model.actionFeatureNames.length).fill(0);
+    for (let actionIndex = 0; actionIndex < model.actionFeatureNames.length; actionIndex += 1) {
+      let sum = actionWeights[actionIndex] ?? 0;
+      const offset = actionIndex * embedding.length;
+      for (let embedIndex = 0; embedIndex < embedding.length; embedIndex += 1) {
+        sum += (contextWeights[offset + embedIndex] ?? 0) * (embedding[embedIndex] ?? 0);
+      }
+      dynamicActionWeights[actionIndex] = sum;
+    }
+  }
+
+  const legacyStateBias = Array.isArray(model.policyHead.stateWeights)
+    ? dot(model.policyHead.stateWeights, embedding)
+    : 0;
   for (const move of legalMoves) {
-    const actionFeatures = extractHiveActionFeatures(state, move, perspective);
-    const actionBias = dot(model.policyHead.actionWeights, actionFeatures);
-    const logit = (stateBias + actionBias + model.policyHead.bias) * (model.policyHead.actionScale ?? 1);
+    const actionFeatures = extractHiveActionFeatures(state, move, perspective)
+      .slice(0, model.actionFeatureNames.length);
+    const actionBias = dynamicActionWeights
+      ? dot(dynamicActionWeights, actionFeatures)
+      : dot(actionWeights, actionFeatures) + legacyStateBias;
+    const logit = (actionBias + model.policyHead.bias) * actionScale;
     logits[moveToActionKey(move)] = Number.isFinite(logit) ? logit : 0;
   }
 
@@ -811,8 +1221,13 @@ export const HIVE_DEFAULT_POLICY_VALUE_MODEL_TEMPLATE: HivePolicyValueModel = {
     activation: 'tanh',
   },
   policyHead: {
-    stateWeights: Array.from({ length: 48 }, () => 0),
-    actionWeights: Array.from({ length: HIVE_ACTION_FEATURE_NAMES.length }, () => 0),
+    inputHiddenSize: 64,
+    hiddenSize: 64,
+    inputWeights: Array.from({ length: (48 + HIVE_ACTION_FEATURE_NAMES.length) * 64 }, () => 0),
+    inputBias: Array.from({ length: 64 }, () => 0),
+    hiddenWeights: Array.from({ length: 64 * 64 }, () => 0),
+    hiddenLayerBias: Array.from({ length: 64 }, () => 0),
+    outputWeights: Array.from({ length: 64 }, () => 0),
     bias: 0,
     actionScale: 1,
   },

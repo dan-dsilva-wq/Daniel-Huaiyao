@@ -2,3 +2,4 @@
 .stratego-cache
 .next
 .claude
+.venv-hive

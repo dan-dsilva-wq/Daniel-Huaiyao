@@ -1,9 +1,9 @@
 import { ChildProcess, spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { getHiveHardwareProfile } from './hardware-profile';
 
-type RunMode = 'linear' | 'deep' | 'deep-eval' | 'alphazero-eval';
+type RunMode = 'linear' | 'deep' | 'deep-eval' | 'alphazero-eval' | 'alphazero-async-tune';
 
 interface AutopilotOptions {
   mode: RunMode;
@@ -66,6 +66,16 @@ interface PromotionDecisionEvent {
   gateDecisionReason: string | null;
 }
 
+interface PresetExperimentSummary {
+  presetId: string;
+  runs: number;
+  promotions: number;
+  severeFailures: number;
+  avgScore: number | null;
+  avgCiLow: number | null;
+  weightedScore: number;
+}
+
 const DEFAULT_OPTIONS: AutopilotOptions = {
   mode: 'deep-eval',
   generations: 0,
@@ -79,6 +89,7 @@ const DEFAULT_OPTIONS: AutopilotOptions = {
     '.hive-cache/deep-replay-buffer.json',
     '.hive-cache/az-replay-buffer.json',
     '.hive-cache/az-candidate-model.json',
+    '.hive-cache/tune/last-tune.json',
   ],
   commitMessage: 'hive: autopilot gen {generation} ({mode})',
   continueOnError: false,
@@ -105,7 +116,7 @@ async function main(): Promise<void> {
 
   const options = parsed.options;
   installSignalHandlers();
-  const enforceStability = options.requireStablePromotions ?? (options.mode === 'alphazero-eval');
+  const enforceStability = options.requireStablePromotions ?? (options.mode === 'alphazero-eval' || options.mode === 'alphazero-async-tune');
 
   if (!options.git) {
     options.push = false;
@@ -115,7 +126,7 @@ async function main(): Promise<void> {
     'setup',
     `mode=${options.mode} generations=${options.generations === 0 ? 'infinite' : options.generations} pause=${options.pauseSeconds}s git=${options.git ? 'on' : 'off'} push=${options.push ? 'on' : 'off'} deploy=${options.deploy ? 'on' : 'off'}`,
   );
-  if (options.mode === 'alphazero-eval') {
+  if (options.mode === 'alphazero-eval' || options.mode === 'alphazero-async-tune') {
     log(
       'setup',
       `stability_gate=${enforceStability ? 'on' : 'off'} window=${options.stabilityWindow} metrics=${path.resolve(process.cwd(), options.metricsLogPath)}`,
@@ -147,6 +158,7 @@ async function main(): Promise<void> {
 
     try {
       await runGeneration(options, generation);
+      writePresetRecommendationSummary(options);
       const stability = evaluateStabilityGate(options, enforceStability);
 
       if (!stability.passed) {
@@ -241,7 +253,9 @@ async function runGeneration(options: AutopilotOptions, generation: number): Pro
         ? resolveScriptPath('scripts/hive/train-deep.ts')
         : options.mode === 'deep-eval'
           ? resolveScriptPath('scripts/hive/train-deep-eval.ts')
-          : resolveScriptPath('scripts/hive/train-alphazero.ts');
+          : options.mode === 'alphazero-async-tune'
+            ? resolveScriptPath('scripts/hive/train-alphazero-async.ts')
+            : resolveScriptPath('scripts/hive/train-alphazero.ts');
 
   const maybeMetricsArg = shouldInjectMetricsLog(options.generationArgs, options.mode)
     ? ['--metrics-log', options.metricsLogPath]
@@ -261,6 +275,54 @@ async function runGeneration(options: AutopilotOptions, generation: number): Pro
             String(generation),
             ...options.generationArgs,
           ]
+        : options.mode === 'alphazero-async-tune'
+          ? [
+              '--max-old-space-size=16384',
+              '--import',
+              'tsx',
+              scriptPath,
+              '--duration-minutes',
+              '0',
+              '--train-interval-seconds',
+              '60',
+              '--min-replay-samples',
+              '2400',
+              '--min-new-samples',
+              '1280',
+              '--min-arena-replay-samples',
+              '20000',
+              '--adaptive-budget',
+              '--trainer-preset',
+              'auto',
+              '--champion-selfplay-ratio',
+              '0.32',
+              '--replay-anchor-ratio',
+              '0.24',
+              '--reanalyse-fraction',
+              '0.12',
+              '--arena-stage2-trigger-margin',
+              '0.05',
+              '--arena-stage2-sim-scale',
+              '1.2',
+              '--arena-stage2-game-scale',
+              '1.5',
+              '--rebase-failure-streak',
+              '2',
+              '--batch-size',
+              String(Math.max(256, Math.min(1024, HARDWARE_PROFILE.deepBatchSize))),
+              '--policy-target-temperature',
+              '0.12',
+              '--label-smoothing',
+              '0.02',
+              '--replay-max-samples',
+              '1000000',
+              '--best-checkpoint-score-floor',
+              '0.4',
+              '--continue-on-error',
+              '--tuning-mode',
+              ...maybeMetricsArg,
+              ...options.generationArgs,
+            ]
         : ['--import', 'tsx', scriptPath, ...options.generationArgs];
 
   await runCommand(process.execPath, runArgs, {
@@ -269,7 +331,7 @@ async function runGeneration(options: AutopilotOptions, generation: number): Pro
 }
 
 function shouldInjectMetricsLog(generationArgs: string[], mode: RunMode): boolean {
-  if (mode !== 'alphazero-eval') return false;
+  if (mode !== 'alphazero-eval' && mode !== 'alphazero-async-tune') return false;
   for (let index = 0; index < generationArgs.length; index += 1) {
     const arg = generationArgs[index];
     if (arg === '--metrics-log') {
@@ -650,7 +712,7 @@ function parseOptions(argv: string[]): ParsedArgs {
 }
 
 function parseMode(value: string | undefined): RunMode {
-  if (value === 'linear' || value === 'deep' || value === 'deep-eval' || value === 'alphazero-eval') {
+  if (value === 'linear' || value === 'deep' || value === 'deep-eval' || value === 'alphazero-eval' || value === 'alphazero-async-tune') {
     return value;
   }
   throw new Error(`Invalid --mode value: ${value}`);
@@ -699,7 +761,7 @@ function evaluateStabilityGate(
       checkedRunIds: [],
     };
   }
-  if (options.mode !== 'alphazero-eval') {
+  if (options.mode !== 'alphazero-eval' && options.mode !== 'alphazero-async-tune') {
     return {
       enabled: true,
       passed: true,
@@ -827,6 +889,96 @@ function readPromotionDecisions(metricsLogPath: string): PromotionDecisionEvent[
   return events;
 }
 
+function readPresetExperimentSummaries(metricsLogPath: string): PresetExperimentSummary[] {
+  const absolutePath = path.resolve(process.cwd(), metricsLogPath);
+  if (!existsSync(absolutePath)) return [];
+
+  let raw = '';
+  try {
+    raw = readFileSync(absolutePath, 'utf8');
+  } catch {
+    return [];
+  }
+
+  const aggregates = new Map<string, { runs: number; promotions: number; severeFailures: number; scoreSum: number; ciLowSum: number; scoreCount: number; ciCount: number }>();
+  const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isRecord(parsed)) continue;
+    if (parsed.eventType !== 'async_arena_result') continue;
+    const presetId = typeof parsed.presetId === 'string' ? parsed.presetId : null;
+    if (!presetId) continue;
+    const aggregate = aggregates.get(presetId) ?? {
+      runs: 0,
+      promotions: 0,
+      severeFailures: 0,
+      scoreSum: 0,
+      ciLowSum: 0,
+      scoreCount: 0,
+      ciCount: 0,
+    };
+    aggregate.runs += 1;
+    if (parsed.promoted === true) aggregate.promotions += 1;
+    if (parsed.finalSevereFailure === true) aggregate.severeFailures += 1;
+    const score = asFiniteNumber(parsed.arenaScore);
+    const ciLow = asFiniteNumber(parsed.finalScoreCiLow);
+    if (score !== null) {
+      aggregate.scoreSum += score;
+      aggregate.scoreCount += 1;
+    }
+    if (ciLow !== null) {
+      aggregate.ciLowSum += ciLow;
+      aggregate.ciCount += 1;
+    }
+    aggregates.set(presetId, aggregate);
+  }
+
+  return [...aggregates.entries()].map(([presetId, aggregate]) => {
+    const avgScore = aggregate.scoreCount > 0 ? aggregate.scoreSum / aggregate.scoreCount : null;
+    const avgCiLow = aggregate.ciCount > 0 ? aggregate.ciLowSum / aggregate.ciCount : null;
+    const weightedScore = (aggregate.promotions / Math.max(1, aggregate.runs)) * 0.45
+      + (avgScore ?? 0) * 0.2
+      + (avgCiLow ?? 0) * 0.3
+      - (aggregate.severeFailures / Math.max(1, aggregate.runs)) * 0.55;
+    return {
+      presetId,
+      runs: aggregate.runs,
+      promotions: aggregate.promotions,
+      severeFailures: aggregate.severeFailures,
+      avgScore,
+      avgCiLow,
+      weightedScore,
+    };
+  }).sort((left, right) => right.weightedScore - left.weightedScore);
+}
+
+function writePresetRecommendationSummary(options: AutopilotOptions): void {
+  const summaries = readPresetExperimentSummaries(options.metricsLogPath);
+  const absolutePath = path.resolve(process.cwd(), options.summaryPath);
+  mkdirSync(path.dirname(absolutePath), { recursive: true });
+  const recommendedPreset = summaries[0]?.presetId ?? null;
+  const payload = {
+    ts: new Date().toISOString(),
+    mode: options.mode,
+    metricsLogPath: path.resolve(process.cwd(), options.metricsLogPath),
+    recommendedPreset,
+    summaries,
+  };
+  appendHistoryEvent(options.historyLogPath, {
+    ts: payload.ts,
+    event: 'preset_summary',
+    mode: options.mode,
+    recommendedPreset,
+    summaries,
+  });
+  writeFileSync(absolutePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -863,9 +1015,10 @@ function printUsageAndExit(): never {
   console.log('  After each generation it can: git add/commit, git push, and deploy (vercel).');
   console.log('');
   console.log('Autopilot options:');
-  console.log('  --mode <linear|deep|deep-eval|alphazero-eval>  Generation command mode (default: deep-eval)');
+  console.log('  --mode <linear|deep|deep-eval|alphazero-eval|alphazero-async-tune>  Generation command mode (default: deep-eval)');
   console.log('                                   deep mode applies hive:train:deep preset defaults before your overrides');
   console.log('                                   alphazero-eval mode applies hive:train:az preset defaults with arena gating');
+  console.log('                                   alphazero-async-tune mode runs the async AZ loop with preset-aware tuning and staged arenas');
   console.log('  --generations <n>                Number of generations (0 = infinite, default: 0)');
   console.log('  --pause-seconds <n>              Delay between generations (default: 15)');
   console.log('  --git / --no-git                 Enable/disable git stage+commit (default: enabled)');
@@ -887,6 +1040,7 @@ function printUsageAndExit(): never {
   console.log('  Pass train/eval args after the second -- separator.');
   console.log('  Example: npm run hive:autopilot -- --mode deep-eval -- --games 300 --epochs 60');
   console.log('  Example: npm run hive:autopilot -- --mode alphazero-eval -- --games 260 --epochs 30');
+  console.log('  Example: npm run hive:autopilot -- --mode alphazero-async-tune -- --trainer-preset auto');
   process.exit(0);
 }
 

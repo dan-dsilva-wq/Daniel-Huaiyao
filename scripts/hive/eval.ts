@@ -13,6 +13,7 @@ import { getActiveHiveModel, parseHiveModel, type HiveModel } from '../../lib/hi
 import { getQueenSurroundCount } from '../../lib/hive/winCondition';
 import { getHiveHardwareProfile } from './hardware-profile';
 import type { Move, PlayerColor } from '../../lib/hive/types';
+import { publishHiveMetricsSnapshotSafely } from './sharedMetrics';
 
 interface EvalOptions {
   games: number;
@@ -273,6 +274,8 @@ async function main(): Promise<void> {
     draws: aggregate.draws,
     elapsedSeconds: Number((elapsedMs / 1000).toFixed(3)),
   });
+
+  await publishHiveMetricsSnapshotSafely(options.metricsLogPath);
 }
 
 function runEvalGame(

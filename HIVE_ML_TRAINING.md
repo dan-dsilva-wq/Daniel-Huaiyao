@@ -60,7 +60,45 @@ npm run hive:train:az -- --arena-gate-mode sprt --arena-sprt-alpha 0.05 --arena-
 Async CPU self-play + GPU training pipeline (runs both concurrently):
 
 ```bash
-npm run hive:train:az:async -- --duration-minutes 0 --selfplay-workers 3 --chunk-games 2 --train-interval-seconds 180 --min-replay-samples 1200 --min-new-samples 320 --continue-on-error
+npm run hive:train:az:async -- --duration-minutes 0 --selfplay-workers 4 --chunk-games 4 --train-interval-seconds 180 --min-replay-samples 1200 --min-new-samples 320 --continue-on-error
+```
+
+Async training with local arena workers overridden plus extra arena workers on a laptop over SSH:
+
+```bash
+npm run hive:train:az:async -- --arena-workers 6 --arena-remote-worker "host=daniel@laptop-wsl,repo=/home/daniel/Documents/Projects/daniel-huaiyao,workers=4"
+```
+
+Async training with remote arena workers plus remote self-play chunk workers on a laptop over SSH:
+
+```bash
+npm run hive:train:az:async -- --arena-workers 6 --arena-remote-worker "host=arena-laptop,repo=C:\\Users\\dan-d\\daniel-huaiyao-arena-worker,workers=6" --selfplay-remote-worker "host=arena-laptop,repo=C:\\Users\\dan-d\\daniel-huaiyao-arena-worker,workers=6"
+```
+
+More stable async preset with stronger champion anchoring, lighter reanalysis, and earlier best-checkpoint retention:
+
+```bash
+npm run hive:train:az:async:stable
+```
+
+The stable preset now requests laptop offload by default with `6` remote arena workers and `6` remote self-play workers. Remote self-play uses the full configured slots while idle and throttles down to `2` slots during arena or training overlap so the laptop stays responsive for arena work.
+
+March 19 style async preset matching the strong fixed-budget run recipe that produced the two `80%` arena promotions:
+
+```bash
+npm run hive:train:az:async:march19
+```
+
+Back up the Hive training code to GitHub after changing the trainer:
+
+```bash
+npm run hive:backup:code -- --message "hive: tune march19 recipe"
+```
+
+Include the currently deployed Hive model in that backup too:
+
+```bash
+npm run hive:backup:code -- --with-model --message "hive: tune march19 recipe + model"
 ```
 
 Train then run arena explicitly:
@@ -74,6 +112,63 @@ Manual arena gate only:
 ```bash
 npm run hive:eval:arena -- --candidate-model .hive-cache/az-candidate-model.json --champion-model lib/hive/trained-model.json --games 400 --pass-score 0.55
 npm run hive:eval:arena -- --gate-mode sprt --sprt-alpha 0.05 --sprt-beta 0.05 --sprt-margin 0.05
+npm run hive:eval:arena -- --candidate-model .hive-cache/az-candidate-model.json --champion-model lib/hive/trained-model.json --games 400 --workers 6 --remote-worker "host=daniel@laptop-wsl,repo=/home/daniel/Documents/Projects/daniel-huaiyao,workers=4"
+```
+
+### Remote Arena + Self-Play Workers Over SSH
+
+Arena evaluation and async self-play can offload extra worker processes to a laptop while keeping replay merging, promotion decisions, metrics, and model outputs on the PC.
+
+Prerequisites:
+
+- The PC can `ssh` and `scp` to the laptop with key-based auth.
+- The laptop exposes a POSIX shell target, such as WSL on Windows.
+- The laptop has this repo checked out at the `repo=` path and `npm install` has already been run there.
+- The remote machine has `node` available on `PATH`.
+
+Remote worker spec format:
+
+```text
+host=<ssh-target>,repo=<absolute-remote-repo-root>,workers=<n>
+```
+
+Behavior:
+
+- If `repo=` is a POSIX path like `/home/daniel/...`, the PC launches the worker with `sh -lc ...`.
+- If `repo=` is a Windows path like `C:\Users\dan-d\...` or `C:/Users/dan-d/...`, the PC launches the worker with Windows OpenSSH + PowerShell instead.
+
+During arena startup the PC copies the current candidate and champion model to:
+
+```text
+<repo>/.hive-cache/remote-arena/<run-id>/
+```
+
+During async remote self-play the PC copies the selected learner or champion model to:
+
+```text
+<repo>/.hive-cache/remote-selfplay/<run-id>/
+```
+
+Then it launches `node --import tsx scripts/hive/az-selfplay-worker.ts ...` over SSH on the laptop, copies the generated chunk JSON back to the PC, merges it locally, and cleans up that remote temp directory.
+
+During arena startup the PC copies the current candidate and champion model to:
+
+```text
+<repo>/.hive-cache/remote-arena/<run-id>/
+```
+
+Then it launches `node --import tsx scripts/hive/eval-arena.ts --worker-mode ...` over SSH on the laptop and cleans up that remote temp directory when the arena finishes.
+
+Windows OpenSSH example:
+
+```bash
+npm run hive:eval:arena -- --candidate-model .hive-cache/az-candidate-model.json --champion-model lib/hive/trained-model.json --games 400 --workers 6 --remote-worker "host=arena-laptop,repo=C:\\Users\\dan-d\\daniel-huaiyao-arena-worker,workers=4"
+```
+
+Windows OpenSSH async self-play example:
+
+```bash
+npm run hive:train:az:async -- --selfplay-remote-worker "host=arena-laptop,repo=C:\\Users\\dan-d\\daniel-huaiyao-arena-worker,workers=6"
 ```
 
 Performance + stability checks (latency tiers + memory ceiling + illegal-move regression):

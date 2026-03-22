@@ -205,15 +205,15 @@ export default function StoryBookPage() {
   // User selection
   if (!currentUser) {
     return (
-      <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-amber-100 via-orange-100 to-stone-100 dark:from-stone-950 dark:via-amber-950 dark:to-zinc-950 flex items-center justify-center p-4">
+      <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-100 via-sky-50 to-blue-100 dark:from-slate-950 dark:via-slate-900 dark:to-blue-950 flex items-center justify-center p-4">
         <div className="absolute inset-0 pointer-events-none">
           <motion.div
-            className="absolute -top-20 -left-20 w-64 h-64 bg-amber-300/40 dark:bg-amber-700/20 rounded-full blur-3xl"
+            className="absolute -top-20 -left-20 w-64 h-64 bg-sky-300/35 dark:bg-sky-500/15 rounded-full blur-3xl"
             animate={{ scale: [1, 1.2, 1], x: [0, 18, 0] }}
             transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
           />
           <motion.div
-            className="absolute bottom-0 right-0 w-72 h-72 bg-orange-300/35 dark:bg-orange-700/20 rounded-full blur-3xl"
+            className="absolute bottom-0 right-0 w-72 h-72 bg-blue-300/30 dark:bg-blue-500/12 rounded-full blur-3xl"
             animate={{ scale: [1.1, 1, 1.1], x: [0, -22, 0] }}
             transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut' }}
           />
@@ -222,10 +222,10 @@ export default function StoryBookPage() {
         <motion.div
           initial={{ opacity: 0, y: 14, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          className="relative z-10 w-full max-w-md rounded-3xl border border-amber-200/70 dark:border-amber-800/60 bg-white/85 dark:bg-stone-900/85 backdrop-blur p-6 sm:p-8 shadow-2xl"
+          className="relative z-10 w-full max-w-md rounded-3xl border border-white/60 dark:border-white/10 bg-white/85 dark:bg-slate-950/80 backdrop-blur p-6 sm:p-8 shadow-2xl"
         >
-          <h1 className="text-3xl font-serif text-amber-900 dark:text-amber-200 text-center">Story Book</h1>
-          <p className="mt-2 text-center text-sm text-amber-700/80 dark:text-amber-300/80">
+          <h1 className="text-3xl font-serif text-slate-950 dark:text-sky-100 text-center">Story Book</h1>
+          <p className="mt-2 text-center text-sm text-slate-600 dark:text-slate-300">
             Pick who is writing and continue your shared chapter.
           </p>
 
@@ -257,11 +257,11 @@ export default function StoryBookPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-100 via-orange-100 to-stone-100 dark:from-stone-950 dark:via-amber-950 dark:to-zinc-950 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-100 via-sky-50 to-blue-100 dark:from-slate-950 dark:via-slate-900 dark:to-blue-950 flex items-center justify-center">
         <motion.div
           animate={{ rotate: 360 }}
           transition={{ repeat: Infinity, duration: 1.5, ease: 'linear' }}
-          className="w-12 h-12 border-4 border-amber-200 border-t-amber-600 rounded-full"
+          className="w-12 h-12 border-4 border-sky-200 border-t-sky-600 rounded-full"
         />
       </div>
     );
@@ -287,25 +287,25 @@ export default function StoryBookPage() {
   );
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-amber-100 via-orange-100 to-stone-100 dark:from-stone-950 dark:via-amber-950 dark:to-zinc-950">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-100 via-sky-50 to-blue-100 dark:from-slate-950 dark:via-slate-900 dark:to-blue-950">
       <div className="absolute inset-0 pointer-events-none">
         <motion.div
-          className="absolute top-8 left-8 w-56 h-56 bg-amber-300/35 dark:bg-amber-700/20 rounded-full blur-3xl"
+          className="absolute top-8 left-8 w-56 h-56 bg-sky-300/30 dark:bg-sky-500/15 rounded-full blur-3xl"
           animate={{ scale: [1, 1.1, 1], y: [0, -15, 0] }}
           transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
         />
         <motion.div
-          className="absolute bottom-6 right-8 w-64 h-64 bg-orange-300/35 dark:bg-orange-700/20 rounded-full blur-3xl"
+          className="absolute bottom-6 right-8 w-64 h-64 bg-blue-300/30 dark:bg-blue-500/12 rounded-full blur-3xl"
           animate={{ scale: [1.1, 1, 1.1], y: [0, 18, 0] }}
           transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }}
         />
       </div>
 
       <main className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-16">
-        <header className="rounded-3xl border border-amber-200/70 dark:border-amber-800/60 bg-white/80 dark:bg-stone-900/80 backdrop-blur p-4 sm:p-6 shadow-xl">
+        <header className="rounded-3xl border border-white/60 dark:border-white/10 bg-white/80 dark:bg-slate-950/75 backdrop-blur p-4 sm:p-6 shadow-xl">
           <div className="flex items-center justify-between gap-3">
-            <Link href="/" className="text-sm text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 transition-colors">
-              ← Home
+            <Link href="/" className="text-sm text-sky-700 dark:text-sky-300 hover:text-sky-900 dark:hover:text-sky-100 transition-colors">
+              Back home
             </Link>
             <div className="flex items-center gap-2">
               <span className={`px-3 py-1 rounded-full border text-xs font-medium ${writerTheme.chip}`}>
@@ -316,24 +316,25 @@ export default function StoryBookPage() {
           </div>
 
           <div className="mt-4">
-            <h1 className="text-3xl sm:text-4xl font-serif text-amber-900 dark:text-amber-100">Story Book</h1>
-            <p className="text-sm text-amber-700/80 dark:text-amber-300/80 mt-1">
-              One sentence each turn. Keep the story moving.
+            <p className="text-[11px] uppercase tracking-[0.3em] text-sky-600 dark:text-sky-300">Shared Writing</p>
+            <h1 className="text-3xl sm:text-4xl font-serif text-slate-950 dark:text-sky-100 mt-2">Story Book</h1>
+            <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
+              One sentence each turn. Same story, same product family, better finish.
             </p>
           </div>
 
           <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-4">
-            <div className="rounded-xl bg-amber-100/80 dark:bg-amber-900/35 px-3 py-2 border border-amber-200/70 dark:border-amber-800/60">
-              <div className="text-xs text-amber-700 dark:text-amber-300">Sentences</div>
-              <div className="text-lg font-semibold text-amber-900 dark:text-amber-100">{sentences.length}</div>
+            <div className="rounded-xl bg-sky-50/90 dark:bg-sky-500/10 px-3 py-2 border border-sky-100 dark:border-sky-400/15">
+              <div className="text-xs text-sky-700 dark:text-sky-200">Sentences</div>
+              <div className="text-lg font-semibold text-slate-950 dark:text-white">{sentences.length}</div>
             </div>
-            <div className="rounded-xl bg-amber-100/80 dark:bg-amber-900/35 px-3 py-2 border border-amber-200/70 dark:border-amber-800/60">
-              <div className="text-xs text-amber-700 dark:text-amber-300">Current page</div>
-              <div className="text-lg font-semibold text-amber-900 dark:text-amber-100">{currentPage}</div>
+            <div className="rounded-xl bg-slate-100/80 dark:bg-white/5 px-3 py-2 border border-slate-200/70 dark:border-white/10">
+              <div className="text-xs text-slate-600 dark:text-slate-300">Current page</div>
+              <div className="text-lg font-semibold text-slate-950 dark:text-white">{currentPage}</div>
             </div>
-            <div className="rounded-xl bg-amber-100/80 dark:bg-amber-900/35 px-3 py-2 border border-amber-200/70 dark:border-amber-800/60">
-              <div className="text-xs text-amber-700 dark:text-amber-300">Total pages</div>
-              <div className="text-lg font-semibold text-amber-900 dark:text-amber-100">{totalPages}</div>
+            <div className="rounded-xl bg-slate-100/80 dark:bg-white/5 px-3 py-2 border border-slate-200/70 dark:border-white/10">
+              <div className="text-xs text-slate-600 dark:text-slate-300">Total pages</div>
+              <div className="text-lg font-semibold text-slate-950 dark:text-white">{totalPages}</div>
             </div>
           </div>
         </header>
@@ -341,7 +342,7 @@ export default function StoryBookPage() {
         <motion.section
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className={`mt-6 rounded-2xl border px-4 py-3 sm:px-6 sm:py-4 ${isYourTurn ? writerTheme.turn : 'border-amber-200/80 dark:border-amber-800/70 bg-amber-50/70 dark:bg-amber-900/25 text-amber-800 dark:text-amber-200'}`}
+          className={`mt-6 rounded-2xl border px-4 py-3 sm:px-6 sm:py-4 ${isYourTurn ? writerTheme.turn : 'border-slate-200/80 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] text-slate-700 dark:text-slate-200'}`}
         >
           {isYourTurn ? (
             <div className="flex items-center gap-2 font-medium">
@@ -356,10 +357,10 @@ export default function StoryBookPage() {
         <motion.section
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mt-6 rounded-[28px] bg-gradient-to-b from-amber-900 to-stone-900 p-1.5 shadow-2xl"
+          className="mt-6 rounded-[28px] bg-gradient-to-b from-sky-500 via-blue-700 to-slate-950 p-1.5 shadow-2xl"
         >
-          <div className="rounded-[24px] border border-amber-300/80 bg-[#fff9ec] dark:bg-stone-100 min-h-[420px] p-4 sm:p-7">
-            <div className="flex items-center justify-between mb-4 text-sm text-amber-700">
+          <div className="rounded-[24px] border border-sky-100/80 bg-slate-50 dark:bg-slate-100 min-h-[420px] p-4 sm:p-7">
+            <div className="flex items-center justify-between mb-4 text-sm text-slate-600">
               <span className="font-serif">Page {currentPage}</span>
               <span>{currentPageSentences.length} sentence{currentPageSentences.length === 1 ? '' : 's'} on this page</span>
             </div>
@@ -367,7 +368,7 @@ export default function StoryBookPage() {
             <div className="space-y-3 sm:space-y-4">
               {currentPageSentences.length === 0 ? (
                 <div className="min-h-[280px] flex items-center justify-center text-center px-4">
-                  <p className="font-serif italic text-lg text-amber-700">
+                  <p className="font-serif italic text-lg text-slate-500">
                     {currentPage === 1 ? 'Begin your first sentence...' : 'This page is ready for the next sentence.'}
                   </p>
                 </div>
@@ -412,7 +413,7 @@ export default function StoryBookPage() {
                           exit={{ opacity: 0, height: 0 }}
                           className="mt-2 text-xs text-stone-600"
                         >
-                          {formatWriterName(sentence.writer)} • {formatTimestamp(sentence.created_at)}
+                          {formatWriterName(sentence.writer)} - {formatTimestamp(sentence.created_at)}
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -429,7 +430,7 @@ export default function StoryBookPage() {
             whileTap={{ scale: 0.96 }}
             onClick={() => goToPage(currentPage - 1)}
             disabled={currentPage === 1}
-            className="px-4 py-2 rounded-full border border-amber-300 bg-amber-100 text-amber-800 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-full border border-sky-200 bg-sky-50 text-sky-800 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Prev
           </motion.button>
@@ -440,8 +441,8 @@ export default function StoryBookPage() {
               onClick={() => goToPage(page)}
               className={`w-9 h-9 rounded-full text-sm font-medium transition-colors ${
                 page === currentPage
-                  ? 'bg-amber-700 text-white'
-                  : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                  ? 'bg-sky-700 text-white'
+                  : 'bg-sky-50 text-sky-800 hover:bg-sky-100'
               }`}
             >
               {page}
@@ -453,7 +454,7 @@ export default function StoryBookPage() {
             whileTap={{ scale: 0.96 }}
             onClick={() => goToPage(currentPage + 1)}
             disabled={currentPage === totalPages}
-            className="px-4 py-2 rounded-full border border-amber-300 bg-amber-100 text-amber-800 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-full border border-sky-200 bg-sky-50 text-sky-800 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Next
           </motion.button>
@@ -468,11 +469,11 @@ export default function StoryBookPage() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -12 }}
                 onSubmit={handleSubmit}
-                className="rounded-3xl border border-amber-200/80 dark:border-amber-800/70 bg-white/85 dark:bg-stone-900/85 backdrop-blur p-4 sm:p-6 shadow-lg"
+                className="rounded-3xl border border-white/70 dark:border-white/10 bg-white/85 dark:bg-slate-950/80 backdrop-blur p-4 sm:p-6 shadow-lg"
               >
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="text-lg font-semibold text-amber-900 dark:text-amber-100">Write the next sentence</h2>
-                  <span className="text-xs text-amber-700 dark:text-amber-300">{content.length}/500</span>
+                  <h2 className="text-lg font-semibold text-slate-950 dark:text-sky-100">Write the next sentence</h2>
+                  <span className="text-xs text-slate-500 dark:text-slate-300">{content.length}/500</span>
                 </div>
 
                 <textarea
@@ -485,7 +486,7 @@ export default function StoryBookPage() {
                   placeholder="Continue the story..."
                   disabled={isSubmitting}
                   maxLength={500}
-                  className="w-full min-h-[130px] rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-stone-800/70 p-4 resize-none focus:outline-none focus:ring-2 focus:ring-amber-400 text-stone-900 dark:text-amber-100"
+                  className="w-full min-h-[130px] rounded-2xl border border-sky-100 dark:border-white/10 bg-slate-50 dark:bg-slate-900/70 p-4 resize-none focus:outline-none focus:ring-2 focus:ring-sky-400 text-slate-900 dark:text-slate-100"
                   style={{ fontFamily: 'Georgia, serif', fontSize: '1.05rem' }}
                 />
 
@@ -505,7 +506,7 @@ export default function StoryBookPage() {
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -12 }}
-                className="rounded-3xl border border-amber-200/80 dark:border-amber-800/70 bg-white/80 dark:bg-stone-900/80 text-center p-6 shadow-lg"
+                className="rounded-3xl border border-white/70 dark:border-white/10 bg-white/80 dark:bg-slate-950/75 text-center p-6 shadow-lg"
               >
                 {partnerTyping ? (
                   <>
@@ -516,13 +517,13 @@ export default function StoryBookPage() {
                     >
                       ✍️
                     </motion.div>
-                    <p className="font-medium text-amber-800 dark:text-amber-200">
+                    <p className="font-medium text-sky-900 dark:text-sky-100">
                       {formatWriterName(currentTurn)} is writing right now...
                     </p>
                     <div className="flex justify-center gap-1 mt-3">
-                      <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-2 h-2 bg-amber-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      <span className="w-2 h-2 bg-sky-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-sky-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-sky-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
                   </>
                 ) : (
@@ -534,10 +535,10 @@ export default function StoryBookPage() {
                     >
                       📚
                     </motion.div>
-                    <p className="font-medium text-amber-800 dark:text-amber-200">
+                    <p className="font-medium text-slate-900 dark:text-slate-100">
                       It&apos;s {formatWriterName(currentTurn)}&apos;s turn.
                     </p>
-                    <p className="text-sm text-amber-700/85 dark:text-amber-300/85 mt-1">
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                       You can write again once they add a sentence.
                     </p>
                   </>

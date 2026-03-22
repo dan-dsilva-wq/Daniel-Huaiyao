@@ -97,28 +97,28 @@ export const MORSE_TOWER_CATALOG: MorseTowerCatalogEntry[] = [
   {
     type: 'ballista',
     label: 'Ballista Nest',
-    description: 'Auto-fires down one lane and softens anything you miss.',
-    short: 'Steady lane damage',
+    description: 'A castle-mounted archer platform that steadily softens the front line.',
+    short: 'Steady wall damage',
     cost: 8,
   },
   {
     type: 'lantern',
     label: 'Signal Lantern',
-    description: 'Reveals tricky symbols in one lane and slows enemies under its glow.',
-    short: 'Reveal + slow',
+    description: 'Bathes the road in signal-light, slowing the march and exposing harder codes.',
+    short: 'Reveal + slow aura',
     cost: 10,
   },
   {
     type: 'mint',
     label: 'Quartermaster Crate',
-    description: 'Generates extra resources between volleys so you can scale harder.',
+    description: 'Supplies the battlements with extra resources for longer sieges.',
     short: 'Resource engine',
     cost: 12,
   },
   {
     type: 'catapult',
     label: 'Bossbreaker Catapult',
-    description: 'Heavy shots that target elites and bosses across the walls.',
+    description: 'A heavy castle engine built to crack elites and bosses before they breach the gate.',
     short: 'Elite damage',
     cost: 14,
   },
@@ -128,19 +128,19 @@ export const MORSE_POWER_CATALOG: MorsePowerCatalogEntry[] = [
   {
     type: 'volley',
     label: 'Arrow Volley',
-    description: 'A fast burst that chips every active enemy.',
+    description: 'Loose a rapid storm of arrows across the entire battlefield.',
     cost: 5,
   },
   {
     type: 'freeze',
     label: 'Frost Bell',
-    description: 'Freezes every lane long enough to recover from a bad wave.',
+    description: 'Stops the entire march long enough to recover from a dangerous push.',
     cost: 7,
   },
   {
     type: 'reveal',
     label: 'Reveal Rune',
-    description: 'Temporarily shows clean hints over enemies and bosses.',
+    description: 'Temporarily projects clean Morse hints above every enemy.',
     cost: 6,
   },
 ];
@@ -156,7 +156,7 @@ const LEVEL_DEFS = [
   },
   {
     title: 'Pine Watch',
-    narrative: 'More lanes wake up, and longer patterns begin to mix together.',
+    narrative: 'The road grows busier, and longer patterns begin to mix together.',
     symbolPool: ['E', 'T', 'I', 'M', 'A', 'N', 'S', 'O'],
     bossChars: ['S', 'O'],
     reward: 22,
@@ -172,7 +172,7 @@ const LEVEL_DEFS = [
   },
   {
     title: 'Lantern Pass',
-    narrative: 'Fast movers split across all three lanes and punish slow decoding.',
+    narrative: 'Fast movers surge down the road and punish slow decoding.',
     symbolPool: ['E', 'T', 'I', 'M', 'A', 'N', 'S', 'O', 'R', 'K', 'D', 'G', 'U', 'W', 'H', 'V'],
     bossChars: ['V'],
     reward: 30,
@@ -196,7 +196,7 @@ const LEVEL_DEFS = [
   },
   {
     title: 'Number Forge',
-    narrative: 'The siege code starts mixing letters and numbers across all lanes.',
+    narrative: 'The siege code starts mixing letters and numbers in one relentless march.',
     symbolPool: ['E', 'T', 'I', 'M', 'A', 'N', 'S', 'O', 'R', 'K', 'D', 'G', 'U', 'W', 'H', 'V', 'F', 'L', 'P', 'J', 'B', 'X', 'C', 'Y', 'Z', 'Q', '1', '2', '3', '4'],
     bossChars: ['4', 'Q'],
     reward: 54,
@@ -212,21 +212,22 @@ const LEVEL_DEFS = [
   },
 ];
 
+const GROUND_OFFSETS = [-28, -10, 10, 26];
+
 function buildWave(id: string, levelNumber: number, symbolPool: string[], waveIndex: number, bossChar?: string): MorseWaveConfig {
-  const baseCount = 5 + levelNumber + waveIndex * 2;
+  const baseCount = 4 + levelNumber + waveIndex * 2;
   const enemies: MorseSpawnBlueprint[] = Array.from({ length: baseCount }, (_, enemyIndex) => {
     const targetChar = symbolPool[(enemyIndex * 3 + waveIndex + levelNumber) % symbolPool.length];
-    const lane = (enemyIndex + waveIndex) % 3;
     const armored = levelNumber >= 3 && enemyIndex % 3 === 0;
     const elite = levelNumber >= 5 && enemyIndex % 6 === 4;
     return {
       targetChar,
-      lane,
       kind: elite ? 'elite' as const : armored ? 'armored' as const : 'runner' as const,
-      speed: 4.2 + levelNumber * 0.5 + waveIndex * 0.35,
+      speed: 4 + levelNumber * 0.42 + waveIndex * 0.28,
       health: elite ? 2 : armored ? 2 : 1,
       reward: elite ? 6 : armored ? 4 : 3,
       damage: elite ? 2 : 1,
+      groundOffsetY: GROUND_OFFSETS[(enemyIndex + waveIndex) % GROUND_OFFSETS.length],
       revealed: waveIndex < 1,
     };
   });
@@ -234,12 +235,12 @@ function buildWave(id: string, levelNumber: number, symbolPool: string[], waveIn
   if (bossChar) {
     enemies.push({
       targetChar: bossChar,
-      lane: (levelNumber + waveIndex) % 3,
       kind: 'boss',
-      speed: 2.6 + levelNumber * 0.22,
+      speed: 2.35 + levelNumber * 0.18,
       health: Math.max(2, Math.floor(levelNumber / 2)),
       reward: 20 + levelNumber * 2,
       damage: 3,
+      groundOffsetY: 0,
       revealed: true,
     });
   }

@@ -7,6 +7,7 @@ import {
   createInitialHand,
   type GameState,
   type Move,
+  type Piece,
   type PlacedPiece,
   type PlayerColor,
 } from './types';
@@ -335,6 +336,8 @@ export interface HiveMctsPolicyEntry {
   move: Move;
   visits: number;
   probability: number;
+  rawVisits?: number;
+  rawProbability?: number;
   prior: number;
   qValue: number;
 }
@@ -528,6 +531,7 @@ export function runHiveMctsSearch(
     .sort((left, right) => right.visits - left.visits || right.prior - left.prior);
 
   const totalVisits = Math.max(1, rootPolicies.reduce((sum, entry) => sum + entry.visits, 0));
+  const totalRawVisits = Math.max(1, rootPolicies.reduce((sum, entry) => sum + Math.max(0, entry.rawVisits), 0));
   const temperature = Math.max(0.01, config.temperature);
   const weighted = rootPolicies.map((entry) => {
     const weight = Math.pow(Math.max(1e-6, entry.visits / totalVisits), 1 / temperature);
@@ -539,8 +543,10 @@ export function runHiveMctsSearch(
     actionKey: entry.actionKey,
     move: entry.move,
     visits: entry.visits,
+    rawVisits: entry.rawVisits,
     prior: entry.prior,
     qValue: entry.qValue,
+    rawProbability: entry.rawVisits > 0 ? entry.rawVisits / totalRawVisits : 0,
     probability: weightSum > 0 ? entry.weight / weightSum : 1 / Math.max(1, weighted.length),
   }));
   const policyEntropy = softmaxEntropy(policy.map((entry) => entry.probability));
@@ -1142,12 +1148,9 @@ function terminalValue(state: GameState, perspective: PlayerColor): number {
 }
 
 function hashState(state: GameState): string {
-  const boardSig = [...state.board]
-    .sort((left, right) => left.id.localeCompare(right.id))
-    .map((piece) => `${piece.id}:${piece.position.q},${piece.position.r},${piece.stackOrder}`)
-    .join('|');
-  const whiteHand = [...state.whiteHand].map((piece) => piece.id).sort().join(',');
-  const blackHand = [...state.blackHand].map((piece) => piece.id).sort().join(',');
+  const boardSig = serializeBoardForHash(state.board);
+  const whiteHand = serializeHandForHash(state.whiteHand);
+  const blackHand = serializeHandForHash(state.blackHand);
   return [
     state.currentTurn,
     state.turnNumber,
@@ -1157,6 +1160,41 @@ function hashState(state: GameState): string {
     whiteHand,
     blackHand,
   ].join('#');
+}
+
+function serializeBoardForHash(board: PlacedPiece[]): string {
+  const source = isOrderedById(board)
+    ? board
+    : [...board].sort((left, right) => left.id.localeCompare(right.id));
+  return source
+    .map((piece) => `${piece.id}:${piece.position.q},${piece.position.r},${piece.stackOrder}`)
+    .join('|');
+}
+
+function serializeHandForHash(hand: Piece[]): string {
+  const ids = hand.map((piece) => piece.id);
+  if (!isOrderedStrings(ids)) {
+    ids.sort((left, right) => left.localeCompare(right));
+  }
+  return ids.join(',');
+}
+
+function isOrderedById<T extends { id: string }>(items: T[]): boolean {
+  for (let index = 1; index < items.length; index += 1) {
+    if (items[index - 1].id.localeCompare(items[index].id) > 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isOrderedStrings(items: string[]): boolean {
+  for (let index = 1; index < items.length; index += 1) {
+    if (items[index - 1].localeCompare(items[index]) > 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function flipColor(color: PlayerColor): PlayerColor {

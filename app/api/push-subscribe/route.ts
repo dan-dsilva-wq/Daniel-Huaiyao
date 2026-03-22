@@ -14,6 +14,17 @@ type PushSubscriptionPayload = {
   };
 };
 
+function getFriendlySubscriptionErrorMessage(message: string) {
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes('null value in column "user_id"') &&
+    normalized.includes('push_subscription')
+  ) {
+    return 'Push subscription schema is still on the legacy user_id-based shape. Apply the latest push subscription migration, then try enabling notifications again.';
+  }
+  return message;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { subscription, userName, timezone } = await request.json();
@@ -54,7 +65,10 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error('Error saving subscription:', error);
       return NextResponse.json(
-        { error: 'Failed to save subscription', details: error.message },
+        {
+          error: 'Failed to save subscription',
+          details: getFriendlySubscriptionErrorMessage(error.message),
+        },
         { status: 500 }
       );
     }

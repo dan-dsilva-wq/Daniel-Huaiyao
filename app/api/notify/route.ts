@@ -126,6 +126,16 @@ export async function POST(request: Request) {
       tag: action,
     });
 
+    if (pushResult.reason && (pushResult.skipped || pushResult.failed > 0)) {
+      console.warn('Notification delivery warning:', {
+        action,
+        recipient,
+        reason: pushResult.reason,
+        sent: pushResult.sent,
+        failed: pushResult.failed,
+      });
+    }
+
     if (!pushResult.success) {
       return NextResponse.json(
         { error: 'Failed to send notifications', details: pushResult.reason },

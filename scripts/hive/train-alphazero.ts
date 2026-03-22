@@ -18,6 +18,7 @@ import {
   parseHiveModel,
   type HiveModel,
 } from '../../lib/hive/ml';
+import { publishHiveMetricsSnapshotSafely } from './sharedMetrics';
 import { getQueenSurroundCount } from '../../lib/hive/winCondition';
 import type { GameState, PlayerColor } from '../../lib/hive/types';
 import { getHiveHardwareProfile } from './hardware-profile';
@@ -106,7 +107,7 @@ interface ReanalyseWorkerSample {
 
 interface ReanalyseWorkerPayload {
   samples: ReanalyseWorkerSample[];
-  championModelPath: string;
+  modelPath: string;
   difficulty: HiveComputerDifficulty;
   fastSimulations: number;
   maxTurns: number;
@@ -157,7 +158,7 @@ const DEFAULT_OPTIONS: AlphaZeroOptions = {
   fastSimulations: 72,
   fastRatio: 0.55,
   epochs: 26,
-  batchSize: Math.max(256, Math.min(2048, HARDWARE_PROFILE.deepBatchSize)),
+  batchSize: Math.max(256, Math.min(1024, HARDWARE_PROFILE.deepBatchSize)),
   learningRate: 0.0015,
   weightDecay: 0.0001,
   hidden: '128,64',
@@ -280,6 +281,7 @@ async function main(): Promise<void> {
   });
 
   console.log(`[az:done] elapsed=${formatDuration(elapsedMs)}`);
+  await publishHiveMetricsSnapshotSafely(options.metricsLogPath);
 }
 
 function runSelfPlay(
@@ -342,8 +344,8 @@ function runSelfPlay(
         valueTarget: 0,
         policyTargets: search.policy.map((entry) => ({
           actionKey: entry.actionKey,
-          probability: entry.probability,
-          visitCount: entry.visits,
+          probability: entry.rawProbability ?? entry.probability,
+          visitCount: entry.rawVisits ?? entry.visits,
           actionFeatures: extractHiveActionFeatures(state, entry.move, state.currentTurn),
         })),
         auxTargets: {
@@ -499,8 +501,8 @@ async function reanalyseReplaySamples(options: AlphaZeroOptions, samples: AlphaZ
 
     sample.policyTargets = search.policy.map((entry) => ({
       actionKey: entry.actionKey,
-      probability: entry.probability,
-      visitCount: entry.visits,
+      probability: entry.rawProbability ?? entry.probability,
+      visitCount: entry.rawVisits ?? entry.visits,
       actionFeatures: extractHiveActionFeatures(state, entry.move, state.currentTurn),
     }));
     sample.searchMeta = {
@@ -544,7 +546,7 @@ async function reanalyseReplaySamplesInWorkers(
         index: sampleIndex,
         stateSnapshot: samples[sampleIndex].stateSnapshot,
       })),
-      championModelPath: path.resolve(process.cwd(), options.championModelPath),
+      modelPath: path.resolve(process.cwd(), options.championModelPath),
       difficulty: options.difficulty,
       fastSimulations: options.fastSimulations,
       maxTurns: options.maxTurns,
@@ -602,6 +604,8 @@ async function runPythonTraining(options: AlphaZeroOptions, datasetPath: string)
     datasetPath,
     '--out',
     outPath,
+    '--init-model',
+    path.resolve(process.cwd(), options.championModelPath),
     '--epochs',
     String(options.epochs),
     '--batch-size',
@@ -918,12 +922,41 @@ function runCommand(command: string, args: string[]): Promise<void> {
   });
 }
 
+function getPreferredPythonCommands(): string[] {
+  const localVenvPython = path.resolve(
+    process.cwd(),
+    '.venv-hive',
+    process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
+  );
+  const fallback = process.platform === 'win32'
+    ? ['python', 'py']
+    : ['python3', 'python'];
+  return [localVenvPython, ...fallback];
+}
+
+function isMissingPythonCommandError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /ENOENT|not recognized/i.test(message);
+}
+
 async function runPythonWithFallback(args: string[]): Promise<void> {
-  try {
-    await runCommand('python', args);
-  } catch {
-    await runCommand('py', args);
+  const pythonCommands = getPreferredPythonCommands();
+
+  let lastMissingCommandError: Error | null = null;
+  for (const command of pythonCommands) {
+    try {
+      await runCommand(command, args);
+      return;
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error(String(error));
+      if (!isMissingPythonCommandError(normalized)) {
+        throw normalized;
+      }
+      lastMissingCommandError = normalized;
+    }
   }
+
+  throw lastMissingCommandError ?? new Error('Unable to locate a usable Python interpreter');
 }
 
 function formatDuration(ms: number): string {

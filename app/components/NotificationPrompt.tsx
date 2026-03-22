@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getCurrentUser } from '@/lib/user-session';
+import { getCurrentUser, setCurrentUser as persistCurrentUser } from '@/lib/user-session';
 
 // VAPID public key - must match the one in environment variables
 const VAPID_PUBLIC_KEY = (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '').trim();
@@ -55,6 +55,7 @@ export default function NotificationPrompt() {
   const [showPrompt, setShowPrompt] = useState(false);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [hasBrowserSubscription, setHasBrowserSubscription] = useState(false);
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,15 +90,27 @@ export default function NotificationPrompt() {
       const subscription = await registration.pushManager.getSubscription();
 
       if (subscription) {
-        setIsSubscribed(true);
+        setHasBrowserSubscription(true);
         if (user) {
           try {
             await saveSubscription(subscription, user);
+            setIsSubscribed(true);
+            setShowPrompt(false);
+            setError(null);
           } catch (syncError) {
             console.error('Error syncing existing subscription:', syncError);
+            setIsSubscribed(false);
+            setShowPrompt(true);
+            setError(getSubscribeErrorMessage(syncError));
           }
+        } else {
+          setIsSubscribed(false);
+          setShowPrompt(true);
+          setError('Choose who you are to finish linking notifications on this device');
         }
       } else {
+        setHasBrowserSubscription(false);
+        setIsSubscribed(false);
         // Check if we've already asked (don't spam)
         const hasAsked = localStorage.getItem('notification_prompt_shown');
         const permission = Notification.permission;
@@ -128,6 +141,40 @@ export default function NotificationPrompt() {
     // Check current subscription status
     void checkSubscription(user);
   }, [checkSubscription]);
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      !('serviceWorker' in navigator) ||
+      !('PushManager' in window) ||
+      (currentUser && (!hasBrowserSubscription || isSubscribed))
+    ) {
+      return;
+    }
+
+    const syncUser = () => {
+      const user = normalizeUser(getCurrentUser());
+      if (!user || user === currentUser) return;
+      setCurrentUser(user);
+      void checkSubscription(user);
+    };
+
+    const intervalId = window.setInterval(syncUser, 1500);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncUser();
+      }
+    };
+
+    window.addEventListener('focus', syncUser);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', syncUser);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [checkSubscription, currentUser, hasBrowserSubscription, isSubscribed]);
 
   const subscribe = async () => {
     const selectedUser = normalizeUser(currentUser || getCurrentUser());
@@ -220,11 +267,40 @@ export default function NotificationPrompt() {
               <div className="text-3xl">🔔</div>
               <div className="flex-1">
                 <h3 className="font-semibold text-gray-800 dark:text-white mb-1">
-                  Enable notifications?
+                  {hasBrowserSubscription ? 'Finish notification setup?' : 'Enable notifications?'}
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                  Get notified when {currentUser === 'daniel' ? 'Huaiyao' : currentUser === 'huaiyao' ? 'Daniel' : 'your partner'} adds something new
+                  {hasBrowserSubscription
+                    ? 'This device already has browser push enabled, but it still needs to be linked to the right profile.'
+                    : `Get notified when ${currentUser === 'daniel' ? 'Huaiyao' : currentUser === 'huaiyao' ? 'Daniel' : 'your partner'} adds something new`}
                 </p>
+
+                {!currentUser && (
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <button
+                      onClick={() => {
+                        persistCurrentUser('daniel');
+                        setCurrentUser('daniel');
+                        setError(null);
+                        void checkSubscription('daniel');
+                      }}
+                      className="py-2 px-3 rounded-lg bg-slate-100 dark:bg-gray-700 text-sm font-medium text-gray-700 dark:text-gray-100"
+                    >
+                      I&apos;m Daniel
+                    </button>
+                    <button
+                      onClick={() => {
+                        persistCurrentUser('huaiyao');
+                        setCurrentUser('huaiyao');
+                        setError(null);
+                        void checkSubscription('huaiyao');
+                      }}
+                      className="py-2 px-3 rounded-lg bg-slate-100 dark:bg-gray-700 text-sm font-medium text-gray-700 dark:text-gray-100"
+                    >
+                      I&apos;m Huaiyao
+                    </button>
+                  </div>
+                )}
 
                 {error && (
                   <p className="text-sm text-red-500 mb-3">{error}</p>
@@ -236,7 +312,7 @@ export default function NotificationPrompt() {
                     disabled={isLoading}
                     className="flex-1 py-2 px-4 bg-indigo-500 text-white rounded-lg font-medium hover:bg-indigo-600 disabled:opacity-50 transition-colors"
                   >
-                    {isLoading ? 'Enabling...' : 'Enable'}
+                    {isLoading ? 'Enabling...' : hasBrowserSubscription ? 'Finish setup' : 'Enable'}
                   </button>
                   <button
                     onClick={dismiss}

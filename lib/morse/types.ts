@@ -91,14 +91,14 @@ export interface MorseEnemy {
   id: string;
   targetChar: string;
   code: string;
-  lane: number;
   kind: MorseEnemyKind;
   health: number;
   maxHealth: number;
-  progress: number;
+  pathProgress: number;
   speed: number;
   reward: number;
   damage: number;
+  groundOffsetY: number;
   revealed: boolean;
   comboPrimedBy: MorsePlayer | null;
   comboWindowUntil: number | null;
@@ -107,10 +107,18 @@ export interface MorseEnemy {
 
 export type MorseTowerType = 'ballista' | 'lantern' | 'mint' | 'catapult';
 
+export type MorseTowerMountId =
+  | 'wall-north'
+  | 'wall-center'
+  | 'wall-south'
+  | 'roof-north'
+  | 'roof-center'
+  | 'roof-south';
+
 export interface MorseTower {
   id: string;
   type: MorseTowerType;
-  lane: number;
+  mountId: MorseTowerMountId;
   level: number;
   cooldownUntil: number;
 }
@@ -126,11 +134,11 @@ export interface MorsePower {
 export interface MorseSpawnBlueprint {
   targetChar: string;
   kind: MorseEnemyKind;
-  lane: number;
   speed: number;
   health: number;
   reward: number;
   damage: number;
+  groundOffsetY: number;
   revealed?: boolean;
 }
 
@@ -153,11 +161,21 @@ export interface MorseLevelConfig {
   difficultyLabel: string;
 }
 
+export interface MorsePoint {
+  x: number;
+  y: number;
+}
+
+export type MorseShotKind = 'castle-arrow' | 'tower-arrow' | 'catapult';
+
 export interface MorseShotAnimation {
   id: string;
-  lane: number;
   targetChar: string;
   enemyId: string;
+  kind: MorseShotKind;
+  origin: MorsePoint;
+  target: MorsePoint;
+  durationMs: number;
   createdAt: number;
 }
 
@@ -183,10 +201,10 @@ export interface MorseRunSnapshot {
     revealUntil: number;
   };
   pendingWave: MorseWaveConfig | null;
-  lanePressure: number[];
   partnerJoined: boolean;
   partnerOnline: boolean;
   recentEvents: string[];
+  simulatedAt: number;
 }
 
 export interface MorseRun {

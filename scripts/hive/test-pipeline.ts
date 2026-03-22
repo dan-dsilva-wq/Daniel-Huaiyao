@@ -323,12 +323,35 @@ async function runNodeCommand(args: string[]): Promise<void> {
   }
 }
 
+function getPreferredPythonCommands(): string[] {
+  const localVenvPython = path.resolve(
+    process.cwd(),
+    '.venv-hive',
+    process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
+  );
+  const fallback = process.platform === 'win32'
+    ? ['python', 'py']
+    : ['python3', 'python'];
+  return [localVenvPython, ...fallback];
+}
+
+function isMissingPythonCommandResult(result: CommandResult): boolean {
+  return /ENOENT|not recognized/i.test(result.stderr);
+}
+
 async function runPythonWithFallback(args: string[]): Promise<void> {
-  const py = await runCommand('python', args);
-  if (py.code === 0) return;
-  const pyLauncher = await runCommand('py', args);
-  if (pyLauncher.code === 0) return;
-  throw new Error(`Python command failed.\npython: ${py.stderr}\npy: ${pyLauncher.stderr}`);
+  const missingCommandErrors: string[] = [];
+
+  for (const command of getPreferredPythonCommands()) {
+    const result = await runCommand(command, args);
+    if (result.code === 0) return;
+    if (!isMissingPythonCommandResult(result)) {
+      throw new Error(`Python command failed via ${command}.\n${result.stderr}`);
+    }
+    missingCommandErrors.push(`${command}: ${result.stderr.trim() || 'unavailable'}`);
+  }
+
+  throw new Error(`Unable to locate a usable Python interpreter.\n${missingCommandErrors.join('\n')}`);
 }
 
 function runCommand(command: string, args: string[]): Promise<CommandResult> {
@@ -376,4 +399,3 @@ void main().catch((error: unknown) => {
   console.error(`[test:pipeline] failed: ${message}`);
   process.exit(1);
 });
-

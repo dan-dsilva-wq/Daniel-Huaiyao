@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/countdown-reminder",
-      "schedule": "0 * * * *"
+      "schedule": "0 13 * * *"
     },
     {
       "path": "/api/gratitude-reminder",
@@ -10,11 +10,15 @@
     },
     {
       "path": "/api/book-reminder",
-      "schedule": "0 * * * *"
+      "schedule": "10 13 * * *"
     },
     {
       "path": "/api/prompts-reminder",
-      "schedule": "0 * * * *"
+      "schedule": "20 13 * * *"
+    },
+    {
+      "path": "/api/surprises/assign",
+      "schedule": "0 13 * * *"
     }
   ]
 }

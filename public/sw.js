@@ -1,12 +1,21 @@
 // Service Worker for Daniel & Huaiyao PWA
-const CACHE_NAME = 'dh-cache-v9'; // Force refresh 2026-03-05 iOS splash/icon fixes
+const CACHE_NAME = 'dh-cache-v11'; // Force refresh 2026-03-08 cache strategy update
 const STATIC_ASSETS = [
   '/',
-  '/manifest.json',
+  '/manifest.json?v=20260308',
   '/icons/apple-touch-icon.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
 ];
+
+function isStaticAssetRequest(url) {
+  if (url.origin !== self.location.origin) return false;
+  if (url.pathname === '/manifest.json') return true;
+  if (STATIC_ASSETS.includes(url.pathname) || STATIC_ASSETS.includes(`${url.pathname}${url.search}`)) {
+    return true;
+  }
+  return /\.(?:png|jpg|jpeg|svg|webp|gif|ico|woff2?)$/i.test(url.pathname);
+}
 
 // Install event - cache static assets
 self.addEventListener('install', (event) => {
@@ -32,6 +41,12 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 // Fetch event - network first, falling back to cache
 self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
@@ -39,13 +54,21 @@ self.addEventListener('fetch', (event) => {
 
   // Skip API requests and Supabase calls
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api') || url.hostname.includes('supabase')) {
+  if (
+    event.request.mode === 'navigate' ||
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/_next') ||
+    url.hostname.includes('supabase') ||
+    !isStaticAssetRequest(url)
+  ) {
     return;
   }
 
   event.respondWith(
-    fetch(event.request)
-      .then((response) => {
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) return cachedResponse;
+
+      return fetch(event.request).then((response) => {
         // Only cache http/https requests (skip chrome-extension, etc.)
         if (event.request.url.startsWith('http') && response.ok) {
           const responseClone = response.clone();
@@ -54,11 +77,8 @@ self.addEventListener('fetch', (event) => {
           });
         }
         return response;
-      })
-      .catch(() => {
-        // If network fails, try cache
-        return caches.match(event.request);
-      })
+      });
+    })
   );
 });
 

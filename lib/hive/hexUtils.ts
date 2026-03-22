@@ -102,8 +102,14 @@ export function getPiecesAt(board: PlacedPiece[], coord: HexCoord): PlacedPiece[
 
 // Get the top piece at a coordinate
 export function getTopPieceAt(board: PlacedPiece[], coord: HexCoord): PlacedPiece | null {
-  const pieces = getPiecesAt(board, coord);
-  return pieces.length > 0 ? pieces[pieces.length - 1] : null;
+  let top: PlacedPiece | null = null;
+  for (const piece of board) {
+    if (!coordsEqual(piece.position, coord)) continue;
+    if (!top || piece.stackOrder > top.stackOrder) {
+      top = piece;
+    }
+  }
+  return top;
 }
 
 // Get all occupied coordinates

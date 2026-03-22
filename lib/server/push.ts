@@ -26,6 +26,11 @@ export type StoredPushSubscription = {
   last_used_at?: string | null;
 };
 
+type PushSendFailure = {
+  statusCode?: number;
+  message: string;
+};
+
 export function normalizeKnownUser(value: unknown): KnownUser | null {
   if (typeof value !== 'string') return null;
   const normalized = value.toLowerCase().trim();
@@ -176,8 +181,28 @@ async function sendPushToSubscription(subscription: StoredPushSubscription, payl
     if (statusCode && INVALID_SUBSCRIPTION_CODES.has(statusCode)) {
       await deletePushSubscription(subscription.endpoint);
     }
-    return { ok: false as const, error };
+    return {
+      ok: false as const,
+      error: {
+        statusCode,
+        message: error instanceof Error ? error.message : 'Unknown push delivery error',
+      } satisfies PushSendFailure,
+    };
   }
+}
+
+async function countUnlinkedSubscriptions() {
+  const supabase = getSupabaseAdmin();
+  const { count, error } = await supabase
+    .from('push_subscriptions')
+    .select('endpoint', { count: 'exact', head: true })
+    .is('user_name', null);
+
+  if (error) {
+    return { count: 0, error };
+  }
+
+  return { count: count ?? 0, error: null };
 }
 
 export async function sendPushToUsers(users: KnownUser[], payload: PushPayload) {
@@ -204,9 +229,14 @@ export async function sendPushToUsers(users: KnownUser[], payload: PushPayload) 
   }
 
   if (!subscriptions || subscriptions.length === 0) {
+    const { count: unlinkedCount } = await countUnlinkedSubscriptions();
+    const reason =
+      unlinkedCount > 0
+        ? `No subscriptions found for recipients; found ${unlinkedCount} unlinked legacy subscription(s)`
+        : 'No subscriptions found for recipients';
     return {
       success: true,
-      reason: 'No subscriptions found for recipients',
+      reason,
       sent: 0,
       failed: 0,
       skipped: true,
@@ -220,12 +250,38 @@ export async function sendPushToUsers(users: KnownUser[], payload: PushPayload) 
     (result) => result.status === 'fulfilled' && result.value.ok
   ).length;
   const failed = results.length - sent;
+  const failureReasons = results
+    .flatMap((result) => {
+      if (result.status === 'rejected') {
+        return [result.reason instanceof Error ? result.reason.message : 'Unknown push delivery error'];
+      }
+      if (!result.value.ok) {
+        return [
+          result.value.error.statusCode
+            ? `${result.value.error.statusCode}: ${result.value.error.message}`
+            : result.value.error.message,
+        ];
+      }
+      return [];
+    })
+    .filter(Boolean);
+
+  if (sent === 0 && failed > 0) {
+    return {
+      success: false,
+      reason: failureReasons[0] ?? 'Push delivery failed for all subscriptions',
+      sent,
+      failed,
+      skipped: false,
+    };
+  }
 
   return {
     success: true,
     sent,
     failed,
     skipped: false,
+    reason: failureReasons[0],
   };
 }
 

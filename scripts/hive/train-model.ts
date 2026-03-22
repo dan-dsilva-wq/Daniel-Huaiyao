@@ -14,6 +14,7 @@ import {
   type TrainingSample,
 } from './training-core';
 import { getHiveHardwareProfile } from './hardware-profile';
+import { publishHiveMetricsSnapshotSafely } from './sharedMetrics';
 
 interface TrainOptions {
   games: number;
@@ -112,6 +113,7 @@ async function main(): Promise<void> {
       blackWins: selfPlay.blackWins,
       draws: selfPlay.draws,
     });
+    await publishHiveMetricsSnapshotSafely();
     return;
   }
 
@@ -155,6 +157,7 @@ async function main(): Promise<void> {
   });
 
   logStage('done', 'Restart `npm run dev` (or rebuild) so the app picks up the new model.');
+  await publishHiveMetricsSnapshotSafely();
 }
 
 function runSelfPlay(

@@ -6,6 +6,13 @@ import {
   MORSE_TOWER_CATALOG,
 } from './content';
 import { createEmptyTeamProgress, makeTransmissionId } from './core';
+import {
+  CASTLE_MOUNT_ORDER,
+  getCastleArrowAnchor,
+  getPathPoint,
+  getPathSlowMultiplier,
+  getTowerAnchor,
+} from './scene';
 import type {
   MorseEnemy,
   MorseEnemyKind,
@@ -14,8 +21,10 @@ import type {
   MorsePower,
   MorsePowerType,
   MorseRunSnapshot,
+  MorseSpawnBlueprint,
   MorseTeamProgress,
   MorseTower,
+  MorseTowerMountId,
   MorseTowerType,
   MorseWaveConfig,
 } from './types';
@@ -23,31 +32,40 @@ import type {
 const MAX_PROGRESS = 100;
 const SHOP_PHASE_BONUS = 5;
 
-function pickLaneWithFewestTowers(towers: MorseTower[]): number {
-  const counts = [0, 0, 0];
-  for (const tower of towers) {
-    counts[tower.lane] += 1;
-  }
-  return counts.indexOf(Math.min(...counts));
+function withSimulationTime(snapshot: MorseRunSnapshot, simulatedAt = Date.now()): MorseRunSnapshot {
+  return {
+    ...snapshot,
+    simulatedAt,
+  };
+}
+
+function getUnlockedMountIds(teamProgress: MorseTeamProgress): MorseTowerMountId[] {
+  const towerLimit = Math.min(CASTLE_MOUNT_ORDER.length, teamProgress.permanentUpgrades.towerSlots + 1);
+  return CASTLE_MOUNT_ORDER.slice(0, towerLimit);
 }
 
 function enemyCode(targetChar: string): string {
   return MORSE_ALPHABET[targetChar] ?? '.';
 }
 
-function createEnemy(blueprint: MorseWaveConfig['enemies'][number], index: number): MorseEnemy {
+function createEnemy(
+  blueprint: MorseSpawnBlueprint,
+  index: number,
+  wave: MorseWaveConfig,
+): MorseEnemy {
+  const spacingProgress = ((index * wave.spawnIntervalMs) / 1000) * Math.max(2.4, blueprint.speed * 0.9);
   return {
     id: `${blueprint.kind}-${index}-${blueprint.targetChar}-${Math.random().toString(36).slice(2, 6)}`,
     targetChar: blueprint.targetChar,
     code: enemyCode(blueprint.targetChar),
-    lane: blueprint.lane,
     kind: blueprint.kind,
     health: blueprint.health,
     maxHealth: blueprint.health,
-    progress: 0,
+    pathProgress: -spacingProgress,
     speed: blueprint.speed,
     reward: blueprint.reward,
     damage: blueprint.damage,
+    groundOffsetY: blueprint.groundOffsetY,
     revealed: blueprint.revealed ?? false,
     comboPrimedBy: null,
     comboWindowUntil: null,
@@ -55,7 +73,12 @@ function createEnemy(blueprint: MorseWaveConfig['enemies'][number], index: numbe
   };
 }
 
-function baseSnapshot(mode: 'campaign' | 'endless', levelNumber: number, teamProgress: MorseTeamProgress, partnerJoined: boolean): MorseRunSnapshot {
+function baseSnapshot(
+  mode: 'campaign' | 'endless',
+  levelNumber: number,
+  teamProgress: MorseTeamProgress,
+  partnerJoined: boolean,
+): MorseRunSnapshot {
   const maxCastleHealth = 10 + teamProgress.permanentUpgrades.startingHealth;
   return {
     id: null,
@@ -73,9 +96,9 @@ function baseSnapshot(mode: 'campaign' | 'endless', levelNumber: number, teamPro
     enemies: [],
     towers: [
       {
-        id: 'ballista-center',
+        id: 'ballista-wall-center',
         type: 'ballista',
-        lane: 1,
+        mountId: 'wall-center',
         level: 1,
         cooldownUntil: 0,
       },
@@ -91,10 +114,10 @@ function baseSnapshot(mode: 'campaign' | 'endless', levelNumber: number, teamPro
       revealUntil: 0,
     },
     pendingWave: null,
-    lanePressure: [0, 0, 0],
     partnerJoined,
     partnerOnline: partnerJoined,
-    recentEvents: ['The beacon is lit.'],
+    recentEvents: ['The keep steadies for the first march.'],
+    simulatedAt: Date.now(),
   };
 }
 
@@ -102,33 +125,38 @@ function getCampaignLevel(levelNumber: number): MorseLevelConfig {
   return MORSE_CAMPAIGN_LEVELS[Math.max(0, Math.min(MORSE_CAMPAIGN_LEVELS.length - 1, levelNumber - 1))];
 }
 
+function endlessGroundOffset(index: number, waveNumber: number): number {
+  const offsets = [-28, -14, 4, 18, 30];
+  return offsets[(index + waveNumber) % offsets.length];
+}
+
 function buildEndlessWave(levelNumber: number, waveNumber: number): MorseWaveConfig {
-  const count = 6 + waveNumber * 2;
-  const enemies = Array.from({ length: count }, (_, index) => {
+  const count = 4 + waveNumber * 2;
+  const enemies: MorseSpawnBlueprint[] = Array.from({ length: count }, (_, index) => {
     const targetChar = ENDLESS_SYMBOL_POOL[(index * 5 + waveNumber * 3 + levelNumber) % ENDLESS_SYMBOL_POOL.length];
     const kind: MorseEnemyKind =
       waveNumber % 7 === 0 && index === count - 1
         ? 'boss'
-        : waveNumber > 2 && index % 5 === 0
+        : waveNumber > 4 && index % 5 === 0
           ? 'elite'
-          : waveNumber > 1 && index % 3 === 0
+          : waveNumber > 2 && index % 3 === 0
             ? 'armored'
             : 'runner';
     return {
       targetChar,
-      lane: (index + waveNumber) % 3,
       kind,
-      speed: 4.5 + waveNumber * 0.45,
+      speed: 3.8 + waveNumber * 0.28,
       health: kind === 'boss' ? Math.max(3, Math.floor(waveNumber / 2)) : kind === 'elite' ? 2 : kind === 'armored' ? 2 : 1,
-      reward: kind === 'boss' ? 25 + waveNumber : kind === 'elite' ? 7 : kind === 'armored' ? 4 : 3,
+      reward: kind === 'boss' ? 24 + waveNumber : kind === 'elite' ? 7 : kind === 'armored' ? 4 : 3,
       damage: kind === 'boss' ? 3 : kind === 'elite' ? 2 : 1,
+      groundOffsetY: endlessGroundOffset(index, waveNumber),
       revealed: waveNumber < 2,
     };
   });
 
   return {
     id: `endless-${levelNumber}-${waveNumber}`,
-    spawnIntervalMs: Math.max(600, 1250 - waveNumber * 22),
+    spawnIntervalMs: Math.max(600, 1180 - waveNumber * 20),
     enemies,
   };
 }
@@ -145,66 +173,76 @@ export function createInitialRunSnapshot(
     ? getCampaignLevel(levelNumber).waves[0]
     : buildEndlessWave(levelNumber, 1);
   if (!startImmediately) {
-    return {
+    return withSimulationTime({
       ...snapshot,
       phase: 'waiting',
-      recentEvents: ['Waiting for the second signaler to join.'],
-    };
+      recentEvents: ['Waiting for the second signaler to take the wall.'],
+    });
   }
   return startNextWave(snapshot, teamProgress);
 }
 
 export function startNextWave(snapshot: MorseRunSnapshot, teamProgress: MorseTeamProgress): MorseRunSnapshot {
   if (!snapshot.pendingWave) {
-    return {
+    return withSimulationTime({
       ...snapshot,
       phase: 'victory',
       metaReward: snapshot.metaReward + 5,
-      recentEvents: ['The walls hold for another night.', ...snapshot.recentEvents].slice(0, 6),
-    };
+      recentEvents: ['The last attackers break against the wall.', ...snapshot.recentEvents].slice(0, 6),
+    });
   }
 
   const now = Date.now();
   const wave = snapshot.pendingWave;
-  return {
+  const allowedMounts = new Set(getUnlockedMountIds(teamProgress));
+  return withSimulationTime({
     ...snapshot,
-    towers: snapshot.towers.slice(0, teamProgress.permanentUpgrades.towerSlots + 1),
-    enemies: wave.enemies.map((enemy, index) => createEnemy(enemy, index)),
+    towers: snapshot.towers.filter((tower) => allowedMounts.has(tower.mountId)),
+    enemies: wave.enemies.map((enemy, index) => createEnemy(enemy, index, wave)),
     pendingWave: null,
     phase: 'playing',
     shots: [],
     currentComboPrompt: null,
-    activeEffects: {
-      ...snapshot.activeEffects,
-      freezeUntil: Math.max(snapshot.activeEffects.freezeUntil, now),
-    },
-    recentEvents: [`Wave ${snapshot.waveNumber} is advancing.`, ...snapshot.recentEvents].slice(0, 6),
-  };
+    recentEvents: [`Wave ${snapshot.waveNumber} marches for the gate.`, ...snapshot.recentEvents].slice(0, 6),
+  }, now);
 }
 
-function slowMultiplierForLane(snapshot: MorseRunSnapshot, lane: number): number {
-  const lanterns = snapshot.towers.filter((tower) => tower.type === 'lantern' && tower.lane === lane).length;
-  if (snapshot.activeEffects.freezeUntil > Date.now()) return 0;
-  return lanterns > 0 ? Math.max(0.55, 1 - lanterns * 0.18) : 1;
-}
-
-function addShot(snapshot: MorseRunSnapshot, enemy: MorseEnemy): MorseRunSnapshot {
-  return {
+function addShot(
+  snapshot: MorseRunSnapshot,
+  enemy: MorseEnemy,
+  source: { type: 'castle' } | { type: 'tower'; tower: MorseTower } = { type: 'castle' },
+): MorseRunSnapshot {
+  const kind: MorseRunSnapshot['shots'][number]['kind'] =
+    source.type === 'tower' && source.tower.type === 'catapult'
+      ? 'catapult'
+      : source.type === 'tower'
+        ? 'tower-arrow'
+        : 'castle-arrow';
+  const origin = source.type === 'tower' ? getTowerAnchor(source.tower) : getCastleArrowAnchor();
+  const target = getPathPoint(enemy.pathProgress, enemy.groundOffsetY);
+  return withSimulationTime({
     ...snapshot,
     shots: [
       ...snapshot.shots,
       {
         id: makeTransmissionId('shot'),
-        lane: enemy.lane,
         targetChar: enemy.targetChar,
         enemyId: enemy.id,
+        kind,
+        origin,
+        target,
+        durationMs: kind === 'catapult' ? 620 : 390,
         createdAt: Date.now(),
       },
-    ].slice(-10),
-  };
+    ].slice(-14),
+  });
 }
 
-function destroyEnemy(snapshot: MorseRunSnapshot, enemyId: string): MorseRunSnapshot {
+function destroyEnemy(
+  snapshot: MorseRunSnapshot,
+  enemyId: string,
+  source: { type: 'castle' } | { type: 'tower'; tower: MorseTower } = { type: 'castle' },
+): MorseRunSnapshot {
   const enemy = snapshot.enemies.find((entry) => entry.id === enemyId);
   if (!enemy) return snapshot;
   const withoutEnemy = snapshot.enemies.filter((entry) => entry.id !== enemyId);
@@ -216,11 +254,12 @@ function destroyEnemy(snapshot: MorseRunSnapshot, enemyId: string): MorseRunSnap
       score: snapshot.score + enemy.reward * (enemy.kind === 'boss' ? 7 : enemy.kind === 'elite' ? 4 : 3),
     },
     enemy,
+    source,
   );
-  return {
+  return withSimulationTime({
     ...withShot,
-    recentEvents: [`${enemy.targetChar} falls in lane ${enemy.lane + 1}.`, ...withShot.recentEvents].slice(0, 6),
-  };
+    recentEvents: [`${enemy.targetChar} falls before the gate.`, ...withShot.recentEvents].slice(0, 6),
+  });
 }
 
 function touchCombo(enemy: MorseEnemy, by: MorsePlayer, allowSolo: boolean): { enemy: MorseEnemy; damage: number; prompt: string | null } {
@@ -271,6 +310,12 @@ function touchCombo(enemy: MorseEnemy, by: MorsePlayer, allowSolo: boolean): { e
   };
 }
 
+function frontmostVisibleEnemy(enemies: MorseEnemy[]): MorseEnemy | undefined {
+  return enemies
+    .filter((enemy) => enemy.pathProgress > 0)
+    .sort((left, right) => right.pathProgress - left.pathProgress)[0];
+}
+
 export function applyDefenseTransmission(
   snapshot: MorseRunSnapshot,
   decodedChar: string,
@@ -280,16 +325,16 @@ export function applyDefenseTransmission(
   if (!normalized || snapshot.phase !== 'playing') return snapshot;
 
   const candidates = snapshot.enemies
-    .filter((enemy) => enemy.targetChar === normalized)
-    .sort((left, right) => right.progress - left.progress);
+    .filter((enemy) => enemy.targetChar === normalized && enemy.pathProgress > 0)
+    .sort((left, right) => right.pathProgress - left.pathProgress);
 
   if (candidates.length === 0) {
-    return {
+    return withSimulationTime({
       ...snapshot,
       signalsUsed: snapshot.signalsUsed + 1,
       currentComboPrompt: null,
-      recentEvents: [`${normalized} had no target.`, ...snapshot.recentEvents].slice(0, 6),
-    };
+      recentEvents: [`${normalized} had no visible target.`, ...snapshot.recentEvents].slice(0, 6),
+    });
   }
 
   const target = candidates[0];
@@ -303,10 +348,10 @@ export function applyDefenseTransmission(
   };
 
   if (comboResult.damage === 0) {
-    return {
+    return withSimulationTime({
       ...next,
       recentEvents: [comboResult.prompt ?? `${normalized} primed.`, ...next.recentEvents].slice(0, 6),
-    };
+    });
   }
 
   const updatedTarget = updatedEnemies.find((enemy) => enemy.id === target.id);
@@ -316,10 +361,10 @@ export function applyDefenseTransmission(
     return destroyEnemy(next, updatedTarget.id);
   }
 
-  return {
+  return withSimulationTime({
     ...next,
-    recentEvents: [`${normalized} hit for ${comboResult.damage}.`, ...next.recentEvents].slice(0, 6),
-  };
+    recentEvents: [`${normalized} lands cleanly.`, ...next.recentEvents].slice(0, 6),
+  });
 }
 
 function towerCooldown(type: MorseTowerType): number {
@@ -327,11 +372,11 @@ function towerCooldown(type: MorseTowerType): number {
     case 'ballista':
       return 1800;
     case 'lantern':
-      return 2200;
+      return 2600;
     case 'mint':
       return 6000;
     case 'catapult':
-      return 3200;
+      return 3400;
   }
 }
 
@@ -343,7 +388,7 @@ function applyTowerFire(snapshot: MorseRunSnapshot, tower: MorseTower, now: numb
   const nextTowers = [...snapshot.towers];
   nextTowers[towerIndex] = {
     ...tower,
-    cooldownUntil: now + towerCooldown(tower.type) - tower.level * 120,
+    cooldownUntil: now + towerCooldown(tower.type) - tower.level * 110,
   };
 
   let next: MorseRunSnapshot = {
@@ -352,28 +397,27 @@ function applyTowerFire(snapshot: MorseRunSnapshot, tower: MorseTower, now: numb
   };
 
   if (tower.type === 'mint') {
-    return {
+    return withSimulationTime({
       ...next,
       resources: next.resources + 2 + tower.level,
-      recentEvents: ['Quartermaster adds supplies.', ...next.recentEvents].slice(0, 6),
-    };
+      recentEvents: ['Quartermasters rush fresh supplies to the wall.', ...next.recentEvents].slice(0, 6),
+    });
   }
 
   if (tower.type === 'lantern') {
-    return {
+    return withSimulationTime({
       ...next,
       enemies: next.enemies.map((enemy) =>
-        enemy.lane === tower.lane ? { ...enemy, revealed: true } : enemy
+        enemy.pathProgress > 0 ? { ...enemy, revealed: true } : enemy
       ),
-      recentEvents: [`Lane ${tower.lane + 1} is lit by lantern fire.`, ...next.recentEvents].slice(0, 6),
-    };
+      recentEvents: ['Signal lanterns wash the road in light.', ...next.recentEvents].slice(0, 6),
+    });
   }
 
+  const candidates = next.enemies.filter((enemy) => enemy.pathProgress > 6);
   const target = tower.type === 'catapult'
-    ? next.enemies.find((enemy) => enemy.kind === 'boss' || enemy.kind === 'elite') ?? next.enemies[0]
-    : next.enemies
-        .filter((enemy) => enemy.lane === tower.lane)
-        .sort((left, right) => right.progress - left.progress)[0];
+    ? candidates.find((enemy) => enemy.kind === 'boss' || enemy.kind === 'elite') ?? frontmostVisibleEnemy(candidates)
+    : frontmostVisibleEnemy(candidates);
 
   if (!target) return next;
 
@@ -388,33 +432,25 @@ function applyTowerFire(snapshot: MorseRunSnapshot, tower: MorseTower, now: numb
   const damagedTarget = next.enemies.find((enemy) => enemy.id === target.id);
   if (!damagedTarget) return next;
   if (damagedTarget.health <= 0) {
-    return destroyEnemy(next, damagedTarget.id);
+    return destroyEnemy(next, damagedTarget.id, { type: 'tower', tower });
   }
 
-  return next;
-}
-
-function refreshLanePressure(snapshot: MorseRunSnapshot): number[] {
-  return [0, 1, 2].map((lane) =>
-    snapshot.enemies
-      .filter((enemy) => enemy.lane === lane)
-      .reduce((sum, enemy) => sum + enemy.progress / MAX_PROGRESS + enemy.health * 0.6, 0)
-  );
+  return withSimulationTime(next);
 }
 
 export function stepRunSnapshot(snapshot: MorseRunSnapshot, dtMs: number): MorseRunSnapshot {
   if (snapshot.phase !== 'playing') {
-    return {
+    return withSimulationTime({
       ...snapshot,
-      shots: snapshot.shots.filter((shot) => Date.now() - shot.createdAt < 450),
-      lanePressure: refreshLanePressure(snapshot),
-    };
+      shots: snapshot.shots.filter((shot) => Date.now() - shot.createdAt < shot.durationMs + 140),
+    });
   }
 
   const now = Date.now();
   let next: MorseRunSnapshot = {
     ...snapshot,
-    shots: snapshot.shots.filter((shot) => now - shot.createdAt < 450),
+    shots: snapshot.shots.filter((shot) => now - shot.createdAt < shot.durationMs + 140),
+    simulatedAt: now,
   };
 
   for (const tower of next.towers) {
@@ -423,16 +459,17 @@ export function stepRunSnapshot(snapshot: MorseRunSnapshot, dtMs: number): Morse
 
   const movedEnemies: MorseEnemy[] = [];
   let castleHealth = next.castleHealth;
+  const pathSlowMultiplier = getPathSlowMultiplier(next, now);
+
   for (const enemy of next.enemies) {
-    const multiplier = slowMultiplierForLane(next, enemy.lane);
-    const progress = enemy.progress + (enemy.speed * multiplier * dtMs) / 1000;
+    const progress = enemy.pathProgress + (enemy.speed * pathSlowMultiplier * dtMs) / 1000;
     if (progress >= MAX_PROGRESS) {
       castleHealth -= enemy.damage;
       continue;
     }
     movedEnemies.push({
       ...enemy,
-      progress,
+      pathProgress: progress,
       revealed: enemy.revealed || next.activeEffects.revealUntil > now,
       comboWindowUntil:
         enemy.comboWindowUntil && enemy.comboWindowUntil < now ? null : enemy.comboWindowUntil,
@@ -445,16 +482,15 @@ export function stepRunSnapshot(snapshot: MorseRunSnapshot, dtMs: number): Morse
     ...next,
     castleHealth,
     enemies: movedEnemies,
-    lanePressure: refreshLanePressure({ ...next, enemies: movedEnemies }),
   };
 
   if (castleHealth <= 0) {
-    return {
+    return withSimulationTime({
       ...next,
       castleHealth: 0,
       phase: 'defeat',
-      recentEvents: ['The keep has fallen.', ...next.recentEvents].slice(0, 6),
-    };
+      recentEvents: ['The gate shatters and the keep falls.', ...next.recentEvents].slice(0, 6),
+    }, now);
   }
 
   if (movedEnemies.length === 0) {
@@ -464,64 +500,70 @@ export function stepRunSnapshot(snapshot: MorseRunSnapshot, dtMs: number): Morse
       const level = getCampaignLevel(next.levelNumber);
       const pendingWave = level.waves[next.waveNumber] ?? null;
       if (!pendingWave) {
-        return {
+        return withSimulationTime({
           ...next,
           phase: 'victory',
           metaReward: next.metaReward + level.reward,
-          recentEvents: [`${level.title} cleared.`, ...next.recentEvents].slice(0, 6),
-        };
+          recentEvents: [`${level.title} holds against the siege.`, ...next.recentEvents].slice(0, 6),
+        }, now);
       }
-      return {
+      return withSimulationTime({
         ...next,
         phase: 'shop',
         resources: next.resources + SHOP_PHASE_BONUS,
         waveNumber: nextWaveNumber,
         pendingWave,
-        recentEvents: [`Wave ${next.waveNumber} cleared. Refit the walls.`, ...next.recentEvents].slice(0, 6),
-      };
+        recentEvents: [`Wave ${next.waveNumber} is broken. Refit the wall.`, ...next.recentEvents].slice(0, 6),
+      }, now);
     }
 
-    return {
+    return withSimulationTime({
       ...next,
       phase: 'shop',
       resources: next.resources + SHOP_PHASE_BONUS + Math.floor(nextWaveNumber / 2),
       waveNumber: nextWaveNumber,
       pendingWave: buildEndlessWave(next.levelNumber, nextWaveNumber),
-      recentEvents: [`Endless wave ${next.waveNumber} cleared.`, ...next.recentEvents].slice(0, 6),
+      recentEvents: [`Endless wave ${next.waveNumber} is repelled.`, ...next.recentEvents].slice(0, 6),
       metaReward: next.metaReward + Math.max(3, Math.floor(nextWaveNumber / 2)),
       powers: next.powers.map((power) => ({
         ...power,
         charges: Math.min(power.charges + (power.type === 'volley' ? 1 : 0), teamProgress.permanentUpgrades.powerCapacity + 1),
       })),
-    };
+    }, now);
   }
 
-  return next;
+  return withSimulationTime(next, now);
 }
 
-export function buyTower(snapshot: MorseRunSnapshot, type: MorseTowerType, teamProgress: MorseTeamProgress): MorseRunSnapshot {
+export function buyTower(
+  snapshot: MorseRunSnapshot,
+  type: MorseTowerType,
+  mountId: MorseTowerMountId,
+  teamProgress: MorseTeamProgress,
+): MorseRunSnapshot {
   const towerDef = MORSE_TOWER_CATALOG.find((tower) => tower.type === type);
   if (!towerDef) return snapshot;
   if (snapshot.resources < towerDef.cost) return snapshot;
-  const towerLimit = teamProgress.permanentUpgrades.towerSlots + 1;
-  if (snapshot.towers.length >= towerLimit) return snapshot;
+  const unlockedMounts = getUnlockedMountIds(teamProgress);
+  if (!unlockedMounts.includes(mountId)) return snapshot;
+  if (snapshot.towers.some((tower) => tower.mountId === mountId)) return snapshot;
+  if (snapshot.towers.length >= unlockedMounts.length) return snapshot;
 
-  const lane = pickLaneWithFewestTowers(snapshot.towers);
-  return {
+  return withSimulationTime({
     ...snapshot,
     resources: snapshot.resources - towerDef.cost,
     towers: [
       ...snapshot.towers,
       {
-        id: `${type}-${lane}-${snapshot.towers.length}`,
+        id: `${type}-${mountId}`,
         type,
-        lane,
+        mountId,
         level: 1,
         cooldownUntil: 0,
       },
     ],
-    recentEvents: [`${towerDef.label} added to lane ${lane + 1}.`, ...snapshot.recentEvents].slice(0, 6),
-  };
+    recentEvents: [`${towerDef.label} is mounted on the wall.`, ...snapshot.recentEvents].slice(0, 6),
+  });
 }
 
 export function upgradeTower(snapshot: MorseRunSnapshot, towerId: string): MorseRunSnapshot {
@@ -529,21 +571,21 @@ export function upgradeTower(snapshot: MorseRunSnapshot, towerId: string): Morse
   if (!tower) return snapshot;
   const cost = 4 + tower.level * 3;
   if (snapshot.resources < cost) return snapshot;
-  return {
+  return withSimulationTime({
     ...snapshot,
     resources: snapshot.resources - cost,
     towers: snapshot.towers.map((entry) =>
       entry.id === towerId ? { ...entry, level: entry.level + 1 } : entry
     ),
-    recentEvents: [`${tower.type} upgraded to tier ${tower.level + 1}.`, ...snapshot.recentEvents].slice(0, 6),
-  };
+    recentEvents: [`${tower.type} rises to tier ${tower.level + 1}.`, ...snapshot.recentEvents].slice(0, 6),
+  });
 }
 
 export function buyPowerCharge(snapshot: MorseRunSnapshot, type: MorsePowerType, teamProgress: MorseTeamProgress): MorseRunSnapshot {
   const powerDef = MORSE_POWER_CATALOG.find((power) => power.type === type);
   if (!powerDef) return snapshot;
   if (snapshot.resources < powerDef.cost) return snapshot;
-  return {
+  return withSimulationTime({
     ...snapshot,
     resources: snapshot.resources - powerDef.cost,
     powers: snapshot.powers.map((power) =>
@@ -551,8 +593,8 @@ export function buyPowerCharge(snapshot: MorseRunSnapshot, type: MorsePowerType,
         ? { ...power, charges: Math.min(power.charges + 1, teamProgress.permanentUpgrades.powerCapacity + 2) }
         : power
     ),
-    recentEvents: [`${powerDef.label} readied.`, ...snapshot.recentEvents].slice(0, 6),
-  };
+    recentEvents: [`${powerDef.label} is readied on the wall.`, ...snapshot.recentEvents].slice(0, 6),
+  });
 }
 
 export function activatePower(snapshot: MorseRunSnapshot, type: MorsePowerType): MorseRunSnapshot {
@@ -568,27 +610,27 @@ export function activatePower(snapshot: MorseRunSnapshot, type: MorsePowerType):
 
   switch (type) {
     case 'volley':
-      return {
+      return withSimulationTime({
         ...snapshot,
         powers: nextPowers,
         enemies: snapshot.enemies
           .map((enemy) => ({ ...enemy, health: enemy.health - 1, revealed: true }))
           .filter((enemy) => enemy.health > 0),
         score: snapshot.score + snapshot.enemies.length * 2,
-        recentEvents: ['Arrow volley unleashed.', ...snapshot.recentEvents].slice(0, 6),
-      };
+        recentEvents: ['A storm-volley sweeps the road.', ...snapshot.recentEvents].slice(0, 6),
+      });
     case 'freeze':
-      return {
+      return withSimulationTime({
         ...snapshot,
         powers: nextPowers,
         activeEffects: {
           ...snapshot.activeEffects,
           freezeUntil: now + 4000,
         },
-        recentEvents: ['A frost bell freezes the lanes.', ...snapshot.recentEvents].slice(0, 6),
-      };
+        recentEvents: ['The frost bell halts the march.', ...snapshot.recentEvents].slice(0, 6),
+      });
     case 'reveal':
-      return {
+      return withSimulationTime({
         ...snapshot,
         powers: nextPowers,
         activeEffects: {
@@ -596,8 +638,8 @@ export function activatePower(snapshot: MorseRunSnapshot, type: MorsePowerType):
           revealUntil: now + 9000,
         },
         enemies: snapshot.enemies.map((enemy) => ({ ...enemy, revealed: true })),
-        recentEvents: ['Reveal runes expose every signal.', ...snapshot.recentEvents].slice(0, 6),
-      };
+        recentEvents: ['Reveal runes flare over the battlefield.', ...snapshot.recentEvents].slice(0, 6),
+      });
   }
 }
 

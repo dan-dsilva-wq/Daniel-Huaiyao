@@ -1,27 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import { Crimson_Pro, Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { ServiceWorkerRegister } from "./components/ServiceWorkerRegister";
 import { OfflineIndicator } from "./components/OfflineIndicator";
 import NotificationPrompt from "./components/NotificationPrompt";
-import ChatBubble from "./components/ChatBubble";
 import { UserBootstrap } from "./components/UserBootstrap";
-
-const inter = Inter({
-  variable: "--font-sans",
-  subsets: ["latin"],
-});
-
-const crimsonPro = Crimson_Pro({
-  variable: "--font-serif",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Daniel & Huaiyao",
   description: "Some fun stuff we made",
-  manifest: "/manifest.json",
+  manifest: "/manifest.json?v=20260308",
   icons: {
     icon: [
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
@@ -41,7 +29,6 @@ export const viewport: Viewport = {
   themeColor: "#8b5cf6",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
 };
 
 // Inline script to prevent flash of wrong theme
@@ -69,7 +56,7 @@ export default function RootLayout({
         <link rel="apple-touch-startup-image" href="/icons/apple-touch-icon.png" />
       </head>
       <body
-        className={`${inter.variable} ${crimsonPro.variable} font-sans antialiased`}
+        className="font-sans antialiased"
       >
         <ThemeProvider>
           <UserBootstrap />
@@ -77,7 +64,6 @@ export default function RootLayout({
           {children}
           <ServiceWorkerRegister />
           <NotificationPrompt />
-          <ChatBubble />
         </ThemeProvider>
       </body>
     </html>

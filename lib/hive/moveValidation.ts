@@ -1,5 +1,5 @@
 // Move Validation - Orchestrates all movement rules
-import { HexCoord, PlacedPiece, GameState, PlayerColor, Move } from './types';
+import { HexCoord, PlacedPiece, GameState, Move } from './types';
 import { coordKey } from './hexUtils';
 import {
   getQueenMoves,
@@ -180,7 +180,7 @@ export function executeMove(gameState: GameState, move: Move): GameState {
       position: move.to,
       stackOrder: 0,
     };
-    newState.board = [...newState.board, placedPiece];
+    newState.board = insertBoardPieceById(newState.board, placedPiece);
 
     // Track queen placement
     if (piece.type === 'queen') {
@@ -237,6 +237,21 @@ export function executeMove(gameState: GameState, move: Move): GameState {
   newState.turnStartedAt = new Date().toISOString();
 
   return newState;
+}
+
+function insertBoardPieceById(board: PlacedPiece[], piece: PlacedPiece): PlacedPiece[] {
+  if (board.length === 0) return [piece];
+
+  const next = [...board];
+  let insertAt = next.length;
+  for (let index = 0; index < next.length; index += 1) {
+    if (next[index].id.localeCompare(piece.id) > 0) {
+      insertAt = index;
+      break;
+    }
+  }
+  next.splice(insertAt, 0, piece);
+  return next;
 }
 
 // Get all valid actions for the current player

@@ -145,6 +145,14 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     mode: 'together',
   },
   {
+    title: 'Scheduler',
+    description: 'Find dates everyone can actually do',
+    icon: '🗓️',
+    href: '/scheduler',
+    gradient: 'from-rose-600 to-amber-500',
+    mode: 'together',
+  },
+  {
     title: 'Our Map',
     description: 'Places we want to go and have been',
     icon: '🗺️',
@@ -216,6 +224,14 @@ const apps: Omit<AppCardProps, 'visitCount' | 'onVisit'>[] = [
     icon: '💝',
     href: '/gratitude',
     gradient: 'from-rose-400 to-pink-500',
+    mode: 'apart',
+  },
+  {
+    title: 'Surprise Generator',
+    description: 'A private monthly surprise for each of you',
+    icon: '🎁',
+    href: '/surprises',
+    gradient: 'from-blue-500 to-cyan-500',
     mode: 'apart',
   },
   {
@@ -639,3 +655,4 @@ export default function Home() {
     </div>
   );
 }
+

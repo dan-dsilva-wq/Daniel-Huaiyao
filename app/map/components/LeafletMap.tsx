@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -29,10 +29,15 @@ export default function LeafletMap({
 }: LeafletMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
+
+    const syncSize = (map: L.Map) => {
+      window.requestAnimationFrame(() => {
+        map.invalidateSize(false);
+      });
+    };
 
     // Initialize the map
     const map = L.map(mapRef.current, {
@@ -40,6 +45,10 @@ export default function LeafletMap({
       zoom: zoom,
       zoomControl: true,
       attributionControl: true,
+      scrollWheelZoom: false,
+      zoomAnimation: false,
+      fadeAnimation: false,
+      markerZoomAnimation: false,
     });
 
     // Add OpenStreetMap tiles
@@ -80,10 +89,25 @@ export default function LeafletMap({
     });
 
     mapInstanceRef.current = map;
-    setIsLoaded(true);
+
+    const resizeTimers = [
+      window.setTimeout(() => syncSize(map), 0),
+      window.setTimeout(() => syncSize(map), 250),
+      window.setTimeout(() => syncSize(map), 750),
+    ];
+    const handleResize = () => syncSize(map);
+    const visualViewport = window.visualViewport;
+    map.whenReady(() => syncSize(map));
+    window.addEventListener('resize', handleResize);
+    visualViewport?.addEventListener('resize', handleResize);
+    visualViewport?.addEventListener('scroll', handleResize);
 
     // Cleanup
     return () => {
+      resizeTimers.forEach((timer) => window.clearTimeout(timer));
+      window.removeEventListener('resize', handleResize);
+      visualViewport?.removeEventListener('resize', handleResize);
+      visualViewport?.removeEventListener('scroll', handleResize);
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -93,17 +117,20 @@ export default function LeafletMap({
 
   // Update view when center/zoom changes
   useEffect(() => {
-    if (mapInstanceRef.current && isLoaded) {
+    if (mapInstanceRef.current) {
       mapInstanceRef.current.setView(center, zoom);
+      window.requestAnimationFrame(() => {
+        mapInstanceRef.current?.invalidateSize(false);
+      });
     }
-  }, [center, zoom, isLoaded]);
+  }, [center, zoom]);
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex min-h-full items-start justify-center overflow-y-auto bg-black/80 p-0 sm:p-4 sm:items-center"
       onClick={onClose}
     >
       <motion.div
@@ -111,16 +138,20 @@ export default function LeafletMap({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-5xl h-[80vh] bg-white dark:bg-gray-900 rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+        className="flex min-h-[100dvh] w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl dark:bg-gray-900 sm:my-4 sm:h-[80vh] sm:min-h-0 sm:max-h-[48rem] sm:rounded-2xl"
+        style={{
+          paddingTop: 'env(safe-area-inset-top, 0px)',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex flex-col gap-3 border-b border-gray-200 p-3 dark:border-gray-700 sm:p-4 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
             Detailed Map View
           </h2>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
             <span className="text-sm text-gray-500 dark:text-gray-400">
-              Scroll to zoom, drag to pan
+              Use +/-, pinch, or double-click to zoom
             </span>
             <button
               onClick={onClose}
@@ -134,17 +165,17 @@ export default function LeafletMap({
         </div>
 
         {/* Map Container */}
-        <div ref={mapRef} className="flex-1 w-full" />
+        <div ref={mapRef} className="min-h-0 flex-1 w-full" />
 
         {/* Legend */}
-        <div className="p-3 border-t border-gray-200 dark:border-gray-700 flex items-center gap-4 text-sm">
+        <div className="flex flex-wrap items-center gap-3 border-t border-gray-200 p-3 text-sm dark:border-gray-700">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 rounded-full bg-purple-500 border-2 border-white shadow"></div>
             <span className="text-gray-600 dark:text-gray-400">Memories</span>
           </div>
           <span className="text-gray-400 dark:text-gray-500">|</span>
           <span className="text-gray-500 dark:text-gray-400">
-            Zoom: Mouse wheel or pinch • Pan: Click and drag
+            Zoom: +/- buttons, double-click, or pinch • Pan: Click and drag
           </span>
         </div>
       </motion.div>
