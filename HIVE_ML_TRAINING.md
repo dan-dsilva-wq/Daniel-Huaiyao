@@ -89,6 +89,18 @@ March 19 style async preset matching the strong fixed-budget run recipe that pro
 npm run hive:train:az:async:march19
 ```
 
+Multi-candidate tournament experiment: freeze one replay snapshot, train many seed-only variants from it, run a knockout bracket, then send the top finishers into the normal champion arena:
+
+```bash
+npm run hive:train:az:tournament -- --candidate-count 16 --epochs 4 --arena-games 200 --arena-gate-mode sprt
+```
+
+Dry-run smoke test without overwriting the live champion:
+
+```bash
+npm run hive:train:az:tournament -- --candidate-count 8 --epochs 1 --replay-path .hive-cache/smoke-selfplay-origin.json --arena-games 20 --dry-run
+```
+
 Back up the Hive training code to GitHub after changing the trainer:
 
 ```bash
@@ -99,6 +111,12 @@ Include the currently deployed Hive model in that backup too:
 
 ```bash
 npm run hive:backup:code -- --with-model --message "hive: tune march19 recipe + model"
+```
+
+Create a local timestamped checkpoint of the current Hive training code, model artifacts, replay buffer, metrics log, and git diff before experimenting:
+
+```bash
+npm run hive:checkpoint -- --label "before-new-approach"
 ```
 
 Train then run arena explicitly:

@@ -40,6 +40,7 @@ type ArenaGateMode = 'fixed' | 'sprt';
 type AdaptiveBudgetPhase = 'bootstrap' | 'growth' | 'development' | 'refinement' | 'validation' | 'fixed';
 type SelfPlaySampleOrigin = 'learner' | 'champion';
 type LearnerRecoveryAction = 'none' | 'restore_best' | 'rebase_champion';
+type SearchBackend = 'cpu' | 'gpu-batched';
 
 interface AsyncOptions {
   durationMinutes: number;
@@ -106,8 +107,11 @@ interface AsyncOptions {
   continueOnError: boolean;
   adaptiveBudget: boolean;
   persistentTrainer: boolean;
+  searchBackend: SearchBackend;
+  gpuGamesInFlight: number;
   gpuWorkers: boolean;
   gpuBatchSize: number;
+  gpuBatchDelayMs: number;
   metricsLogPath: string;
   chunkDir: string;
   tmpDir: string;
@@ -399,6 +403,7 @@ const HARDWARE_PROFILE = getHiveHardwareProfile();
 const REANALYSE_WORKER_TIMEOUT_MIN_MS = 5 * 60 * 1000;
 const REANALYSE_WORKER_TIMEOUT_PER_SAMPLE_MS = 2500;
 const REANALYSE_WORKER_TIMEOUT_MAX_MS = 20 * 60 * 1000;
+const REANALYSE_MAX_SAMPLES_PER_WORKER = 1200;
 const PERSISTENT_TRAINER_INIT_TIMEOUT_MS = 3 * 60 * 1000;
 const PERSISTENT_TRAINER_REPLAY_REPLACE_TIMEOUT_MIN_MS = 2 * 60 * 1000;
 const PERSISTENT_TRAINER_REPLAY_REPLACE_TIMEOUT_MAX_MS = 12 * 60 * 1000;
@@ -435,12 +440,12 @@ const DEFAULT_OPTIONS: AsyncOptions = {
   trainerPreset: 'auto',
   tuningMode: false,
   epochs: 8,
-  batchSize: Math.max(256, Math.min(1024, HARDWARE_PROFILE.deepBatchSize)),
+  batchSize: Math.max(1024, HARDWARE_PROFILE.deepBatchSize),
   learningRate: 0.0015,
   weightDecay: 0.0001,
   policyTargetTemperature: 0.12,
   labelSmoothing: 0.02,
-  hidden: '128,64',
+  hidden: '256,128',
   learnerModelPath: '.hive-cache/az-learner-model.json',
   candidateOutPath: '.hive-cache/az-candidate-model.json',
   bestLearnerModelPath: '.hive-cache/az-best-learner-model.json',
@@ -477,8 +482,11 @@ const DEFAULT_OPTIONS: AsyncOptions = {
   continueOnError: true,
   adaptiveBudget: true,
   persistentTrainer: true,
-  gpuWorkers: false,
-  gpuBatchSize: 64,
+  searchBackend: 'gpu-batched',
+  gpuGamesInFlight: HARDWARE_PROFILE.gpuSelfPlayGamesInFlight,
+  gpuWorkers: true,
+  gpuBatchSize: HARDWARE_PROFILE.gpuInferenceMaxBatchSize,
+  gpuBatchDelayMs: HARDWARE_PROFILE.gpuInferenceBatchDelayMs,
   metricsLogPath: '.hive-cache/metrics/training-metrics.jsonl',
   chunkDir: '.hive-cache/async/chunks',
   tmpDir: '.hive-cache/async/tmp',
@@ -490,6 +498,7 @@ const DEFAULT_ARENA_SIMULATIONS_BY_DIFFICULTY: Record<HiveComputerDifficulty, nu
   hard: 140,
   extreme: 260,
 };
+const ARENA_SEARCH_BACKEND: SearchBackend = 'cpu';
 
 const ADAPTIVE_BUDGET_PROFILES: BudgetProfile[] = [
   {
@@ -983,6 +992,10 @@ async function main(): Promise<void> {
     'setup',
     `workers=${options.selfplayWorkers} chunk_games=${options.chunkGames} adaptive=${options.adaptiveBudget ? 'on' : 'off'} persistent_trainer=${options.persistentTrainer ? 'on' : 'off'} caps=${options.simulations}/${options.fastSimulations}/${currentBudget.arenaSimulationCap} arena_games=${options.arenaGames} champion_mix<=${Math.round(currentBudget.championSelfplayRatio * 100)}% replay_anchor<=${Math.round(currentBudget.replayAnchorRatio * 100)}% train_interval=${options.trainIntervalSeconds}s min_replay=${options.minReplaySamples} min_new=${currentBudget.trainerMinNewSamples} preset=${currentBudget.presetId}`,
   );
+  log(
+    'setup',
+    `search_backend=${options.searchBackend} gpu_games_in_flight=${options.gpuGamesInFlight} gpu_batch_size=${options.gpuBatchSize} gpu_batch_delay_ms=${options.gpuBatchDelayMs}`,
+  );
   log('setup', `arena replay floor=${options.minArenaReplaySamples}`);
   log(
     'setup',
@@ -1371,7 +1384,8 @@ function spawnLocalSelfPlayWorker(
   activeWorkers: Map<number, ActiveWorker>,
   logger: MetricsLogger,
 ): ActiveWorker {
-  const scriptPath = options.gpuWorkers
+  const useGpuBatched = options.searchBackend === 'gpu-batched';
+  const scriptPath = useGpuBatched
     ? path.resolve(process.cwd(), 'scripts/hive/az-selfplay-worker-gpu.ts')
     : path.resolve(process.cwd(), 'scripts/hive/az-selfplay-worker.ts');
   const args = [
@@ -1402,15 +1416,17 @@ function spawnLocalSelfPlayWorker(
     outPath,
   ];
   // Add GPU-specific args
-  if (options.gpuWorkers) {
+  if (useGpuBatched) {
     args.push('--batch-size', String(options.gpuBatchSize));
+    args.push('--games-in-flight', String(options.gpuGamesInFlight));
+    args.push('--batch-delay-ms', String(options.gpuBatchDelayMs));
   }
   const child = spawn(process.execPath, args, {
     cwd: process.cwd(),
-    stdio: options.gpuWorkers ? ['ignore', 'pipe', 'pipe'] : 'ignore',
+    stdio: useGpuBatched ? ['ignore', 'pipe', 'pipe'] : 'ignore',
     shell: false,
   });
-  if (options.gpuWorkers) {
+  if (useGpuBatched) {
     captureSelfPlayWorkerStderr(child, workerId, options, 'local');
   }
 
@@ -1726,6 +1742,9 @@ function resolveSelfPlayWorkerCap(
     trainingRunning: boolean;
   },
 ): number {
+  if (options.searchBackend === 'gpu-batched') {
+    return 1;
+  }
   if (state.arenaRunning || state.trainingRunning) {
     return Math.max(1, Math.floor(options.selfplayWorkers * 0.25));
   }
@@ -2306,6 +2325,8 @@ async function runArenaMatch(input: {
     options.difficulty,
     '--engine',
     'alphazero',
+    '--search-backend',
+    ARENA_SEARCH_BACKEND,
     '--max-turns',
     String(options.maxTurns),
     '--no-capture-draw',
@@ -2732,9 +2753,11 @@ async function reanalyseSnapshot(
   if (!existsSync(modelPath)) return 0;
   if (snapshot.samples.length === 0) return 0;
 
+  const maxSelectedSamples = Math.max(1, options.reanalyseWorkers * REANALYSE_MAX_SAMPLES_PER_WORKER);
   const count = Math.min(
     snapshot.samples.length,
     Math.floor(snapshot.samples.length * options.reanalyseFraction),
+    maxSelectedSamples,
   );
   if (count <= 0) return 0;
 
@@ -2766,7 +2789,17 @@ async function reanalyseSnapshot(
       step: context?.step ?? null,
       trainerMode: context?.trainerMode ?? null,
       replaySamples: snapshot.samples.length,
+      requestedSamples: Math.min(
+        snapshot.samples.length,
+        Math.floor(snapshot.samples.length * options.reanalyseFraction),
+      ),
       selectedSamples: selected.length,
+      cappedSamples: selected.length < Math.min(
+        snapshot.samples.length,
+        Math.floor(snapshot.samples.length * options.reanalyseFraction),
+      )
+        ? maxSelectedSamples
+        : null,
       workers,
     });
 
@@ -4152,9 +4185,24 @@ function parseOptions(argv: string[]): AsyncOptions {
       case '--fixed-budget': options.adaptiveBudget = false; break;
       case '--persistent-trainer': options.persistentTrainer = true; break;
       case '--no-persistent-trainer': options.persistentTrainer = false; break;
-      case '--gpu-workers': options.gpuWorkers = true; break;
-      case '--no-gpu-workers': options.gpuWorkers = false; break;
+      case '--search-backend':
+        options.searchBackend = parseSearchBackend(next);
+        index += 1;
+        break;
+      case '--gpu-games-in-flight':
+        options.gpuGamesInFlight = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--gpu-workers':
+        options.searchBackend = 'gpu-batched';
+        options.gpuWorkers = true;
+        break;
+      case '--no-gpu-workers':
+        options.searchBackend = 'cpu';
+        options.gpuWorkers = false;
+        break;
       case '--gpu-batch-size': options.gpuBatchSize = parsePositiveInt(next, arg); index += 1; break;
+      case '--gpu-batch-delay-ms': options.gpuBatchDelayMs = parsePositiveInt(next, arg); index += 1; break;
       case '--verbose':
       case '-v':
         options.verbose = true;
@@ -4170,6 +4218,8 @@ function parseOptions(argv: string[]): AsyncOptions {
   options.selfplayWorkers = Math.max(1, options.selfplayWorkers);
   options.reanalyseWorkers = Math.max(1, options.reanalyseWorkers);
   options.arenaWorkers = Math.max(1, options.arenaWorkers);
+  options.gpuGamesInFlight = Math.max(1, options.gpuGamesInFlight);
+  options.gpuWorkers = options.searchBackend === 'gpu-batched';
   options.arenaRemoteWorkers = aggregateRemoteWorkerSpecs(options.arenaRemoteWorkers);
   options.selfplayRemoteWorkers = aggregateRemoteWorkerSpecs(options.selfplayRemoteWorkers);
   options.minArenaReplaySamples = Math.max(options.minReplaySamples, options.minArenaReplaySamples);
@@ -4195,6 +4245,11 @@ function parseDifficulty(value: string | undefined): HiveComputerDifficulty {
 function parseGateMode(value: string | undefined): ArenaGateMode {
   if (value === 'fixed' || value === 'sprt') return value;
   throw new Error(`Invalid --arena-gate-mode value: ${value}`);
+}
+
+function parseSearchBackend(value: string | undefined): SearchBackend {
+  if (value === 'cpu' || value === 'gpu-batched') return value;
+  throw new Error(`Invalid --search-backend value: ${value}`);
 }
 
 function parsePositiveInt(value: string | undefined, flag: string): number {
@@ -4272,8 +4327,11 @@ function printUsageAndExit(): never {
   console.log('  --rebase-failure-streak <n>    Severe failures before learner reset (default: 1)');
   console.log('  --best-checkpoint-score-floor <0..1> --best-checkpoint-regression-tolerance <0..1>');
   console.log('  --persistent-trainer --no-persistent-trainer');
+  console.log('  --search-backend <cpu|gpu-batched>  Self-play backend (default: gpu-batched)');
+  console.log('  --gpu-games-in-flight <n>          Concurrent GPU self-play games inside one local worker');
   console.log('  --gpu-workers --no-gpu-workers  Use GPU-accelerated self-play workers');
-  console.log('  --gpu-batch-size <n>            Batch size for GPU inference (default: 64)');
+  console.log('  --gpu-batch-size <n>            Shared GPU inference max batch size (default: auto)');
+  console.log('  --gpu-batch-delay-ms <n>        Shared GPU inference batch delay (default: auto)');
   console.log('  --deploy-on-promotion --no-deploy-on-promotion');
   console.log('  --deploy-after-arena --no-deploy-after-arena --deploy-command <cmd>');
   console.log('  --notify-arena --no-notify-arena');

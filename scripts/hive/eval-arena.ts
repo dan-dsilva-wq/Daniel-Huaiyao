@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import type { HiveComputerDifficulty, HiveSearchEngine, HiveSearchStats } from '../../lib/hive/ai';
 import {
   applyHiveMove,
@@ -16,6 +17,8 @@ import { parseHiveModel, type HiveModel } from '../../lib/hive/ml';
 import { getQueenSurroundCount } from '../../lib/hive/winCondition';
 import type { Move, PlayerColor } from '../../lib/hive/types';
 import { getHiveHardwareProfile } from './hardware-profile';
+import { GpuInferenceClient } from './gpu-inference-client';
+import { runGpuMctsSearch } from './gpu-mcts';
 import {
   aggregateRemoteWorkerSpecs,
   allocateRemoteWorkerSpecs,
@@ -31,7 +34,10 @@ import {
 } from './remote-worker';
 import { publishHiveMetricsSnapshotSafely } from './sharedMetrics';
 
+const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url));
+
 type ArenaGateMode = 'fixed' | 'sprt';
+type SearchBackend = 'cpu' | 'gpu-batched' | 'python-batched';
 
 interface ArenaOptions {
   candidateModelPath: string;
@@ -53,6 +59,10 @@ interface ArenaOptions {
   openingRandomPlies: number;
   seed: number;
   engine: HiveSearchEngine;
+  searchBackend: SearchBackend;
+  gpuGamesInFlight: number;
+  gpuBatchSize: number;
+  gpuBatchDelayMs: number;
   workers: number;
   remoteWorkers: RemoteWorkerSpec[];
   metricsLogPath: string;
@@ -160,6 +170,10 @@ const DEFAULT_OPTIONS: ArenaOptions = {
   openingRandomPlies: 4,
   seed: 2026,
   engine: 'alphazero',
+  searchBackend: 'cpu',
+  gpuGamesInFlight: getHiveHardwareProfile().gpuArenaGamesInFlight,
+  gpuBatchSize: getHiveHardwareProfile().gpuInferenceMaxBatchSize,
+  gpuBatchDelayMs: getHiveHardwareProfile().gpuInferenceBatchDelayMs,
   workers: getHiveHardwareProfile().evalWorkers,
   remoteWorkers: [],
   metricsLogPath: '.hive-cache/metrics/training-metrics.jsonl',
@@ -188,14 +202,24 @@ async function main(): Promise<void> {
   );
   const configuredRemoteSlots = countRemoteWorkerSlots(options.remoteWorkers);
   const effectiveRemoteSlots = countRemoteWorkerSlots(allocatedRemoteWorkers);
-  const effectiveWorkerCount = effectiveLocalWorkers + effectiveRemoteSlots;
+  if (options.searchBackend === 'python-batched' && effectiveRemoteSlots > 0) {
+    throw new Error('python-batched backend does not support remote workers yet');
+  }
+  const effectiveWorkerCount = (options.searchBackend === 'gpu-batched' || options.searchBackend === 'python-batched') && effectiveRemoteSlots === 0
+    ? Math.max(1, Math.min(options.gpuGamesInFlight, options.games))
+    : effectiveLocalWorkers + effectiveRemoteSlots;
 
   console.log(
-    `[arena:setup] games=${options.games} min_games_before_stop=${options.minGamesBeforeStop} pass_score=${(options.passScore * 100).toFixed(1)}% gate=${options.gateMode} difficulty=${options.difficulty} engine=${options.engine} seed=${options.seed} sims=${options.simulations ?? 'default'} workers=${effectiveWorkerCount}`,
+    `[arena:setup] games=${options.games} min_games_before_stop=${options.minGamesBeforeStop} pass_score=${(options.passScore * 100).toFixed(1)}% gate=${options.gateMode} difficulty=${options.difficulty} engine=${options.engine} search_backend=${options.searchBackend} seed=${options.seed} sims=${options.simulations ?? 'default'} workers=${effectiveWorkerCount}`,
   );
   console.log(
     `[arena:setup] local_workers=${effectiveLocalWorkers} remote_slots=${effectiveRemoteSlots}/${configuredRemoteSlots} remote_hosts=${formatRemoteWorkerSummary(allocatedRemoteWorkers)}`,
   );
+  if (options.searchBackend === 'gpu-batched' || options.searchBackend === 'python-batched') {
+    console.log(
+      `[arena:setup] gpu_games_in_flight=${options.gpuGamesInFlight} gpu_batch_size=${options.gpuBatchSize} gpu_batch_delay_ms=${options.gpuBatchDelayMs}`,
+    );
+  }
   if (options.manualStopFile) {
     console.log(`[arena:setup] manual_stop_file=${path.resolve(process.cwd(), options.manualStopFile)}`);
   }
@@ -222,6 +246,10 @@ async function main(): Promise<void> {
       difficulty: options.difficulty,
       simulations: options.simulations,
       engine: options.engine,
+      searchBackend: options.searchBackend,
+      gpuGamesInFlight: options.gpuGamesInFlight,
+      gpuBatchSize: options.gpuBatchSize,
+      gpuBatchDelayMs: options.gpuBatchDelayMs,
       seed: options.seed,
       maxTurns: options.maxTurns,
       noCaptureDrawMoves: options.noCaptureDrawMoves,
@@ -243,7 +271,21 @@ async function main(): Promise<void> {
   let gate: GateEvaluation;
   let manualStopRequested = false;
 
-  if (effectiveWorkerCount <= 1) {
+  if (options.searchBackend === 'gpu-batched' && effectiveRemoteSlots === 0) {
+    ({ aggregate, completedGames, gate, manualStopRequested } = await runArenaGpuBatched(
+      options,
+      candidate.absolutePath,
+      champion.absolutePath,
+      startedAt,
+    ));
+  } else if (options.searchBackend === 'python-batched' && effectiveRemoteSlots === 0) {
+    ({ aggregate, completedGames, gate, manualStopRequested } = await runArenaPythonBatched(
+      options,
+      candidate.absolutePath,
+      champion.absolutePath,
+      startedAt,
+    ));
+  } else if (effectiveWorkerCount <= 1) {
     ({ aggregate, completedGames, gate, manualStopRequested } = runArenaSequential(options, candidate.model, champion.model, startedAt));
   } else {
     ({ aggregate, completedGames, gate, manualStopRequested } = await runArenaParallel(
@@ -440,6 +482,289 @@ function runArenaSequential(
       break;
     }
   }
+  return { aggregate, completedGames, gate, manualStopRequested };
+}
+
+async function runArenaGpuBatched(
+  options: ArenaOptions,
+  candidateModelPath: string,
+  championModelPath: string,
+  startedAt: number,
+): Promise<{ aggregate: ArenaAggregate; completedGames: number; gate: GateEvaluation; manualStopRequested: boolean }> {
+  const aggregate: ArenaAggregate = {
+    candidateWins: 0,
+    championWins: 0,
+    draws: 0,
+    totalTurns: 0,
+    candidateMoves: 0,
+    candidateSimulations: 0,
+    nodesPerSecondSum: 0,
+    policyEntropySum: 0,
+  };
+
+  let completedGames = 0;
+  let gate = evaluatePromotionGate(aggregate, 1, options);
+  let manualStopRequested = false;
+  let stopLaunching = false;
+  let fatalError: Error | null = null;
+  let nextGameIndex = 1;
+  let stopLogged = false;
+
+  const gpuClient = await GpuInferenceClient.start(candidateModelPath, {
+    modelKey: 'candidate',
+    batchDelayMs: options.gpuBatchDelayMs,
+    maxBatchSize: options.gpuBatchSize,
+  });
+  await gpuClient.loadModel('champion', championModelPath);
+
+  const inFlight = new Set<Promise<void>>();
+
+  const maybeLogGateStop = (): void => {
+    if (stopLogged || !gate.decisionFinal || completedGames >= options.games) return;
+    stopLogged = true;
+    const thresholdMargin = formatThresholdMarginSummary(gate, completedGames, options);
+    const passDelta = formatSignedPercentagePoints(gate.score - options.passScore, 2);
+    console.log(
+      `[${formatClock()}] [arena] stopping new launches at ${completedGames}/${options.games}: ${gate.decisionReason} pass_delta=${passDelta} ${thresholdMargin} llr=${gate.sprt?.llr?.toFixed(3) ?? 'n/a'}`,
+    );
+  };
+
+  const maybeLogProgress = (): void => {
+    if (!(options.verbose || completedGames <= 10 || completedGames % 10 === 0 || completedGames === options.games)) {
+      return;
+    }
+    const elapsed = performance.now() - startedAt;
+    const eta = estimateRemainingMs(elapsed, completedGames, options.games);
+    const thresholdMargin = formatThresholdMarginSummary(gate, completedGames, options);
+    const passDelta = formatSignedPercentagePoints(gate.score - options.passScore, 2);
+    console.log(
+      `[${formatClock()}] [arena] ${completedGames}/${options.games} ${formatProgressBar(completedGames, options.games)} score=${(gate.score * 100).toFixed(1)}% pass_delta=${passDelta} ci${Math.round(gate.confidenceLevel * 100)}=[${(gate.ciLow * 100).toFixed(1)}%,${(gate.ciHigh * 100).toFixed(1)}%] ${thresholdMargin} W/L/D=${aggregate.candidateWins}/${aggregate.championWins}/${aggregate.draws} elapsed=${formatDuration(elapsed)} eta=${formatDuration(eta)} in_flight=${inFlight.size}`,
+    );
+  };
+
+  const launchGame = (gameIndex: number): void => {
+    const task = runArenaGameGpu(gameIndex, options, gpuClient)
+      .then((summary) => {
+        applyGameResult(aggregate, summary);
+        completedGames += 1;
+        gate = evaluatePromotionGate(aggregate, completedGames, options);
+        maybeLogProgress();
+
+        if (isManualStopRequested(options)) {
+          manualStopRequested = true;
+          stopLaunching = true;
+          const thresholdMargin = formatThresholdMarginSummary(gate, completedGames, options);
+          const passDelta = formatSignedPercentagePoints(gate.score - options.passScore, 2);
+          console.log(
+            `[${formatClock()}] [arena] manual stop at ${completedGames}/${options.games}: pass_delta=${passDelta} ${thresholdMargin}`,
+          );
+          return;
+        }
+
+        if (gate.decisionFinal) {
+          stopLaunching = true;
+          maybeLogGateStop();
+        }
+      })
+      .catch((error: unknown) => {
+        fatalError = error instanceof Error ? error : new Error(String(error));
+        stopLaunching = true;
+      })
+      .finally(() => {
+        inFlight.delete(task);
+      });
+    inFlight.add(task);
+  };
+
+  try {
+    while (true) {
+      if (fatalError) {
+        throw fatalError;
+      }
+      if (!manualStopRequested && isManualStopRequested(options)) {
+        manualStopRequested = true;
+        stopLaunching = true;
+        console.log(`[${formatClock()}] [arena] manual stop requested before launching remaining games`);
+      }
+
+      while (
+        !stopLaunching
+        && nextGameIndex <= options.games
+        && inFlight.size < Math.max(1, Math.min(options.gpuGamesInFlight, options.games))
+      ) {
+        launchGame(nextGameIndex);
+        nextGameIndex += 1;
+      }
+
+      if (inFlight.size === 0) {
+        break;
+      }
+      await Promise.race([...inFlight]);
+    }
+  } finally {
+    await gpuClient.shutdown();
+  }
+
+  return { aggregate, completedGames, gate, manualStopRequested };
+}
+
+async function runArenaPythonBatched(
+  options: ArenaOptions,
+  candidateModelPath: string,
+  championModelPath: string,
+  startedAt: number,
+): Promise<{ aggregate: ArenaAggregate; completedGames: number; gate: GateEvaluation; manualStopRequested: boolean }> {
+  const aggregate: ArenaAggregate = {
+    candidateWins: 0,
+    championWins: 0,
+    draws: 0,
+    totalTurns: 0,
+    candidateMoves: 0,
+    candidateSimulations: 0,
+    nodesPerSecondSum: 0,
+    policyEntropySum: 0,
+  };
+  let completedGames = 0;
+  let gate = evaluatePromotionGate(aggregate, 1, options);
+  let manualStopRequested = false;
+  let fatalError: Error | null = null;
+  let stopLogged = false;
+  let intentionallyStopped = false;
+  let stderrTail = '';
+
+  const scriptPath = path.join(SCRIPTS_DIR, 'python-batched-arena.py');
+  const worker = await spawnPythonWithFallback([
+    scriptPath,
+    '--candidate-model', path.resolve(process.cwd(), candidateModelPath),
+    '--champion-model', path.resolve(process.cwd(), championModelPath),
+    '--games', String(options.games),
+    '--games-in-flight', String(Math.max(1, Math.min(options.gpuGamesInFlight, options.games))),
+    '--max-turns', String(options.maxTurns),
+    '--no-capture-draw', String(options.noCaptureDrawMoves),
+    '--opening-random-plies', String(options.openingRandomPlies),
+    '--seed', String(options.seed),
+    '--gpu-batch-size', String(options.gpuBatchSize),
+    '--gpu-batch-delay-ms', String(options.gpuBatchDelayMs),
+    '--device', 'auto',
+    ...(options.simulations ? ['--simulations', String(options.simulations)] : []),
+  ]);
+
+  const stopWorker = (): void => {
+    if (intentionallyStopped) return;
+    intentionallyStopped = true;
+    try {
+      worker.stdin?.destroy();
+    } catch {
+      // ignore
+    }
+    try {
+      worker.kill();
+    } catch {
+      // ignore
+    }
+  };
+
+  const maybeLogGateStop = (): void => {
+    if (stopLogged || !gate.decisionFinal || completedGames >= options.games) return;
+    stopLogged = true;
+    const thresholdMargin = formatThresholdMarginSummary(gate, completedGames, options);
+    const passDelta = formatSignedPercentagePoints(gate.score - options.passScore, 2);
+    console.log(
+      `[${formatClock()}] [arena] stopping python-batched worker at ${completedGames}/${options.games}: ${gate.decisionReason} pass_delta=${passDelta} ${thresholdMargin} llr=${gate.sprt?.llr?.toFixed(3) ?? 'n/a'}`,
+    );
+  };
+
+  const maybeLogProgress = (): void => {
+    if (!(options.verbose || completedGames <= 10 || completedGames % 10 === 0 || completedGames === options.games)) {
+      return;
+    }
+    const elapsed = performance.now() - startedAt;
+    const eta = estimateRemainingMs(elapsed, completedGames, options.games);
+    const thresholdMargin = formatThresholdMarginSummary(gate, completedGames, options);
+    const passDelta = formatSignedPercentagePoints(gate.score - options.passScore, 2);
+    console.log(
+      `[${formatClock()}] [arena] ${completedGames}/${options.games} ${formatProgressBar(completedGames, options.games)} score=${(gate.score * 100).toFixed(1)}% pass_delta=${passDelta} ci${Math.round(gate.confidenceLevel * 100)}=[${(gate.ciLow * 100).toFixed(1)}%,${(gate.ciHigh * 100).toFixed(1)}%] ${thresholdMargin} W/L/D=${aggregate.candidateWins}/${aggregate.championWins}/${aggregate.draws} elapsed=${formatDuration(elapsed)} eta=${formatDuration(eta)} in_flight=${Math.max(0, Math.min(options.gpuGamesInFlight, options.games - completedGames))}`,
+    );
+  };
+
+  const reader = worker.stdout
+    ? createInterface({ input: worker.stdout })
+    : null;
+
+  worker.stderr?.setEncoding('utf8');
+  worker.stderr?.on('data', (chunk: string | Buffer) => {
+    stderrTail = appendCapturedOutput(stderrTail, String(chunk), 16 * 1024);
+  });
+
+  const workerDone = new Promise<void>((resolve) => {
+    reader?.on('line', (line) => {
+      let result: GameResult;
+      try {
+        result = JSON.parse(line) as GameResult;
+      } catch {
+        if (options.verbose) {
+          console.error(`[${formatClock()}] [arena] python-batched non-json stdout: ${line}`);
+        }
+        return;
+      }
+      applyGameResult(aggregate, result);
+      completedGames += 1;
+      gate = evaluatePromotionGate(aggregate, completedGames, options);
+      maybeLogProgress();
+
+      if (isManualStopRequested(options)) {
+        manualStopRequested = true;
+        const thresholdMargin = formatThresholdMarginSummary(gate, completedGames, options);
+        const passDelta = formatSignedPercentagePoints(gate.score - options.passScore, 2);
+        console.log(
+          `[${formatClock()}] [arena] manual stop at ${completedGames}/${options.games}: pass_delta=${passDelta} ${thresholdMargin}`,
+        );
+        stopWorker();
+        return;
+      }
+
+      if (gate.decisionFinal) {
+        maybeLogGateStop();
+        stopWorker();
+      }
+    });
+
+    worker.on('error', (error) => {
+      fatalError = error instanceof Error ? error : new Error(String(error));
+      resolve();
+    });
+
+    worker.on('close', (code, signal) => {
+      if (!intentionallyStopped && completedGames < options.games && !gate.decisionFinal && !manualStopRequested) {
+        fatalError = new Error(
+          `python-batched worker exited early: code=${code ?? 'null'} signal=${signal ?? 'null'} stderr=${stderrTail}`,
+        );
+      }
+      resolve();
+    });
+  });
+
+  while (!fatalError) {
+    if (!manualStopRequested && isManualStopRequested(options)) {
+      manualStopRequested = true;
+      stopWorker();
+    }
+    const raceResult = await Promise.race([
+      workerDone.then(() => 'done' as const),
+      sleep(250).then(() => 'tick' as const),
+    ]);
+    if (raceResult === 'done') break;
+    if (gate.decisionFinal && !intentionallyStopped) {
+      maybeLogGateStop();
+      stopWorker();
+    }
+  }
+
+  if (fatalError) {
+    stopWorker();
+    throw fatalError;
+  }
+
   return { aggregate, completedGames, gate, manualStopRequested };
 }
 
@@ -814,6 +1139,7 @@ function buildWorkerArgs(
     '--champion-model', overrides?.championModelPath ?? options.championModelPath,
     '--difficulty', options.difficulty,
     '--engine', options.engine,
+    '--search-backend', 'cpu',
     '--max-turns', String(options.maxTurns),
     '--no-capture-draw', String(options.noCaptureDrawMoves),
     '--opening-random-plies', String(options.openingRandomPlies),
@@ -923,6 +1249,104 @@ function applyGameResult(aggregate: ArenaAggregate, result: GameResult): void {
   if (result.winner === null) aggregate.draws += 1;
   else if (result.winner === result.candidateColor) aggregate.candidateWins += 1;
   else aggregate.championWins += 1;
+}
+
+async function runArenaGameGpu(
+  gameIndex: number,
+  options: ArenaOptions,
+  gpuClient: GpuInferenceClient,
+): Promise<GameResult> {
+  const rng = createRng(options.seed + gameIndex * 131);
+  const candidateColor: PlayerColor = gameIndex % 2 === 1 ? 'white' : 'black';
+  let state = createLocalHiveGameState({
+    id: `arena-gpu-${Date.now()}-${gameIndex}`,
+    shortCode: 'AGPU',
+    whitePlayerId: candidateColor === 'white' ? 'candidate' : 'champion',
+    blackPlayerId: candidateColor === 'black' ? 'candidate' : 'champion',
+  });
+
+  let noProgress = 0;
+  let prevPressure = queenPressureTotal(state);
+  let openingPly = 0;
+  let gameCandidateMoves = 0;
+  let gameCandidateSimulations = 0;
+  let gameNodesPerSecondSum = 0;
+  let gamePolicyEntropySum = 0;
+
+  while (state.status === 'playing' && state.turnNumber <= options.maxTurns) {
+    const activeColor = state.currentTurn;
+    const isCandidateTurn = activeColor === candidateColor;
+    let move: Move | null = null;
+
+    if (openingPly < options.openingRandomPlies) {
+      const legal = getLegalMovesForColor(state, activeColor);
+      if (legal.length > 0) {
+        move = legal[Math.floor(rng() * legal.length)];
+      }
+      openingPly += 1;
+    } else {
+      const search = await runGpuMctsSearch({
+        state,
+        color: activeColor,
+        gpuClient,
+        seed: options.seed + gameIndex * 163 + state.turnNumber,
+        leafBatchSize: options.gpuBatchSize,
+        modelKey: isCandidateTurn ? 'candidate' : 'champion',
+        mctsConfig: options.simulations ? { simulations: options.simulations, maxDepth: options.maxTurns } : { maxDepth: options.maxTurns },
+      });
+      move = search.selectedMove;
+      if (isCandidateTurn) {
+        gameCandidateMoves += 1;
+        gameCandidateSimulations += search.stats.simulations;
+        gameNodesPerSecondSum += search.stats.nodesPerSecond;
+        gamePolicyEntropySum += search.stats.policyEntropy;
+      }
+    }
+
+    if (!move) {
+      state = {
+        ...state,
+        status: 'finished',
+        winner: oppositeColor(activeColor),
+      };
+      break;
+    }
+
+    state = applyHiveMove(state, move);
+    const pressure = queenPressureTotal(state);
+    if (pressure === prevPressure) noProgress += 1;
+    else {
+      noProgress = 0;
+      prevPressure = pressure;
+    }
+    if (options.noCaptureDrawMoves > 0 && noProgress >= options.noCaptureDrawMoves) {
+      state = {
+        ...state,
+        status: 'finished',
+        winner: 'draw',
+      };
+      break;
+    }
+  }
+
+  if (state.status === 'playing') {
+    state = {
+      ...state,
+      status: 'finished',
+      winner: 'draw',
+    };
+  }
+
+  return {
+    gameIndex,
+    winner: state.winner === 'draw' ? null : state.winner,
+    candidateColor,
+    turns: state.turnNumber,
+    candidateMoves: gameCandidateMoves,
+    candidateSimulations: gameCandidateSimulations,
+    nodesPerSecondSum: gameNodesPerSecondSum,
+    policyEntropySum: gamePolicyEntropySum,
+  };
 }
 
 function runArenaGame(
@@ -1132,6 +1556,22 @@ function parseOptions(argv: string[]): ArenaOptions {
         options.engine = parseEngine(next);
         index += 1;
         break;
+      case '--search-backend':
+        options.searchBackend = parseSearchBackend(next);
+        index += 1;
+        break;
+      case '--gpu-games-in-flight':
+        options.gpuGamesInFlight = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--gpu-batch-size':
+        options.gpuBatchSize = parsePositiveInt(next, arg);
+        index += 1;
+        break;
+      case '--gpu-batch-delay-ms':
+        options.gpuBatchDelayMs = parsePositiveInt(next, arg);
+        index += 1;
+        break;
       case '--max-turns':
         options.maxTurns = parsePositiveInt(next, arg);
         index += 1;
@@ -1192,6 +1632,12 @@ function parseEngine(value: string | undefined): HiveSearchEngine {
   if (!value) throw new Error('Missing value for --engine');
   if (value === 'classic' || value === 'alphazero' || value === 'gumbel') return value;
   throw new Error(`Invalid --engine value: ${value}`);
+}
+
+function parseSearchBackend(value: string | undefined): SearchBackend {
+  if (!value) throw new Error('Missing value for --search-backend');
+  if (value === 'cpu' || value === 'gpu-batched' || value === 'python-batched') return value;
+  throw new Error(`Invalid --search-backend value: ${value}`);
 }
 
 function parseGateMode(value: string | undefined): ArenaGateMode {
@@ -1691,6 +2137,10 @@ function printHelpAndExit(): never {
   console.log('  --difficulty <d>            medium|hard|extreme (default: extreme)');
   console.log('  --simulations <n>           Override MCTS simulations for both sides');
   console.log('  --engine <e>                classic|alphazero|gumbel (default: alphazero)');
+  console.log('  --search-backend <mode>     cpu|gpu-batched|python-batched (default: cpu)');
+  console.log('  --gpu-games-in-flight <n>   Concurrent local GPU arena games (default: auto)');
+  console.log('  --gpu-batch-size <n>        Shared GPU inference max batch size (default: auto)');
+  console.log('  --gpu-batch-delay-ms <n>    Shared GPU inference batch delay (default: auto)');
   console.log('  --max-turns <n>             Max turns per game (default: 320)');
   console.log('  --no-capture-draw <n>       Draw threshold for no queen-pressure progress (default: 100)');
   console.log('  --opening-random-plies <n>  Random opening plies for diversity (default: 4)');
@@ -1717,6 +2167,48 @@ function createRng(seed: number): () => number {
 function scoreToElo(score: number): number {
   const clipped = Math.min(0.999, Math.max(0.001, score));
   return 400 * Math.log10(clipped / (1 - clipped));
+}
+
+async function spawnPythonWithFallback(args: string[]): Promise<ChildProcess> {
+  const localVenvPython = path.resolve(
+    process.cwd(),
+    '.venv-hive',
+    process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
+  );
+  const candidates = process.platform === 'win32'
+    ? [localVenvPython, 'python', 'python3', 'py']
+    : [localVenvPython, 'python3', 'python'];
+
+  for (const cmd of candidates) {
+    try {
+      const proc = spawn(cmd, args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, PYTHONUNBUFFERED: '1' },
+      });
+
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          proc.on('spawn', resolve);
+        }),
+        new Promise<void>((_, reject) => {
+          proc.on('error', reject);
+        }),
+        sleep(2000).then(() => {
+          throw new Error(`Timeout starting ${cmd}`);
+        }),
+      ]);
+
+      return proc;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error('Could not start Python 3 worker');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function formatDuration(ms: number): string {

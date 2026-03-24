@@ -9,6 +9,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface, type Interface } from 'node:readline';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const SCRIPTS_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 export interface GpuInferenceAction {
   actionKey: string;
@@ -16,11 +19,13 @@ export interface GpuInferenceAction {
 }
 
 export interface GpuInferencePosition {
+  modelKey?: string;
   stateFeatures: number[];
   actions: GpuInferenceAction[];
 }
 
 export interface GpuInferenceResult {
+  modelKey?: string;
   value: number;
   actionLogits: Record<string, number>;
 }
@@ -73,7 +78,6 @@ export class GpuInferenceClient {
 
     process.stderr?.setEncoding('utf8');
     process.stderr?.on('data', (chunk: string) => {
-      process.stderr?.pipe(process.stderr);
       // Log GPU server messages to our stderr
       for (const line of chunk.split('\n').filter(Boolean)) {
         console.error(`[gpu] ${line}`);
@@ -100,8 +104,9 @@ export class GpuInferenceClient {
     device?: 'auto' | 'cuda' | 'cpu';
     batchDelayMs?: number;
     maxBatchSize?: number;
+    modelKey?: string;
   }): Promise<GpuInferenceClient> {
-    const scriptPath = path.resolve(process.cwd(), 'scripts/hive/gpu-inference-server.py');
+    const scriptPath = path.join(SCRIPTS_DIR, 'gpu-inference-server.py');
     const pythonProcess = await spawnPythonWithFallback([scriptPath]);
     const client = new GpuInferenceClient(pythonProcess, options);
 
@@ -109,6 +114,7 @@ export class GpuInferenceClient {
     const initResult = await client.request('init', {
       modelPath: path.resolve(process.cwd(), modelPath),
       device: options?.device ?? 'auto',
+      modelKey: options?.modelKey ?? 'default',
     });
 
     client.initPromise = Promise.resolve(initResult);
@@ -215,6 +221,20 @@ export class GpuInferenceClient {
     });
   }
 
+  async loadModel(modelKey: string, modelPath: string): Promise<Record<string, unknown>> {
+    return this.request('load_model', {
+      modelKey,
+      modelPath: path.resolve(process.cwd(), modelPath),
+    });
+  }
+
+  async reloadModel(modelKey: string, modelPath: string): Promise<Record<string, unknown>> {
+    return this.request('reload', {
+      modelKey,
+      modelPath: path.resolve(process.cwd(), modelPath),
+    });
+  }
+
   /**
    * Get server statistics.
    */
@@ -311,9 +331,14 @@ export class GpuInferenceClient {
  * Try to spawn Python with multiple fallback paths.
  */
 async function spawnPythonWithFallback(args: string[]): Promise<ChildProcess> {
+  const localVenvPython = path.resolve(
+    process.cwd(),
+    '.venv-hive',
+    process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
+  );
   const candidates = process.platform === 'win32'
-    ? ['python', 'python3', 'py']
-    : ['python3', 'python'];
+    ? [localVenvPython, 'python', 'python3', 'py']
+    : [localVenvPython, 'python3', 'python'];
 
   for (const cmd of candidates) {
     try {
@@ -355,7 +380,7 @@ let sharedClient: GpuInferenceClient | null = null;
 
 export async function getSharedGpuClient(modelPath: string): Promise<GpuInferenceClient> {
   if (!sharedClient) {
-    sharedClient = await GpuInferenceClient.start(modelPath);
+    sharedClient = await GpuInferenceClient.start(modelPath, { modelKey: 'default' });
   }
   return sharedClient;
 }

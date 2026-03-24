@@ -2,7 +2,6 @@ import type { GameState, Move, PieceType, PlacedPiece, PlayerColor } from './typ
 import { coordKey, getNeighbors, hexDistance } from './hexUtils';
 import { getQueenSurroundCount } from './winCondition';
 import { moveToActionKey, pieceTypeFromPieceId } from './actionEncoding';
-import trainedModelData from './trained-model.json';
 
 export type HiveDifficultyLabel = 'medium' | 'hard' | 'extreme' | 'mixed';
 
@@ -202,7 +201,7 @@ const DEFAULT_MODEL: HiveLinearModel = {
   },
 };
 
-const ACTIVE_MODEL = parseHiveModel(trainedModelData) ?? DEFAULT_MODEL;
+const ACTIVE_MODEL = loadDefaultHiveModel();
 
 export function getActiveHiveModel(): HiveModel {
   return ACTIVE_MODEL;
@@ -485,6 +484,39 @@ export function parseHiveModel(input: unknown): HiveModel | null {
     return parseV2(candidate);
   }
   return parseV1(candidate);
+}
+
+function loadDefaultHiveModel(): HiveModel {
+  const nodeRequire = getNodeRequire();
+  if (!nodeRequire) {
+    return DEFAULT_MODEL;
+  }
+
+  try {
+    const fs = nodeRequire('node:fs') as { existsSync: (path: string) => boolean; readFileSync: (path: string, encoding: string) => string };
+    const nodePath = nodeRequire('node:path') as { dirname: (value: string) => string; join: (...parts: string[]) => string };
+    const nodeUrl = nodeRequire('node:url') as { fileURLToPath: (value: string | URL) => string };
+    const currentDir = nodePath.dirname(nodeUrl.fileURLToPath(import.meta.url));
+    const defaultModelPath = nodePath.join(currentDir, 'trained-model.json');
+    if (!fs.existsSync(defaultModelPath)) {
+      return DEFAULT_MODEL;
+    }
+    const raw = JSON.parse(fs.readFileSync(defaultModelPath, 'utf8')) as unknown;
+    return parseHiveModel(raw) ?? DEFAULT_MODEL;
+  } catch {
+    return DEFAULT_MODEL;
+  }
+}
+
+function getNodeRequire(): ((specifier: string) => unknown) | null {
+  if (typeof window !== 'undefined') {
+    return null;
+  }
+  try {
+    return Function('return typeof require !== "undefined" ? require : null')() as ((specifier: string) => unknown) | null;
+  } catch {
+    return null;
+  }
 }
 
 function parseV1(candidate: Record<string, unknown>): HiveLinearModel | null {

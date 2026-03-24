@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import contextlib
 import hashlib
 import json
 import math
@@ -77,9 +78,25 @@ class PolicyValueNet(nn.Module):
         logits = hidden @ self.policy_output_weights + self.policy_bias.squeeze(0)
         return logits * torch.exp(self.policy_log_scale).clamp(min=0.25, max=32.0)
 
+    def forward(self, state_tensor: torch.Tensor, action_features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        embeddings = self.embed(state_tensor)
+        value_pred = self.value(embeddings).squeeze(-1)
+        queen_pred = torch.tanh(self.queen_head(embeddings)).squeeze(-1)
+        mobility_pred = torch.tanh(self.mobility_head(embeddings)).squeeze(-1)
+        length_logits = self.length_head(embeddings)
+
+        expanded_embeddings = embeddings.unsqueeze(1).expand(-1, action_features.shape[1], -1)
+        joint = torch.cat([expanded_embeddings, action_features], dim=2)
+        hidden = torch.tanh(self.policy_input_hidden(joint))
+        hidden = torch.tanh(self.policy_hidden(hidden))
+        all_logits = torch.matmul(hidden, self.policy_output_weights) + self.policy_bias.squeeze(0)
+        all_logits = all_logits * torch.exp(self.policy_log_scale).clamp(min=0.25, max=32.0)
+        return value_pred, queen_pred, mobility_pred, length_logits, all_logits
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train Hive AlphaZero-style policy-value model")
+    parser.set_defaults(mixed_precision=None)
     parser.add_argument("--dataset", required=True, help="Dataset path from train-alphazero.ts")
     parser.add_argument("--out", default=".hive-cache/az-candidate-model.json", help="Output model path")
     parser.add_argument("--init-model", default="", help="Optional policy-value model JSON to warm-start from")
@@ -102,6 +119,8 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_POLICY_TARGET_TEMPERATURE,
         help="Sharpen replay policy targets using stored visit counts",
     )
+    parser.add_argument("--mixed-precision", dest="mixed_precision", action="store_true", help="Use CUDA autocast + GradScaler")
+    parser.add_argument("--no-mixed-precision", dest="mixed_precision", action="store_false", help="Disable CUDA autocast + GradScaler")
     return parser.parse_args()
 
 
@@ -130,6 +149,59 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def enable_cuda_fast_math(device: torch.device) -> None:
+    if device.type != "cuda":
+        return
+    try:
+        torch.set_float32_matmul_precision("high")
+    except Exception:
+        pass
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+    except Exception:
+        pass
+    try:
+        torch.backends.cudnn.allow_tf32 = True
+    except Exception:
+        pass
+
+
+def build_adamw_optimizer(parameters: Any, learning_rate: float, weight_decay: float, device: torch.device) -> torch.optim.Optimizer:
+    kwargs: Dict[str, Any] = {
+        "lr": learning_rate,
+        "weight_decay": weight_decay,
+    }
+    if device.type == "cuda":
+        try:
+            kwargs["fused"] = True
+            return torch.optim.AdamW(parameters, **kwargs)
+        except Exception:
+            kwargs.pop("fused", None)
+    return torch.optim.AdamW(parameters, **kwargs)
+
+
+def use_mixed_precision(args: Any, device: torch.device) -> bool:
+    raw = getattr(args, "mixed_precision", None)
+    if raw is None:
+        return device.type == "cuda"
+    return bool(raw) and device.type == "cuda"
+
+
+def create_grad_scaler(device: torch.device, enabled: bool) -> Any:
+    if device.type != "cuda":
+        return None
+    try:
+        return torch.amp.GradScaler("cuda", enabled=enabled)
+    except Exception:
+        return torch.cuda.amp.GradScaler(enabled=enabled)
+
+
+def autocast_context(device: torch.device, enabled: bool):
+    if enabled and device.type == "cuda":
+        return torch.autocast(device_type="cuda", dtype=torch.float16)
+    return contextlib.nullcontext()
 
 
 def append_metrics(metrics_path: str, run_id: str, event_type: str, payload: Dict[str, Any]) -> None:
@@ -373,6 +445,7 @@ def evaluate_split(
     args: argparse.Namespace,
 ) -> Dict[str, float]:
     model.eval()
+    mixed_precision = use_mixed_precision(args, device)
     with torch.no_grad():
         total_loss = 0.0
         total_value = 0.0
@@ -382,7 +455,8 @@ def evaluate_split(
         batches = batch_indices(len(samples), max(1, args.batch_size))
         for batch_ids in batches:
             batch = [samples[i] for i in batch_ids]
-            loss, metrics = compute_batch_loss(model, batch, device, args)
+            with autocast_context(device, mixed_precision):
+                loss, metrics = compute_batch_loss(model, batch, device, args)
             total_loss += float(loss.item())
             total_value += metrics["valueLoss"]
             total_policy += metrics["policyLoss"]
@@ -419,6 +493,43 @@ def build_feature_index_map(
         if target_index is not None:
             mapping.append((source_index, target_index))
     return mapping
+
+
+def copy_linear_overlap(
+    linear: nn.Linear,
+    source_weight: torch.Tensor,
+    source_bias: torch.Tensor,
+) -> None:
+    rows = min(int(linear.out_features), int(source_weight.shape[0]), int(source_bias.shape[0]))
+    cols = min(int(linear.in_features), int(source_weight.shape[1]))
+    linear.weight[:rows, :cols].copy_(source_weight[:rows, :cols])
+    linear.bias[:rows].copy_(source_bias[:rows])
+
+
+def copy_vector_overlap(target: torch.Tensor, source: torch.Tensor) -> None:
+    size = min(int(target.shape[0]), int(source.shape[0]))
+    target[:size].copy_(source[:size])
+
+
+def copy_policy_input_hidden_overlap(
+    linear: nn.Linear,
+    source_weight: torch.Tensor,
+    source_bias: torch.Tensor,
+    source_embedding_size: int,
+    target_embedding_size: int,
+    action_feature_map: List[Tuple[int, int]],
+) -> None:
+    rows = min(int(linear.out_features), int(source_weight.shape[0]), int(source_bias.shape[0]))
+    state_cols = min(max(0, source_embedding_size), max(0, target_embedding_size), int(source_weight.shape[1]))
+    linear.weight[:rows, :state_cols].copy_(source_weight[:rows, :state_cols])
+    source_action_offset = max(0, source_embedding_size)
+    target_action_offset = max(0, target_embedding_size)
+    for source_index, target_index in action_feature_map:
+        source_col = source_action_offset + source_index
+        target_col = target_action_offset + target_index
+        if source_col < source_weight.shape[1] and target_col < linear.in_features:
+            linear.weight[:rows, target_col].copy_(source_weight[:rows, source_col])
+    linear.bias[:rows].copy_(source_bias[:rows])
 
 
 def load_initial_model(
@@ -493,6 +604,7 @@ def load_initial_model(
 
     try:
         with torch.no_grad():
+            widened = False
             expected_in = len(state_feature_names)
             for index, linear in enumerate(model_trunk):
                 layer_payload = trunk_layers[index]
@@ -506,7 +618,7 @@ def load_initial_model(
                 bias = layer_payload.get("bias")
                 if (
                     input_size != expected_in
-                    or output_size != linear.out_features
+                    or output_size <= 0
                     or not isinstance(weights, list)
                     or not isinstance(bias, list)
                     or len(weights) != input_size * output_size
@@ -514,12 +626,25 @@ def load_initial_model(
                 ):
                     result["reason"] = f"trunk_shape_mismatch_{index}"
                     return result
+                if output_size > linear.out_features or input_size > linear.in_features:
+                    result["reason"] = f"trunk_shape_mismatch_{index}"
+                    return result
+                if output_size != linear.out_features or input_size != linear.in_features:
+                    widened = True
 
-                linear.weight.copy_(
-                    torch.tensor(weights, dtype=torch.float32, device=linear.weight.device).reshape(output_size, input_size)
+                source_weight = torch.tensor(
+                    weights,
+                    dtype=torch.float32,
+                    device=linear.weight.device,
+                ).reshape(output_size, input_size)
+                source_bias = torch.tensor(
+                    bias,
+                    dtype=torch.float32,
+                    device=linear.bias.device,
                 )
-                linear.bias.copy_(torch.tensor(bias, dtype=torch.float32, device=linear.bias.device))
+                copy_linear_overlap(linear, source_weight, source_bias)
                 expected_in = output_size
+            source_embedding_size = expected_in
 
             value_head = payload.get("valueHead")
             policy_head = payload.get("policyHead")
@@ -546,17 +671,22 @@ def load_initial_model(
             policy_scale = policy_head.get("actionScale")
             if (
                 not isinstance(value_weights, list)
-                or len(value_weights) != model.value_head.in_features
+                or len(value_weights) > model.value_head.in_features
                 or not isinstance(value_bias, (int, float))
                 or not isinstance(policy_bias, (int, float))
                 or (policy_scale is not None and (not isinstance(policy_scale, (int, float)) or float(policy_scale) <= 0))
             ):
                 result["reason"] = "head_shape_mismatch"
                 return result
+            if len(value_weights) != model.value_head.in_features:
+                widened = True
 
-            model.value_head.weight.copy_(
-                torch.tensor(value_weights, dtype=torch.float32, device=model.value_head.weight.device).reshape(1, -1)
+            value_weight_tensor = torch.tensor(
+                value_weights,
+                dtype=torch.float32,
+                device=model.value_head.weight.device,
             )
+            model.value_head.weight[:, :value_weight_tensor.shape[0]].copy_(value_weight_tensor.reshape(1, -1))
             model.value_head.bias.copy_(
                 torch.tensor([float(value_bias)], dtype=torch.float32, device=model.value_head.bias.device)
             )
@@ -565,78 +695,101 @@ def load_initial_model(
             )
             if (
                 isinstance(policy_input_hidden_size, int)
-                and policy_input_hidden_size == model.policy_hidden_size
+                and 0 < policy_input_hidden_size <= model.policy_hidden_size
                 and isinstance(policy_hidden_size, int)
-                and policy_hidden_size == model.policy_hidden_size
+                and 0 < policy_hidden_size <= model.policy_hidden_size
                 and isinstance(policy_input_weights, list)
-                and len(policy_input_weights) == model.policy_input_hidden.in_features * model.policy_input_hidden.out_features
+                and len(policy_input_weights) == (source_embedding_size + len(payload_action_feature_names)) * policy_input_hidden_size
                 and isinstance(policy_input_bias, list)
-                and len(policy_input_bias) == model.policy_input_hidden.out_features
+                and len(policy_input_bias) == policy_input_hidden_size
                 and isinstance(policy_hidden_weights, list)
-                and len(policy_hidden_weights) == model.policy_hidden.in_features * model.policy_hidden.out_features
+                and len(policy_hidden_weights) == policy_hidden_size * policy_hidden_size
                 and isinstance(policy_hidden_layer_bias, list)
-                and len(policy_hidden_layer_bias) == model.policy_hidden.out_features
+                and len(policy_hidden_layer_bias) == policy_hidden_size
                 and isinstance(policy_output_weights, list)
-                and len(policy_output_weights) == model.policy_hidden_size
+                and len(policy_output_weights) == policy_hidden_size
             ):
-                model.policy_input_hidden.weight.copy_(
-                    torch.tensor(policy_input_weights, dtype=torch.float32, device=model.policy_input_hidden.weight.device).reshape(
-                        model.policy_input_hidden.out_features,
-                        model.policy_input_hidden.in_features,
-                    )
+                if (
+                    policy_input_hidden_size != model.policy_hidden_size
+                    or policy_hidden_size != model.policy_hidden_size
+                    or source_embedding_size != model.embedding_size
+                ):
+                    widened = True
+                source_input_weights = torch.tensor(
+                    policy_input_weights,
+                    dtype=torch.float32,
+                    device=model.policy_input_hidden.weight.device,
+                ).reshape(policy_input_hidden_size, source_embedding_size + len(payload_action_feature_names))
+                source_input_bias = torch.tensor(
+                    policy_input_bias,
+                    dtype=torch.float32,
+                    device=model.policy_input_hidden.bias.device,
                 )
-                model.policy_input_hidden.bias.copy_(
-                    torch.tensor(policy_input_bias, dtype=torch.float32, device=model.policy_input_hidden.bias.device)
+                copy_policy_input_hidden_overlap(
+                    model.policy_input_hidden,
+                    source_input_weights,
+                    source_input_bias,
+                    source_embedding_size,
+                    model.embedding_size,
+                    action_feature_map,
                 )
-                model.policy_hidden.weight.copy_(
-                    torch.tensor(policy_hidden_weights, dtype=torch.float32, device=model.policy_hidden.weight.device).reshape(
-                        model.policy_hidden.out_features,
-                        model.policy_hidden.in_features,
-                    )
+                source_hidden_weights = torch.tensor(
+                    policy_hidden_weights,
+                    dtype=torch.float32,
+                    device=model.policy_hidden.weight.device,
+                ).reshape(policy_hidden_size, policy_hidden_size)
+                source_hidden_bias = torch.tensor(
+                    policy_hidden_layer_bias,
+                    dtype=torch.float32,
+                    device=model.policy_hidden.bias.device,
                 )
-                model.policy_hidden.bias.copy_(
-                    torch.tensor(policy_hidden_layer_bias, dtype=torch.float32, device=model.policy_hidden.bias.device)
-                )
-                model.policy_output_weights.copy_(
-                    torch.tensor(policy_output_weights, dtype=torch.float32, device=model.policy_output_weights.device)
+                copy_linear_overlap(model.policy_hidden, source_hidden_weights, source_hidden_bias)
+                copy_vector_overlap(
+                    model.policy_output_weights,
+                    torch.tensor(policy_output_weights, dtype=torch.float32, device=model.policy_output_weights.device),
                 )
             elif (
                 isinstance(policy_hidden_size, int)
-                and policy_hidden_size == model.policy_hidden_size
+                and 0 < policy_hidden_size <= model.policy_hidden_size
                 and isinstance(policy_state_hidden, list)
-                and len(policy_state_hidden) == model.embedding_size * model.policy_hidden_size
+                and len(policy_state_hidden) == source_embedding_size * policy_hidden_size
                 and isinstance(policy_action_hidden, list)
-                and len(policy_action_hidden) == len(payload_action_feature_names) * model.policy_hidden_size
+                and len(policy_action_hidden) == len(payload_action_feature_names) * policy_hidden_size
                 and isinstance(policy_hidden_bias, list)
-                and len(policy_hidden_bias) == model.policy_hidden_size
+                and len(policy_hidden_bias) == policy_hidden_size
                 and isinstance(policy_output_weights, list)
-                and len(policy_output_weights) == model.policy_hidden_size
+                and len(policy_output_weights) == policy_hidden_size
             ):
-                model.policy_input_hidden.weight.zero_()
+                if policy_hidden_size != model.policy_hidden_size or source_embedding_size != model.embedding_size:
+                    widened = True
                 old_state_hidden = torch.tensor(
                     policy_state_hidden,
                     dtype=torch.float32,
                     device=model.policy_input_hidden.weight.device,
-                ).reshape(model.policy_hidden_size, model.embedding_size)
+                ).reshape(policy_hidden_size, source_embedding_size)
                 old_action_hidden = torch.tensor(
                     policy_action_hidden,
                     dtype=torch.float32,
                     device=model.policy_input_hidden.weight.device,
-                ).reshape(model.policy_hidden_size, len(payload_action_feature_names))
-                model.policy_input_hidden.weight[:, :model.embedding_size].copy_(old_state_hidden)
+                ).reshape(policy_hidden_size, len(payload_action_feature_names))
+                rows = min(policy_hidden_size, model.policy_hidden_size)
+                model.policy_input_hidden.weight[:rows, :source_embedding_size].copy_(old_state_hidden[:rows, :source_embedding_size])
                 for source_index, target_index in action_feature_map:
-                    model.policy_input_hidden.weight[:, model.embedding_size + target_index].copy_(old_action_hidden[:, source_index])
-                model.policy_input_hidden.bias.copy_(
-                    torch.tensor(policy_hidden_bias, dtype=torch.float32, device=model.policy_input_hidden.bias.device)
+                    model.policy_input_hidden.weight[:rows, model.embedding_size + target_index].copy_(old_action_hidden[:rows, source_index])
+                model.policy_input_hidden.bias[:rows].copy_(
+                    torch.tensor(policy_hidden_bias, dtype=torch.float32, device=model.policy_input_hidden.bias.device)[:rows]
                 )
                 model.policy_hidden.weight.zero_()
                 model.policy_hidden.bias.zero_()
                 eye = torch.eye(model.policy_hidden_size, dtype=torch.float32, device=model.policy_hidden.weight.device)
                 model.policy_hidden.weight.copy_(eye)
-                model.policy_output_weights.copy_(
-                    torch.tensor(policy_output_weights, dtype=torch.float32, device=model.policy_output_weights.device)
+                copy_vector_overlap(
+                    model.policy_output_weights,
+                    torch.tensor(policy_output_weights, dtype=torch.float32, device=model.policy_output_weights.device),
                 )
             else:
+                if source_embedding_size != model.embedding_size:
+                    widened = True
                 model.policy_input_hidden.weight.zero_()
                 model.policy_input_hidden.bias.zero_()
                 model.policy_hidden.weight.zero_()
@@ -660,7 +813,7 @@ def load_initial_model(
                 initial_policy_scale = max(initial_policy_scale, 6.0)
             model.policy_log_scale.copy_(
                 torch.log(torch.tensor([initial_policy_scale], dtype=torch.float32, device=model.policy_log_scale.device))
-            )
+                        )
 
             auxiliary_heads = payload.get("auxiliaryHeads")
             if isinstance(auxiliary_heads, dict):
@@ -671,10 +824,15 @@ def load_initial_model(
                 if isinstance(queen_head, dict):
                     queen_weights = queen_head.get("weights")
                     queen_bias = queen_head.get("bias")
-                    if isinstance(queen_weights, list) and len(queen_weights) == model.queen_head.in_features and isinstance(queen_bias, (int, float)):
-                        model.queen_head.weight.copy_(
-                            torch.tensor(queen_weights, dtype=torch.float32, device=model.queen_head.weight.device).reshape(1, -1)
+                    if isinstance(queen_weights, list) and len(queen_weights) <= model.queen_head.in_features and isinstance(queen_bias, (int, float)):
+                        if len(queen_weights) != model.queen_head.in_features:
+                            widened = True
+                        queen_weight_tensor = torch.tensor(
+                            queen_weights,
+                            dtype=torch.float32,
+                            device=model.queen_head.weight.device,
                         )
+                        model.queen_head.weight[:, :queen_weight_tensor.shape[0]].copy_(queen_weight_tensor.reshape(1, -1))
                         model.queen_head.bias.copy_(
                             torch.tensor([float(queen_bias)], dtype=torch.float32, device=model.queen_head.bias.device)
                         )
@@ -682,10 +840,15 @@ def load_initial_model(
                 if isinstance(mobility_head, dict):
                     mobility_weights = mobility_head.get("weights")
                     mobility_bias = mobility_head.get("bias")
-                    if isinstance(mobility_weights, list) and len(mobility_weights) == model.mobility_head.in_features and isinstance(mobility_bias, (int, float)):
-                        model.mobility_head.weight.copy_(
-                            torch.tensor(mobility_weights, dtype=torch.float32, device=model.mobility_head.weight.device).reshape(1, -1)
+                    if isinstance(mobility_weights, list) and len(mobility_weights) <= model.mobility_head.in_features and isinstance(mobility_bias, (int, float)):
+                        if len(mobility_weights) != model.mobility_head.in_features:
+                            widened = True
+                        mobility_weight_tensor = torch.tensor(
+                            mobility_weights,
+                            dtype=torch.float32,
+                            device=model.mobility_head.weight.device,
                         )
+                        model.mobility_head.weight[:, :mobility_weight_tensor.shape[0]].copy_(mobility_weight_tensor.reshape(1, -1))
                         model.mobility_head.bias.copy_(
                             torch.tensor([float(mobility_bias)], dtype=torch.float32, device=model.mobility_head.bias.device)
                         )
@@ -695,16 +858,20 @@ def load_initial_model(
                     length_bias = length_head.get("bias")
                     if (
                         isinstance(length_weights, list)
-                        and len(length_weights) == model.length_head.in_features * model.length_head.out_features
+                        and len(length_weights) % model.length_head.out_features == 0
+                        and (len(length_weights) // model.length_head.out_features) <= model.length_head.in_features
                         and isinstance(length_bias, list)
                         and len(length_bias) == model.length_head.out_features
                     ):
-                        model.length_head.weight.copy_(
-                            torch.tensor(length_weights, dtype=torch.float32, device=model.length_head.weight.device).reshape(
-                                model.length_head.out_features,
-                                model.length_head.in_features,
-                            )
-                        )
+                        source_length_in = len(length_weights) // model.length_head.out_features
+                        if source_length_in != model.length_head.in_features:
+                            widened = True
+                        length_weight_tensor = torch.tensor(
+                            length_weights,
+                            dtype=torch.float32,
+                            device=model.length_head.weight.device,
+                        ).reshape(model.length_head.out_features, source_length_in)
+                        model.length_head.weight[:, :source_length_in].copy_(length_weight_tensor)
                         model.length_head.bias.copy_(
                             torch.tensor(length_bias, dtype=torch.float32, device=model.length_head.bias.device)
                         )
@@ -713,7 +880,7 @@ def load_initial_model(
         return result
 
     result["loaded"] = True
-    result["reason"] = "loaded"
+    result["reason"] = "loaded_widened" if widened else "loaded"
     return result
 
 
@@ -791,7 +958,9 @@ def main() -> None:
     args = parse_args()
     set_seed(args.seed)
     device = resolve_device(args.device)
+    enable_cuda_fast_math(device)
     hidden = parse_hidden(args.hidden)
+    mixed_precision = use_mixed_precision(args, device)
 
     run_id = f"az-train-{int(time.time())}-{random.randint(1000, 9999)}"
     state_names, action_names, samples, dataset_meta = read_dataset(args.dataset, args.policy_target_temperature)
@@ -801,14 +970,15 @@ def main() -> None:
     train_samples, val_samples = split_dataset(samples, ratio=0.9)
     model = PolicyValueNet(len(state_names), len(action_names), hidden).to(device)
     init_result = load_initial_model(model, args.init_model, state_names, action_names, hidden)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = build_adamw_optimizer(model.parameters(), args.lr, args.weight_decay, device)
+    grad_scaler = create_grad_scaler(device, mixed_precision)
 
     ema_state = {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
 
     print(
         f"[az:setup] samples={len(samples)} train={len(train_samples)} val={len(val_samples)} "
         f"state_dim={len(state_names)} action_dim={len(action_names)} hidden={hidden} "
-        f"epochs={args.epochs} batch={args.batch_size} lr={args.lr} wd={args.weight_decay} device={device.type}",
+        f"epochs={args.epochs} batch={args.batch_size} lr={args.lr} wd={args.weight_decay} device={device.type} mixed_precision={'on' if mixed_precision else 'off'}",
         flush=True,
     )
     if init_result["loaded"]:
@@ -863,9 +1033,15 @@ def main() -> None:
         for batch_ids in train_batches:
             batch = [train_samples[i] for i in batch_ids]
             optimizer.zero_grad()
-            loss, metrics = compute_batch_loss(model, batch, device, args)
-            loss.backward()
-            optimizer.step()
+            with autocast_context(device, mixed_precision):
+                loss, metrics = compute_batch_loss(model, batch, device, args)
+            if grad_scaler and mixed_precision:
+                grad_scaler.scale(loss).backward()
+                grad_scaler.step(optimizer)
+                grad_scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
             epoch_loss += float(loss.item())
             epoch_value += metrics["valueLoss"]
             epoch_policy += metrics["policyLoss"]

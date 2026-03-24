@@ -11,11 +11,15 @@ Protocol:
 - Output: JSON lines with {id, ok, payload/error}
 
 Commands:
-- init: Initialize model from file
+- init: Initialize or replace a model from file
+- load_model: Load a model under a registry key
 - infer: Batch inference for state + action features
+- reload: Reload a model for a registry key
+- stats: Return evaluator stats
 - shutdown: Graceful shutdown
 """
 
+import contextlib
 import json
 import os
 import sys
@@ -255,35 +259,64 @@ class InferenceServer:
     """GPU inference server for batched neural network evaluation."""
 
     def __init__(self):
-        self.model: Optional[PolicyValueNet] = None
+        self.models: Dict[str, PolicyValueNet] = {}
+        self.model_meta: Dict[str, Dict[str, Any]] = {}
         self.device: Optional[torch.device] = None
-        self.meta: Dict[str, Any] = {}
         self.inference_count = 0
         self.total_positions = 0
         self.total_actions = 0
+        self.total_batches = 0
+        self.max_batch_size_seen = 0
+        self.per_model_request_count: Dict[str, int] = {}
+        self.per_model_position_count: Dict[str, int] = {}
 
     def handle_init(self, payload: Dict) -> Dict:
         """Initialize model from file."""
-        model_path = payload.get('modelPath')
-        if not model_path:
-            raise ValueError("modelPath required")
-
         device_str = payload.get('device', 'auto')
         if device_str == 'auto':
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
             self.device = torch.device(device_str)
 
-        self.model, self.meta = load_model(model_path, self.device)
+        return self._load_model(payload, replace=True)
 
-        emit_log(f"Loaded model: state={self.meta['state_size']} action={self.meta['action_size']} "
-                 f"hidden={self.meta['hidden']} device={self.device}")
+    def handle_load_model(self, payload: Dict) -> Dict:
+        """Load a model under a registry key."""
+        return self._load_model(payload, replace=False)
+
+    def _load_model(self, payload: Dict, replace: bool) -> Dict:
+        if self.device is None:
+            device_str = payload.get('device', 'auto')
+            if device_str == 'auto':
+                self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            else:
+                self.device = torch.device(device_str)
+
+        model_path = payload.get('modelPath')
+        if not model_path:
+            raise ValueError("modelPath required")
+        model_key = str(payload.get('modelKey') or 'default')
+        if not replace and model_key in self.models:
+            raise ValueError(f"Model key already loaded: {model_key}")
+
+        model, meta = load_model(model_path, self.device)
+        self.models[model_key] = model
+        self.model_meta[model_key] = meta
+        self.per_model_request_count.setdefault(model_key, 0)
+        self.per_model_position_count.setdefault(model_key, 0)
+
+        emit_log(
+            f"Loaded model[{model_key}]: state={meta['state_size']} action={meta['action_size']} "
+            f"hidden={meta['hidden']} device={self.device}"
+        )
 
         return {
             'status': 'ready',
+            'modelKey': model_key,
             'device': str(self.device),
             'cuda_available': torch.cuda.is_available(),
-            **self.meta,
+            'loadedModelKeys': sorted(self.models.keys()),
+            **meta,
         }
 
     def handle_infer(self, payload: Dict) -> Dict:
@@ -308,6 +341,7 @@ class InferenceServer:
         {
             "results": [
                 {
+                    "modelKey": "candidate",
                     "value": 0.5,
                     "actionLogits": {"actionKey1": 0.3, "actionKey2": -0.1, ...}
                 },
@@ -315,77 +349,115 @@ class InferenceServer:
             ]
         }
         """
-        if self.model is None:
+        if not self.models:
             raise RuntimeError("Model not initialized")
 
         positions = payload.get('positions', [])
         if not positions:
             return {'results': []}
 
-        # Collect all state features and action features
-        state_features_list = []
-        action_features_list = []
-        action_keys_list = []  # Track action keys per position
-        action_counts = []
+        default_model_key = str(payload.get('modelKey') or 'default')
+        indexed_positions_by_key: Dict[str, List[Tuple[int, Dict[str, Any]]]] = {}
+        for index, pos in enumerate(positions):
+            model_key = str(pos.get('modelKey') or default_model_key)
+            if model_key not in self.models:
+                raise ValueError(f"Unknown model key: {model_key}")
+            indexed_positions_by_key.setdefault(model_key, []).append((index, pos))
 
-        for pos in positions:
-            state_features_list.append(pos['stateFeatures'])
-            actions = pos.get('actions', [])
-            action_counts.append(len(actions))
-            keys = []
-            for action in actions:
-                action_features_list.append(
-                    adapt_action_features(action['actionFeatures'], self.meta['action_size'])
-                )
-                keys.append(action['actionKey'])
-            action_keys_list.append(keys)
+        results: List[Optional[Dict[str, Any]]] = [None] * len(positions)
+        queue_depth = len(positions)
+        batch_groups = 0
 
-        # Convert to tensors
-        state_tensor = torch.tensor(state_features_list, dtype=torch.float32, device=self.device)
-        action_tensor = torch.tensor(action_features_list, dtype=torch.float32, device=self.device) \
-            if action_features_list else torch.empty(0, self.meta['action_size'], device=self.device)
+        for model_key, indexed_positions in indexed_positions_by_key.items():
+            model = self.models[model_key]
+            meta = self.model_meta[model_key]
 
-        # Forward pass
-        with torch.no_grad():
-            values, logits = self.model.forward_batch(state_tensor, action_tensor, action_counts)
-            values = values.cpu().numpy()
-            logits = logits.cpu().numpy() if len(logits) > 0 else []
+            state_features_list = []
+            action_features_list = []
+            action_keys_list = []
+            action_counts = []
 
-        # Build results
-        results = []
-        logit_offset = 0
-        for i, pos in enumerate(positions):
-            count = action_counts[i]
-            action_logits = {}
-            for j, key in enumerate(action_keys_list[i]):
-                action_logits[key] = float(logits[logit_offset + j])
-            logit_offset += count
+            for _, pos in indexed_positions:
+                state_features_list.append(pos['stateFeatures'])
+                actions = pos.get('actions', [])
+                action_counts.append(len(actions))
+                keys = []
+                for action in actions:
+                    action_features_list.append(
+                        adapt_action_features(action['actionFeatures'], meta['action_size'])
+                    )
+                    keys.append(action['actionKey'])
+                action_keys_list.append(keys)
 
-            results.append({
-                'value': float(values[i]),
-                'actionLogits': action_logits,
-            })
+            state_tensor = torch.tensor(state_features_list, dtype=torch.float32, device=self.device)
+            action_tensor = torch.tensor(action_features_list, dtype=torch.float32, device=self.device) \
+                if action_features_list else torch.empty(0, meta['action_size'], device=self.device)
+
+            with torch.inference_mode():
+                with self._autocast_context():
+                    values, logits = model.forward_batch(state_tensor, action_tensor, action_counts)
+                values = values.float().cpu().numpy()
+                logits = logits.float().cpu().numpy() if len(logits) > 0 else []
+
+            logit_offset = 0
+            for batch_index, (original_index, _) in enumerate(indexed_positions):
+                count = action_counts[batch_index]
+                action_logits = {}
+                for action_index, key in enumerate(action_keys_list[batch_index]):
+                    action_logits[key] = float(logits[logit_offset + action_index])
+                logit_offset += count
+
+                results[original_index] = {
+                    'modelKey': model_key,
+                    'value': float(values[batch_index]),
+                    'actionLogits': action_logits,
+                }
+
+            batch_groups += 1
+            self.per_model_request_count[model_key] = self.per_model_request_count.get(model_key, 0) + 1
+            self.per_model_position_count[model_key] = self.per_model_position_count.get(model_key, 0) + len(indexed_positions)
 
         self.inference_count += 1
         self.total_positions += len(positions)
-        self.total_actions += sum(action_counts)
+        self.total_actions += sum(len(pos.get('actions', [])) for pos in positions)
+        self.total_batches += batch_groups
+        self.max_batch_size_seen = max(self.max_batch_size_seen, len(positions))
 
-        return {'results': results}
+        return {
+            'results': [result for result in results if result is not None],
+            'stats': {
+                'queueDepth': queue_depth,
+                'groupCount': batch_groups,
+                'loadedModelKeys': sorted(self.models.keys()),
+            },
+        }
 
     def handle_reload(self, payload: Dict) -> Dict:
         """Reload model from file."""
-        return self.handle_init(payload)
+        return self._load_model(payload, replace=True)
 
     def handle_stats(self, payload: Dict) -> Dict:
         """Return server statistics."""
+        average_batch_size = self.total_positions / self.inference_count if self.inference_count > 0 else 0.0
         return {
             'inferenceCount': self.inference_count,
             'totalPositions': self.total_positions,
             'totalActions': self.total_actions,
+            'totalBatches': self.total_batches,
+            'averageBatchSize': average_batch_size,
+            'maxBatchSizeSeen': self.max_batch_size_seen,
             'device': str(self.device) if self.device else None,
             'cudaAvailable': torch.cuda.is_available(),
             'cudaDeviceName': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+            'loadedModelKeys': sorted(self.models.keys()),
+            'perModelRequestCount': self.per_model_request_count,
+            'perModelPositionCount': self.per_model_position_count,
         }
+
+    def _autocast_context(self):
+        if self.device is not None and self.device.type == 'cuda':
+            return torch.autocast(device_type='cuda', dtype=torch.float16)
+        return contextlib.nullcontext()
 
 
 def main():
@@ -405,6 +477,8 @@ def main():
 
             if cmd == 'init':
                 result = server.handle_init(payload)
+            elif cmd == 'load_model':
+                result = server.handle_load_model(payload)
             elif cmd == 'infer':
                 result = server.handle_infer(payload)
             elif cmd == 'reload':

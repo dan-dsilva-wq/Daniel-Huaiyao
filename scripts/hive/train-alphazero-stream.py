@@ -26,8 +26,12 @@ SampleRecord = TRAIN.SampleRecord
 PolicyValueNet = TRAIN.PolicyValueNet
 append_metrics = TRAIN.append_metrics
 batch_indices = TRAIN.batch_indices
+autocast_context = TRAIN.autocast_context
+build_adamw_optimizer = TRAIN.build_adamw_optimizer
 clamp = getattr(TRAIN, "clamp", None)
 compute_batch_loss = TRAIN.compute_batch_loss
+create_grad_scaler = TRAIN.create_grad_scaler
+enable_cuda_fast_math = TRAIN.enable_cuda_fast_math
 evaluate_split = TRAIN.evaluate_split
 export_model = TRAIN.export_model
 load_initial_model = TRAIN.load_initial_model
@@ -36,6 +40,7 @@ resolve_device = TRAIN.resolve_device
 set_seed = TRAIN.set_seed
 update_ema = TRAIN.update_ema
 torch = TRAIN.torch
+use_mixed_precision = TRAIN.use_mixed_precision
 
 
 DEFAULT_VALIDATION_RATIO = 0.1
@@ -298,6 +303,8 @@ class TrainerServer:
             "hash": None,
             "reason": "not_initialized",
         }
+        self.mixed_precision = False
+        self.grad_scaler = None
 
     def ensure_initialized(self) -> None:
         if self.model is None or self.optimizer is None or self.device is None:
@@ -308,11 +315,13 @@ class TrainerServer:
             raise RuntimeError("Trainer model has not been initialized")
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
-        self.optimizer = torch.optim.AdamW(
+        self.optimizer = build_adamw_optimizer(
             self.model.parameters(),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay,
+            self.learning_rate,
+            self.weight_decay,
+            self.device,
         )
+        self.grad_scaler = create_grad_scaler(self.device, self.mixed_precision)
 
     def configure_optimizer(self, learning_rate: float, weight_decay: float) -> None:
         self.ensure_initialized()
@@ -335,7 +344,9 @@ class TrainerServer:
         self.policy_target_temperature = float(payload.get("policyTargetTemperature", DEFAULT_POLICY_TARGET_TEMPERATURE))
         self.hidden = parse_hidden(str(payload["hidden"]))
         self.device = resolve_device(str(payload.get("device", "auto")))
+        enable_cuda_fast_math(self.device)
         set_seed(self.seed)
+        self.mixed_precision = use_mixed_precision(type("InitArgs", (), {"mixed_precision": payload.get("mixedPrecision", None)})(), self.device)
 
         state_names, action_names, samples = read_replay_file(
             replay_path,
@@ -363,7 +374,7 @@ class TrainerServer:
         emit_log(
             f"[az:setup] resident samples={len(self.samples)} "
             f"train={len(self.train_samples())} val={len(self.val_samples())} "
-            f"state_dim={len(self.state_names)} action_dim={len(self.action_names)} hidden={self.hidden} device={self.device.type}"
+            f"state_dim={len(self.state_names)} action_dim={len(self.action_names)} hidden={self.hidden} device={self.device.type} mixed_precision={'on' if self.mixed_precision else 'off'}"
         )
         if self.init_result["loaded"]:
             emit_log(
@@ -523,6 +534,7 @@ class TrainerServer:
             "value_loss_weight": value_loss_weight,
             "aux_loss_weight": aux_loss_weight,
             "label_smoothing": label_smoothing,
+            "mixed_precision": self.mixed_precision,
         })()
 
         run_id = f"az-train-stream-{int(time.time())}-{random.randint(1000, 9999)}"
@@ -571,9 +583,15 @@ class TrainerServer:
             for batch_ids in train_batches:
                 batch = [train_samples[i] for i in batch_ids]
                 self.optimizer.zero_grad()
-                loss, metrics = compute_batch_loss(self.model, batch, self.device, train_args)
-                loss.backward()
-                self.optimizer.step()
+                with autocast_context(self.device, self.mixed_precision):
+                    loss, metrics = compute_batch_loss(self.model, batch, self.device, train_args)
+                if self.grad_scaler and self.mixed_precision:
+                    self.grad_scaler.scale(loss).backward()
+                    self.grad_scaler.step(self.optimizer)
+                    self.grad_scaler.update()
+                else:
+                    loss.backward()
+                    self.optimizer.step()
                 epoch_loss += float(loss.item())
                 epoch_value += metrics["valueLoss"]
                 epoch_policy += metrics["policyLoss"]
