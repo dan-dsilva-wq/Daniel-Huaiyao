@@ -13,10 +13,19 @@ type Writer = 'daniel' | 'huaiyao';
 
 interface Sentence {
   id: string;
+  story_id: string;
   content: string;
   writer: Writer;
   page_number: number;
   created_at: string;
+}
+
+interface BookStory {
+  id: string;
+  title: string;
+  created_by: Writer | null;
+  created_at: string;
+  updated_at: string;
 }
 
 const SENTENCES_PER_PAGE = 8;
@@ -41,6 +50,11 @@ export default function StoryBookPage() {
     const user = getStoredUser();
     return user === 'daniel' || user === 'huaiyao' ? user : null;
   });
+  const [stories, setStories] = useState<BookStory[]>([]);
+  const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
+  const [isCreatingStory, setIsCreatingStory] = useState(false);
+  const [showStoryCreator, setShowStoryCreator] = useState(false);
+  const [newStoryTitle, setNewStoryTitle] = useState('');
   const [sentences, setSentences] = useState<Sentence[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
@@ -49,6 +63,7 @@ export default function StoryBookPage() {
   const [expandedSentence, setExpandedSentence] = useState<string | null>(null);
   const [partnerTyping, setPartnerTyping] = useState(false);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const selectedStory = stories.find((story) => story.id === selectedStoryId) || null;
 
   // Calculate current turn
   const currentTurn: Writer = sentences.length === 0
@@ -66,31 +81,70 @@ export default function StoryBookPage() {
   const totalPages = pages.length;
   const currentPageSentences = pages[currentPage - 1] || [];
 
+  const loadStories = useCallback(async () => {
+    if (!isSupabaseConfigured) {
+      setIsLoading(false);
+      return [] as BookStory[];
+    }
+
+    const { data, error } = await supabase
+      .from('book_stories')
+      .select('*')
+      .order('updated_at', { ascending: false });
+
+    if (!error && data) {
+      const nextStories = data as BookStory[];
+      setStories(nextStories);
+      if (!selectedStoryId && nextStories.length > 0) {
+        setSelectedStoryId(nextStories[0].id);
+      }
+      return nextStories;
+    }
+
+    return [] as BookStory[];
+  }, [selectedStoryId]);
+
   // Fetch sentences
-  const fetchSentences = useCallback(async () => {
+  const fetchSentences = useCallback(async (storyIdOverride?: string) => {
     if (!isSupabaseConfigured) {
       setIsLoading(false);
       return;
     }
 
+    const storyId = storyIdOverride || selectedStoryId;
+    if (!storyId) {
+      setSentences([]);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+
     const { data, error } = await supabase
       .from('book_sentences')
       .select('*')
+      .eq('story_id', storyId)
       .order('created_at', { ascending: true });
 
     if (!error && data) {
-      setSentences(data);
+      setSentences(data as Sentence[]);
       const lastPage = Math.ceil(data.length / SENTENCES_PER_PAGE) || 1;
       setCurrentPage(lastPage);
     }
     setIsLoading(false);
-  }, []);
+  }, [selectedStoryId]);
 
   useEffect(() => {
-    queueMicrotask(() => {
-      void fetchSentences();
+    queueMicrotask(async () => {
+      const loadedStories = await loadStories();
+      const firstStoryId = selectedStoryId || loadedStories[0]?.id || null;
+      if (firstStoryId) {
+        await fetchSentences(firstStoryId);
+      } else {
+        setIsLoading(false);
+      }
     });
-  }, [fetchSentences]);
+  }, [fetchSentences, loadStories, selectedStoryId]);
 
   // Update typing status
   const updateTypingStatus = useCallback(async (isTyping: boolean) => {
@@ -134,6 +188,7 @@ export default function StoryBookPage() {
         { event: 'INSERT', schema: 'public', table: 'book_sentences' },
         (payload) => {
           const newSentence = payload.new as Sentence;
+          if (newSentence.story_id !== selectedStoryId) return;
           setSentences(prev => {
             if (prev.some(s => s.id === newSentence.id)) return prev;
             const updated = [...prev, newSentence];
@@ -144,6 +199,12 @@ export default function StoryBookPage() {
           if (newSentence.writer !== currentUser) {
             playNotification();
           }
+        }
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'book_stories' },
+        () => {
+          void loadStories();
         }
       )
       .subscribe();
@@ -166,7 +227,35 @@ export default function StoryBookPage() {
       // Clear typing status when component unmounts
       updateTypingStatus(false);
     };
-  }, [currentUser, updateTypingStatus]);
+  }, [currentUser, loadStories, selectedStoryId, updateTypingStatus]);
+
+  const handleCreateStory = async () => {
+    if (!newStoryTitle.trim() || !currentUser || isCreatingStory) return;
+
+    setIsCreatingStory(true);
+    const { data, error } = await supabase
+      .from('book_stories')
+      .insert({
+        title: newStoryTitle.trim(),
+        created_by: currentUser,
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (!error && data) {
+      const newStory = data as BookStory;
+      setStories((prev) => [newStory, ...prev]);
+      setSelectedStoryId(newStory.id);
+      setSentences([]);
+      setCurrentPage(1);
+      void fetchSentences(newStory.id);
+      setNewStoryTitle('');
+      setShowStoryCreator(false);
+    }
+
+    setIsCreatingStory(false);
+  };
 
   const goToPage = (page: number) => {
     if (page < 1 || page > totalPages || page === currentPage) return;
@@ -176,10 +265,11 @@ export default function StoryBookPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!content.trim() || !currentUser || !isYourTurn || isSubmitting) return;
+    if (!content.trim() || !currentUser || !selectedStoryId || !isYourTurn || isSubmitting) return;
 
     setIsSubmitting(true);
     const { error } = await supabase.from('book_sentences').insert({
+      story_id: selectedStoryId,
       content: content.trim(),
       writer: currentUser,
       page_number: totalPages,
@@ -194,7 +284,7 @@ export default function StoryBookPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'book_sentence',
-          title: content.trim().length > 50 ? content.trim().substring(0, 50) + '...' : content.trim(),
+          title: `${selectedStory?.title || 'Story'}: ${content.trim().length > 40 ? content.trim().substring(0, 40) + '...' : content.trim()}`,
           user: currentUser,
         }),
       }).catch(() => {});
@@ -319,9 +409,64 @@ export default function StoryBookPage() {
             <p className="text-[11px] uppercase tracking-[0.3em] text-sky-600 dark:text-sky-300">Shared Writing</p>
             <h1 className="text-3xl sm:text-4xl font-serif text-slate-950 dark:text-sky-100 mt-2">Story Book</h1>
             <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-              One sentence each turn. Same story, same product family, better finish.
+              One sentence each turn. You can now keep multiple stories going at once.
             </p>
           </div>
+
+          <div className="mt-4 overflow-x-auto">
+            <div className="flex min-w-max items-center gap-2">
+              {stories.map((story) => (
+                <button
+                  key={story.id}
+                  onClick={() => {
+                    setSelectedStoryId(story.id);
+                    void fetchSentences(story.id);
+                  }}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                    story.id === selectedStoryId
+                      ? 'bg-sky-700 text-white'
+                      : 'bg-sky-50 text-sky-800 hover:bg-sky-100 dark:bg-slate-800 dark:text-sky-100 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  {story.title}
+                </button>
+              ))}
+              <button
+                onClick={() => setShowStoryCreator((open) => !open)}
+                className="rounded-full border border-dashed border-sky-300 px-4 py-2 text-sm font-medium text-sky-700 transition-colors hover:border-sky-500 hover:text-sky-900 dark:border-sky-700 dark:text-sky-200 dark:hover:border-sky-500"
+              >
+                + New Story
+              </button>
+            </div>
+          </div>
+
+          <AnimatePresence>
+            {showStoryCreator && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="mt-3 flex gap-2">
+                  <input
+                    type="text"
+                    value={newStoryTitle}
+                    onChange={(event) => setNewStoryTitle(event.target.value)}
+                    placeholder="Give this story a name"
+                    className="flex-1 rounded-2xl border border-sky-200 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-sky-400 dark:border-white/10 dark:bg-slate-900/70 dark:text-slate-100"
+                  />
+                  <button
+                    onClick={handleCreateStory}
+                    disabled={!newStoryTitle.trim() || isCreatingStory}
+                    className="rounded-2xl bg-sky-700 px-4 py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isCreatingStory ? 'Creating...' : 'Create'}
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <div className="grid grid-cols-3 gap-2 sm:gap-3 mt-4">
             <div className="rounded-xl bg-sky-50/90 dark:bg-sky-500/10 px-3 py-2 border border-sky-100 dark:border-sky-400/15">
@@ -344,6 +489,11 @@ export default function StoryBookPage() {
           animate={{ opacity: 1, y: 0 }}
           className={`mt-6 rounded-2xl border px-4 py-3 sm:px-6 sm:py-4 ${isYourTurn ? writerTheme.turn : 'border-slate-200/80 dark:border-white/10 bg-white/70 dark:bg-white/[0.04] text-slate-700 dark:text-slate-200'}`}
         >
+          {selectedStory && (
+            <p className="mb-1 text-xs uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+              {selectedStory.title}
+            </p>
+          )}
           {isYourTurn ? (
             <div className="flex items-center gap-2 font-medium">
               <span className="w-2 h-2 rounded-full bg-current animate-pulse" />
@@ -518,7 +668,7 @@ export default function StoryBookPage() {
                       ✍️
                     </motion.div>
                     <p className="font-medium text-sky-900 dark:text-sky-100">
-                      {formatWriterName(currentTurn)} is writing right now...
+                      {formatWriterName(currentTurn)} is writing in this story right now...
                     </p>
                     <div className="flex justify-center gap-1 mt-3">
                       <span className="w-2 h-2 bg-sky-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />

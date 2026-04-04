@@ -63,7 +63,7 @@ export function EventDetailModal({ event, currentUser, onClose, onDelete, onNoti
   const [loading, setLoading] = useState(true);
 
   // Timeline state
-  const [showAddTimeline, setShowAddTimeline] = useState(false);
+  const [showAddTimeline, setShowAddTimeline] = useState(true);
   const [newTimeSlot, setNewTimeSlot] = useState('');
   const [newTimeTitle, setNewTimeTitle] = useState('');
   const [newTimeDescription, setNewTimeDescription] = useState('');
@@ -159,7 +159,6 @@ export function EventDetailModal({ event, currentUser, onClose, onDelete, onNoti
       setNewTimeTitle('');
       setNewTimeDescription('');
       setNewTimeLocation('');
-      setShowAddTimeline(false);
       onNotify('event_plan_updated', event.title);
       fetchPlan();
     } catch (error) {

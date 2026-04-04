@@ -79,6 +79,7 @@ export default function Gratitude() {
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [showWriteModal, setShowWriteModal] = useState(false);
   const [reactingKey, setReactingKey] = useState<string | null>(null);
+  const [reactionsAvailable, setReactionsAvailable] = useState(true);
   const [newNote, setNewNote] = useState({
     text: '',
     category: 'love',
@@ -110,8 +111,10 @@ export default function Gratitude() {
 
         if (reactionsError) {
           console.warn('Gratitude reactions unavailable, loading notes without reactions:', reactionsError);
+          setReactionsAvailable(false);
         } else {
           reactionRows = reactions || [];
+          setReactionsAvailable(true);
         }
       }
 
@@ -213,6 +216,7 @@ export default function Gratitude() {
       await fetchNotes();
     } catch (error) {
       console.error('Error toggling reaction:', error);
+      setReactionsAvailable(false);
     }
     setReactingKey(null);
   };
@@ -401,29 +405,35 @@ export default function Gratitude() {
                         <span>{formatDate(note.created_at)}</span>
                       </div>
 
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {REACTION_OPTIONS.map((emoji) => {
-                          const reaction = note.reactions?.find((item) => item.emoji === emoji);
-                          const reactedByMe = reaction?.reactedByMe || false;
-                          const count = reaction?.count || 0;
+                      {reactionsAvailable ? (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {REACTION_OPTIONS.map((emoji) => {
+                            const reaction = note.reactions?.find((item) => item.emoji === emoji);
+                            const reactedByMe = reaction?.reactedByMe || false;
+                            const count = reaction?.count || 0;
 
-                          return (
-                            <button
-                              key={emoji}
-                              onClick={() => toggleReaction(note.id, emoji, reactedByMe)}
-                              disabled={reactingKey === `${note.id}-${emoji}`}
-                              className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm transition-colors ${
-                                reactedByMe
-                                  ? 'border-rose-300 bg-rose-100 text-rose-700 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
-                                  : 'border-gray-200 bg-white text-gray-500 hover:border-rose-200 hover:text-rose-600 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:border-rose-700 dark:hover:text-rose-300'
-                              }`}
-                            >
-                              <span>{emoji}</span>
-                              {count > 0 && <span>{count}</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
+                            return (
+                              <button
+                                key={emoji}
+                                onClick={() => toggleReaction(note.id, emoji, reactedByMe)}
+                                disabled={reactingKey === `${note.id}-${emoji}`}
+                                className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm transition-colors ${
+                                  reactedByMe
+                                    ? 'border-rose-300 bg-rose-100 text-rose-700 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
+                                    : 'border-gray-200 bg-white text-gray-500 hover:border-rose-200 hover:text-rose-600 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:border-rose-700 dark:hover:text-rose-300'
+                                }`}
+                              >
+                                <span>{emoji}</span>
+                                {count > 0 && <span>{count}</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="mt-4 text-xs text-gray-400 dark:text-gray-500">
+                          Reactions will appear after the database update is applied.
+                        </p>
+                      )}
                     </div>
                   </div>
                   {!note.is_read && activeTab === 'received' && (

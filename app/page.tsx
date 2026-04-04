@@ -591,6 +591,7 @@ export default function Home() {
   const [newCounts, setNewCounts] = useState<Record<string, number>>({});
   const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -624,6 +625,15 @@ export default function Home() {
     }
     return `Find ${seasonalMode.collectibleCount - foundCollectibles.length} more ${seasonalMode.collectibleLabel}.`;
   }, [foundCollectibles.length, seasonalMode]);
+  const heroContextText = useMemo(() => {
+    if (seasonalMode && todayThemeLabel) {
+      return `${seasonalMode.label} · ${todayThemeLabel}`;
+    }
+    if (seasonalMode) {
+      return seasonalProgressLabel;
+    }
+    return todayThemeLabel;
+  }, [seasonalMode, seasonalProgressLabel, todayThemeLabel]);
   const activityHasUnread = useMemo(() => {
     if (recentActivity.length === 0) return false;
     if (!lastSeenActivityAt) return true;
@@ -1131,6 +1141,15 @@ export default function Home() {
   return (
     <div className={`min-h-screen ${activeTheme.pageGradient}`}>
       <div className="fixed right-4 top-4 z-50 flex items-center gap-2">
+        <button
+          onClick={() => setIsSearchOpen((open) => !open)}
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/85 text-gray-600 shadow-lg backdrop-blur transition-colors hover:text-gray-900 dark:bg-gray-800/85 dark:text-gray-300 dark:hover:text-white"
+          aria-label="Search"
+        >
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </button>
         <div className="relative">
           <button
             onClick={() => {
@@ -1274,26 +1293,14 @@ export default function Home() {
           <p className="mx-auto max-w-md text-lg text-gray-500 dark:text-gray-400 sm:text-xl">
             {activeTheme.subheading}
           </p>
-          {seasonalMode && (
-            <div className="mt-4 flex justify-center">
-              <div className={`max-w-lg rounded-2xl border px-4 py-3 text-sm shadow-lg backdrop-blur ${seasonalMode.heroCard}`}>
-                <p className="text-[11px] uppercase tracking-[0.22em] text-gray-400 dark:text-gray-500">
-                  Seasonal mode
-                </p>
-                <p className="mt-1 font-medium text-gray-800 dark:text-gray-100">
-                  {seasonalProgressLabel}
-                </p>
-              </div>
-            </div>
-          )}
-          {todayThemeLabel && (
+          {heroContextText && (
             <div className="mt-4 flex justify-center">
               <div className={`max-w-lg rounded-2xl border px-4 py-3 text-sm shadow-lg backdrop-blur ${activeTheme.heroCard}`}>
                 <p className="text-[11px] uppercase tracking-[0.22em] text-gray-400 dark:text-gray-500">
-                  {homeTheme.kicker}
+                  {seasonalMode ? 'Today' : homeTheme.kicker}
                 </p>
                 <p className="mt-1 font-medium text-gray-800 dark:text-gray-100">
-                  {todayThemeLabel}
+                  {heroContextText}
                 </p>
               </div>
             </div>
@@ -1306,81 +1313,93 @@ export default function Home() {
           transition={{ delay: 0.15 }}
           className="mx-auto mb-6 max-w-2xl"
         >
-          <div className={`overflow-hidden rounded-2xl border shadow-lg backdrop-blur ${seasonalMode ? seasonalMode.searchCard : 'border-white/60 bg-white/80 dark:border-gray-700 dark:bg-gray-800/75'}`}>
-            <div className="relative">
-              <svg
-                className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+          <AnimatePresence>
+            {isSearchOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className={`overflow-hidden rounded-2xl border shadow-lg backdrop-blur ${seasonalMode ? seasonalMode.searchCard : 'border-white/60 bg-white/80 dark:border-gray-700 dark:bg-gray-800/75'}`}
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search prompts, gratitude, memories, plans, quiz and map"
-                className="w-full bg-transparent py-4 pl-11 pr-12 text-sm text-gray-800 outline-none placeholder:text-gray-400 dark:text-gray-100 dark:placeholder:text-gray-500 sm:text-base"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-200"
-                  aria-label="Clear search"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <div className="relative">
+                  <svg
+                    className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
-                </button>
-              )}
-            </div>
-
-            <AnimatePresence>
-              {(searchQuery.trim() || isSearching) && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="border-t border-gray-100 dark:border-gray-700"
-                >
-                  {isSearching ? (
-                    <div className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400">Searching…</div>
-                  ) : searchResults.length > 0 ? (
-                    <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                      {searchResults.map((result) => (
-                        <a
-                          key={result.id}
-                          href={result.href}
-                          onClick={() => recordVisit(result.appTitle)}
-                          className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-700/40"
-                        >
-                          <span className="mt-0.5 text-xl">{result.icon}</span>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
-                                {result.title}
-                              </span>
-                              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
-                                {result.appTitle}
-                              </span>
-                            </div>
-                            <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
-                              {result.description}
-                            </p>
-                          </div>
-                        </a>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400">
-                      No matches for &quot;{searchQuery.trim()}&quot;.
-                    </div>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search prompts, gratitude, memories, plans, quiz and map"
+                    className="w-full bg-transparent py-4 pl-11 pr-12 text-sm text-gray-800 outline-none placeholder:text-gray-400 dark:text-gray-100 dark:placeholder:text-gray-500 sm:text-base"
+                  />
+                  {(searchQuery || isSearchOpen) && (
+                    <button
+                      onClick={() => {
+                        setSearchQuery('');
+                        setIsSearchOpen(false);
+                      }}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-200"
+                      aria-label="Close search"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
                   )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                </div>
+
+                <AnimatePresence>
+                  {(searchQuery.trim() || isSearching) && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="border-t border-gray-100 dark:border-gray-700"
+                    >
+                      {isSearching ? (
+                        <div className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400">Searching…</div>
+                      ) : searchResults.length > 0 ? (
+                        <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                          {searchResults.map((result) => (
+                            <a
+                              key={result.id}
+                              href={result.href}
+                              onClick={() => recordVisit(result.appTitle)}
+                              className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-700/40"
+                            >
+                              <span className="mt-0.5 text-xl">{result.icon}</span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                                    {result.title}
+                                  </span>
+                                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-gray-500 dark:bg-gray-700 dark:text-gray-300">
+                                    {result.appTitle}
+                                  </span>
+                                </div>
+                                <p className="mt-1 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
+                                  {result.description}
+                                </p>
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="px-4 py-4 text-sm text-gray-500 dark:text-gray-400">
+                          No matches for &quot;{searchQuery.trim()}&quot;.
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
 
         <div className="space-y-6 sm:space-y-7">
