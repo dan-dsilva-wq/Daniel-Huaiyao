@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/surprises/notify-ready",
-      "schedule": "0 * * * *"
+      "schedule": "30 14 * * *"
     }
   ]
 }

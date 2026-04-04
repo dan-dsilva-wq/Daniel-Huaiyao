@@ -1198,7 +1198,7 @@ export default function Home() {
         >
           <div className="mb-4 flex justify-center">
             <span className={`rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-gray-600 dark:text-gray-300 ${activeTheme.heroCard}`}>
-              {seasonalMode ? seasonalMode.label : activeTheme.badge}
+              {seasonalMode ? seasonalMode.label : homeTheme.badge}
             </span>
           </div>
           <motion.div
