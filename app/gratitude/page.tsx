@@ -1,10 +1,17 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
+
+interface ReactionSummary {
+  emoji: string;
+  count: number;
+  reactedByMe: boolean;
+}
 
 interface GratitudeNote {
   id: string;
@@ -15,6 +22,7 @@ interface GratitudeNote {
   emoji: string;
   is_read: boolean;
   created_at: string;
+  reactions?: ReactionSummary[];
 }
 
 const CATEGORY_OPTIONS = [
@@ -25,6 +33,42 @@ const CATEGORY_OPTIONS = [
   { value: 'memory', emoji: '📸', label: 'Memory' },
 ];
 
+const REACTION_OPTIONS = ['❤️', '🥰', '😭', '✨', '🤗'];
+
+function mergeReactionsIntoNotes(
+  notes: GratitudeNote[],
+  reactionRows: { note_id: string; user_name: string; emoji: string }[],
+  currentUser: 'daniel' | 'huaiyao'
+) {
+  const grouped = new Map<string, Map<string, { count: number; reactedByMe: boolean }>>();
+
+  reactionRows.forEach((reaction) => {
+    if (!grouped.has(reaction.note_id)) {
+      grouped.set(reaction.note_id, new Map());
+    }
+    const noteMap = grouped.get(reaction.note_id)!;
+    const entry = noteMap.get(reaction.emoji) || { count: 0, reactedByMe: false };
+    entry.count += 1;
+    if (reaction.user_name === currentUser) {
+      entry.reactedByMe = true;
+    }
+    noteMap.set(reaction.emoji, entry);
+  });
+
+  return notes.map((note) => {
+    const reactionMap = grouped.get(note.id);
+    const reactions = reactionMap
+      ? Array.from(reactionMap.entries()).map(([emoji, value]) => ({
+          emoji,
+          count: value.count,
+          reactedByMe: value.reactedByMe,
+        }))
+      : [];
+
+    return { ...note, reactions };
+  });
+}
+
 export default function Gratitude() {
   useMarkAppViewed('gratitude');
   const [received, setReceived] = useState<GratitudeNote[]>([]);
@@ -34,6 +78,7 @@ export default function Gratitude() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [showWriteModal, setShowWriteModal] = useState(false);
+  const [reactingKey, setReactingKey] = useState<string | null>(null);
   const [newNote, setNewNote] = useState({
     text: '',
     category: 'love',
@@ -53,8 +98,23 @@ export default function Gratitude() {
       if (error) throw error;
 
       if (data && data.length > 0) {
-        setReceived(data[0].received || []);
-        setSent(data[0].sent || []);
+        const receivedNotes = (data[0].received || []) as GratitudeNote[];
+        const sentNotes = (data[0].sent || []) as GratitudeNote[];
+        const noteIds = [...receivedNotes, ...sentNotes].map((note) => note.id);
+
+        let reactionRows: { note_id: string; user_name: string; emoji: string }[] = [];
+        if (noteIds.length > 0) {
+          const { data: reactions, error: reactionsError } = await supabase
+            .from('gratitude_reactions')
+            .select('note_id, user_name, emoji')
+            .in('note_id', noteIds);
+
+          if (reactionsError) throw reactionsError;
+          reactionRows = reactions || [];
+        }
+
+        setReceived(mergeReactionsIntoNotes(receivedNotes, reactionRows, currentUser));
+        setSent(mergeReactionsIntoNotes(sentNotes, reactionRows, currentUser));
         setUnreadCount(data[0].unread_count || 0);
       }
     } catch (error) {
@@ -74,7 +134,6 @@ export default function Gratitude() {
     }
   }, [currentUser, fetchNotes]);
 
-  // Mark notes as read when viewing received tab
   useEffect(() => {
     const markRead = async () => {
       if (activeTab === 'received' && unreadCount > 0 && currentUser) {
@@ -123,6 +182,37 @@ export default function Gratitude() {
     fetchNotes();
   };
 
+  const toggleReaction = async (noteId: string, emoji: string, reactedByMe: boolean) => {
+    if (!currentUser) return;
+
+    setReactingKey(`${noteId}-${emoji}`);
+    try {
+      if (reactedByMe) {
+        const { error } = await supabase
+          .from('gratitude_reactions')
+          .delete()
+          .eq('note_id', noteId)
+          .eq('user_name', currentUser)
+          .eq('emoji', emoji);
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('gratitude_reactions')
+          .upsert([{ note_id: noteId, user_name: currentUser, emoji }], {
+            onConflict: 'note_id,user_name,emoji',
+          });
+
+        if (error) throw error;
+      }
+
+      await fetchNotes();
+    } catch (error) {
+      console.error('Error toggling reaction:', error);
+    }
+    setReactingKey(null);
+  };
+
   const selectUser = (user: 'daniel' | 'huaiyao') => {
     setCurrentUser(user);
     localStorage.setItem('currentUser', user);
@@ -141,12 +231,6 @@ export default function Gratitude() {
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
 
-  // Check if user wrote today
-  const today = new Date().toDateString();
-  const wroteToday = sent.some((note) => new Date(note.created_at).toDateString() === today);
-  const partnerWroteToday = received.some((note) => new Date(note.created_at).toDateString() === today);
-
-  // User selection screen
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-slate-900 dark:to-zinc-900 flex items-center justify-center p-4">
@@ -175,7 +259,7 @@ export default function Gratitude() {
               onClick={() => selectUser('daniel')}
               className="px-8 py-4 rounded-xl bg-blue-500 text-white font-medium shadow-lg hover:bg-blue-600 transition-colors"
             >
-              I'm Daniel
+              I&apos;m Daniel
             </motion.button>
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -183,7 +267,7 @@ export default function Gratitude() {
               onClick={() => selectUser('huaiyao')}
               className="px-8 py-4 rounded-xl bg-rose-500 text-white font-medium shadow-lg hover:bg-rose-600 transition-colors"
             >
-              I'm Huaiyao
+              I&apos;m Huaiyao
             </motion.button>
           </div>
         </motion.div>
@@ -207,7 +291,6 @@ export default function Gratitude() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-slate-900 dark:to-zinc-900">
-      {/* Background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <motion.div
           className="absolute top-1/4 left-1/4 w-96 h-96 bg-rose-100/30 dark:bg-rose-900/20 rounded-full blur-3xl"
@@ -222,69 +305,28 @@ export default function Gratitude() {
       </div>
 
       <main className="relative z-10 max-w-2xl mx-auto px-4 py-6 sm:py-12 pb-safe">
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-6 sm:mb-8"
         >
           <div className="flex items-center justify-between mb-4">
-            <a
+            <Link
               href="/"
               className="px-4 py-2 -mx-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 active:text-gray-800 transition-colors touch-manipulation"
             >
               ← Home
-            </a>
+            </Link>
             <ThemeToggle />
           </div>
           <h1 className="text-3xl sm:text-4xl font-serif font-bold text-gray-800 dark:text-gray-100 mb-2">
             Gratitude Wall
           </h1>
           <p className="text-gray-500 dark:text-gray-400">
-            Little notes of appreciation
+            Little notes of appreciation, now with reactions.
           </p>
         </motion.div>
 
-        {/* Today's Status */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-6 p-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur rounded-2xl shadow-sm"
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                wroteToday
-                  ? 'bg-green-100 dark:bg-green-900/30'
-                  : 'bg-gray-100 dark:bg-gray-700'
-              }`}>
-                <span className="text-lg">{wroteToday ? '✓' : '💭'}</span>
-              </div>
-              <div>
-                <p className="font-medium text-gray-800 dark:text-gray-100">
-                  {wroteToday ? "You've shared gratitude today" : "Write something today?"}
-                </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {partnerWroteToday
-                    ? `${partnerName} left you a note today 💝`
-                    : `${partnerName} hasn't written yet`}
-                </p>
-              </div>
-            </div>
-            {!wroteToday && (
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setShowWriteModal(true)}
-                className="px-4 py-2 bg-rose-500 text-white rounded-lg text-sm font-medium"
-              >
-                Write
-              </motion.button>
-            )}
-          </div>
-        </motion.div>
-
-        {/* Write note button */}
         <motion.button
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -297,7 +339,6 @@ export default function Gratitude() {
           Write a note to {partnerName} 💝
         </motion.button>
 
-        {/* Tabs */}
         <div className="flex gap-2 mb-6">
           <button
             onClick={() => setActiveTab('received')}
@@ -326,7 +367,6 @@ export default function Gratitude() {
           </button>
         </div>
 
-        {/* Notes */}
         <div className="space-y-4">
           <AnimatePresence mode="wait">
             {currentNotes.length > 0 ? (
@@ -349,10 +389,36 @@ export default function Gratitude() {
                       </p>
                       <div className="mt-3 flex items-center gap-2 text-sm text-gray-400">
                         <span>
-                          {activeTab === 'received' ? `From ${note.from_player === 'daniel' ? 'Daniel' : 'Huaiyao'}` : `To ${note.to_player === 'daniel' ? 'Daniel' : 'Huaiyao'}`}
+                          {activeTab === 'received'
+                            ? `From ${note.from_player === 'daniel' ? 'Daniel' : 'Huaiyao'}`
+                            : `To ${note.to_player === 'daniel' ? 'Daniel' : 'Huaiyao'}`}
                         </span>
                         <span>·</span>
                         <span>{formatDate(note.created_at)}</span>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {REACTION_OPTIONS.map((emoji) => {
+                          const reaction = note.reactions?.find((item) => item.emoji === emoji);
+                          const reactedByMe = reaction?.reactedByMe || false;
+                          const count = reaction?.count || 0;
+
+                          return (
+                            <button
+                              key={emoji}
+                              onClick={() => toggleReaction(note.id, emoji, reactedByMe)}
+                              disabled={reactingKey === `${note.id}-${emoji}`}
+                              className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm transition-colors ${
+                                reactedByMe
+                                  ? 'border-rose-300 bg-rose-100 text-rose-700 dark:border-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
+                                  : 'border-gray-200 bg-white text-gray-500 hover:border-rose-200 hover:text-rose-600 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:hover:border-rose-700 dark:hover:text-rose-300'
+                              }`}
+                            >
+                              <span>{emoji}</span>
+                              {count > 0 && <span>{count}</span>}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -380,7 +446,6 @@ export default function Gratitude() {
           </AnimatePresence>
         </div>
 
-        {/* Footer */}
         <motion.footer
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -406,7 +471,6 @@ export default function Gratitude() {
         </motion.footer>
       </main>
 
-      {/* Write Modal */}
       <AnimatePresence>
         {showWriteModal && (
           <motion.div

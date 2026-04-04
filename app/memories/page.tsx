@@ -150,19 +150,6 @@ export default function MemoriesPage() {
     return uploadedUrls;
   };
 
-  const sendNotification = async (title: string) => {
-    if (!currentUser) return;
-    try {
-      await fetch('/api/notify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'memory_added', title, user: currentUser }),
-      });
-    } catch (error) {
-      console.error('Notification error:', error);
-    }
-  };
-
   const handleAddMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !formTitle.trim()) return;
@@ -191,9 +178,6 @@ export default function MemoriesPage() {
       });
 
       if (error) throw error;
-
-      // Notify partner
-      sendNotification(formTitle.trim());
 
       // Upload photos if any
       if (formPhotos.length > 0 && memoryData?.id) {
@@ -561,28 +545,25 @@ export default function MemoriesPage() {
                                 ))}
                               </div>
                             )}
-                            {/* Timeline thumbnails */}
                             {memory.photos && memory.photos.length > 0 && (
-                              <div
-                                className={`mt-3 flex items-center gap-2 ${
-                                  index % 2 === 1 ? 'md:justify-end' : ''
-                                }`}
-                              >
-                                {memory.photos.slice(0, 2).map((photo) => (
+                              <div className={`mt-3 flex items-center gap-2 ${index % 2 === 1 ? 'md:justify-end' : ''}`}>
+                                {memory.photos.slice(0, 2).map((photo, photoIndex) => (
                                   <div
                                     key={photo.id}
-                                    className="w-12 h-12 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 ring-1 ring-black/5 dark:ring-white/10"
+                                    className={`h-12 w-12 overflow-hidden rounded-lg bg-gray-100 shadow-sm ring-1 ring-black/5 dark:bg-gray-700 dark:ring-white/10 ${
+                                      photoIndex === 1 ? '-ml-1' : ''
+                                    }`}
                                   >
                                     <img
                                       src={photo.photo_url}
-                                      alt={photo.caption || 'Memory thumbnail'}
-                                      className="w-full h-full object-cover"
+                                      alt=""
+                                      className="h-full w-full object-cover"
                                     />
                                   </div>
                                 ))}
                                 {memory.photos.length > 2 && (
-                                  <span className="text-xs text-pink-500 dark:text-pink-400 font-medium">
-                                    +{memory.photos.length - 2} more
+                                  <span className="text-xs text-pink-500 dark:text-pink-400">
+                                    +{memory.photos.length - 2}
                                   </span>
                                 )}
                               </div>

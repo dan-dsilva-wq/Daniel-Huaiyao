@@ -5,6 +5,7 @@ import { ServiceWorkerRegister } from "./components/ServiceWorkerRegister";
 import { OfflineIndicator } from "./components/OfflineIndicator";
 import NotificationPrompt from "./components/NotificationPrompt";
 import { UserBootstrap } from "./components/UserBootstrap";
+import AppLaunchSplash from "./components/AppLaunchSplash";
 
 export const metadata: Metadata = {
   title: "Daniel & Huaiyao",
@@ -60,6 +61,7 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <UserBootstrap />
+          <AppLaunchSplash />
           <OfflineIndicator />
           {children}
           <ServiceWorkerRegister />

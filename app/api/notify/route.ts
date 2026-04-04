@@ -14,7 +14,7 @@ function isWithinAllowedHours(): boolean {
   return hour >= QUIET_HOURS_END && hour < QUIET_HOURS_START;
 }
 
-type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed' | 'memory_added' | 'gratitude_sent' | 'chat_message' | 'book_sentence' | 'date_added' | 'date_removed' | 'prompt_answered' | 'media_added' | 'stratego_new_game' | 'stratego_move' | 'morse_room_invite' | 'morse_run_started' | 'date_idea_edited' | 'event_plan_updated';
+type ActionType = 'added' | 'removed' | 'completed' | 'uncompleted' | 'question_added' | 'question_answered' | 'place_added' | 'place_visited' | 'mystery_started' | 'mystery_waiting' | 'mystery_agreed' | 'memory_added' | 'gratitude_sent' | 'chat_message' | 'book_sentence' | 'date_added' | 'date_removed' | 'prompt_answered' | 'prompt_waiting' | 'prompt_revealed' | 'media_added' | 'stratego_new_game' | 'stratego_move' | 'morse_room_invite' | 'morse_run_started' | 'date_idea_edited' | 'event_plan_updated';
 
 const ACTION_MESSAGES: Record<ActionType, string> = {
   added: 'added a new date idea',
@@ -35,6 +35,8 @@ const ACTION_MESSAGES: Record<ActionType, string> = {
   date_added: 'added a countdown event',
   date_removed: 'removed a countdown event',
   prompt_answered: 'answered today\'s prompt',
+  prompt_waiting: 'answered a prompt and is waiting for you',
+  prompt_revealed: 'completed a prompt and both answers are ready',
   media_added: 'added something to watch',
   stratego_new_game: 'started a Stratego game',
   stratego_move: 'made a move in Stratego',
@@ -63,6 +65,8 @@ const ACTION_APP_NAMES: Record<string, string> = {
   date_added: 'countdown',
   date_removed: 'countdown',
   prompt_answered: 'prompts',
+  prompt_waiting: 'prompts',
+  prompt_revealed: 'prompts',
   media_added: 'media',
   stratego_new_game: 'stratego',
   stratego_move: 'stratego',

@@ -1,12 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { clearCurrentUser, getCurrentUser, setCurrentUser as persistCurrentUser } from '@/lib/user-session';
 
 interface DailyPrompt {
   daily_prompt_id: string;
@@ -28,12 +27,17 @@ interface PromptHistory {
   prompt_date: string;
   my_response: string | null;
   partner_response: string | null;
+  my_response_time: string | null;
+  partner_response_time: string | null;
   both_answered: boolean;
+  needs_my_answer: boolean;
 }
+
+type UserName = 'daniel' | 'huaiyao';
 
 export default function PromptsPage() {
   useMarkAppViewed('prompts');
-  const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserName | null>(null);
   const [todayPrompt, setTodayPrompt] = useState<DailyPrompt | null>(null);
   const [history, setHistory] = useState<PromptHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -51,7 +55,6 @@ export default function PromptsPage() {
     }
 
     try {
-      // Get today's prompt
       const { data: promptData, error: promptError } = await supabase.rpc('get_daily_prompt', {
         p_player: currentUser,
       });
@@ -61,13 +64,12 @@ export default function PromptsPage() {
         setResponse(promptData[0].my_response || '');
       }
 
-      // Get history
       const { data: historyData, error: historyError } = await supabase.rpc('get_prompt_history', {
         p_player: currentUser,
-        p_limit: 365,
+        p_limit: 90,
       });
       if (historyError) throw historyError;
-      setHistory(historyData || []);
+      setHistory((historyData || []) as PromptHistory[]);
     } catch (error) {
       console.error('Error fetching prompts:', error);
     }
@@ -75,7 +77,7 @@ export default function PromptsPage() {
   }, [currentUser]);
 
   useEffect(() => {
-    const savedUser = getCurrentUser() as 'daniel' | 'huaiyao' | null;
+    const savedUser = localStorage.getItem('currentUser') as UserName | null;
     setCurrentUser(savedUser);
   }, []);
 
@@ -85,32 +87,69 @@ export default function PromptsPage() {
     }
   }, [currentUser, fetchData]);
 
-  const sendNotification = async () => {
+  const sendNotification = async (
+    action: 'prompt_waiting' | 'prompt_revealed',
+    title: string
+  ) => {
     if (!currentUser) return;
     try {
       await fetch('/api/notify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'prompt_answered', title: 'answered today\'s prompt', user: currentUser }),
+        body: JSON.stringify({ action, title, user: currentUser }),
       });
     } catch (error) {
       console.error('Notification error:', error);
     }
   };
 
-  const submitResponse = async () => {
+  const submitPromptResponse = async ({
+    promptId,
+    promptDate,
+    text,
+    hadMyResponse,
+    partnerHasResponse,
+  }: {
+    promptId: string;
+    promptDate: string;
+    text: string;
+    hadMyResponse: boolean;
+    partnerHasResponse: boolean;
+  }) => {
+    if (!currentUser || !text.trim()) return;
+
+    const { error } = await supabase.rpc('submit_prompt_response', {
+      p_daily_prompt_id: promptId,
+      p_player: currentUser,
+      p_response_text: text.trim(),
+    });
+
+    if (error) throw error;
+
+    if (!hadMyResponse) {
+      const formattedDate = new Date(promptDate).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+      });
+      await sendNotification(
+        partnerHasResponse ? 'prompt_revealed' : 'prompt_waiting',
+        `${formattedDate} prompt`
+      );
+    }
+  };
+
+  const submitTodayResponse = async () => {
     if (!response.trim() || !todayPrompt || !currentUser) return;
 
     setIsSubmitting(true);
     try {
-      const { error } = await supabase.rpc('submit_prompt_response', {
-        p_daily_prompt_id: todayPrompt.daily_prompt_id,
-        p_player: currentUser,
-        p_response_text: response.trim(),
+      await submitPromptResponse({
+        promptId: todayPrompt.daily_prompt_id,
+        promptDate: todayPrompt.prompt_date,
+        text: response,
+        hadMyResponse: Boolean(todayPrompt.my_response),
+        partnerHasResponse: Boolean(todayPrompt.partner_response),
       });
-
-      if (error) throw error;
-      sendNotification();
       fetchData();
     } catch (error) {
       console.error('Error submitting response:', error);
@@ -118,36 +157,35 @@ export default function PromptsPage() {
     setIsSubmitting(false);
   };
 
-  const selectUser = (user: 'daniel' | 'huaiyao') => {
-    setCurrentUser(user);
-    persistCurrentUser(user);
-  };
+  const submitLateResponse = async (item: PromptHistory) => {
+    const value = lateResponses[item.daily_prompt_id]?.trim();
+    if (!value || !currentUser) return;
 
-  const submitLateResponse = async (dailyPromptId: string, responseText: string) => {
-    if (!currentUser || !responseText.trim()) return;
-
-    setSubmittingLateId(dailyPromptId);
+    setSubmittingLateId(item.daily_prompt_id);
     try {
-      const { error } = await supabase.rpc('submit_prompt_response', {
-        p_daily_prompt_id: dailyPromptId,
-        p_player: currentUser,
-        p_response_text: responseText.trim(),
+      await submitPromptResponse({
+        promptId: item.daily_prompt_id,
+        promptDate: item.prompt_date,
+        text: value,
+        hadMyResponse: Boolean(item.my_response),
+        partnerHasResponse: Boolean(item.partner_response),
       });
-      if (error) throw error;
-
-      sendNotification();
-      setLateResponses((prev) => ({ ...prev, [dailyPromptId]: '' }));
-      await fetchData();
+      setLateResponses((prev) => ({ ...prev, [item.daily_prompt_id]: '' }));
+      fetchData();
     } catch (error) {
       console.error('Error submitting late response:', error);
-    } finally {
-      setSubmittingLateId(null);
     }
+    setSubmittingLateId(null);
+  };
+
+  const selectUser = (user: UserName) => {
+    setCurrentUser(user);
+    localStorage.setItem('currentUser', user);
   };
 
   const partnerName = currentUser === 'daniel' ? 'Huaiyao' : 'Daniel';
+  const catchUpCount = history.filter((item) => item.needs_my_answer).length;
 
-  // User selection screen
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-slate-900 dark:to-zinc-900 flex items-center justify-center p-4">
@@ -206,7 +244,6 @@ export default function PromptsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-stone-50 to-zinc-100 dark:from-gray-900 dark:via-slate-900 dark:to-zinc-900">
-      {/* Background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <motion.div
           className="absolute top-1/4 left-1/4 w-96 h-96 bg-cyan-100/30 dark:bg-cyan-900/20 rounded-full blur-3xl"
@@ -221,7 +258,6 @@ export default function PromptsPage() {
       </div>
 
       <main className="relative z-10 max-w-2xl mx-auto px-4 py-6 sm:py-12 pb-safe">
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -240,11 +276,10 @@ export default function PromptsPage() {
             Daily Prompts
           </h1>
           <p className="text-gray-500 dark:text-gray-400">
-            A new question each day to connect deeper
+            A new question each day, with catch-up when one of you misses it.
           </p>
         </motion.div>
 
-        {/* Tabs */}
         <div className="flex gap-2 mb-6">
           <button
             onClick={() => setActiveTab('today')}
@@ -264,7 +299,7 @@ export default function PromptsPage() {
                 : 'bg-white/70 dark:bg-gray-800/70 text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-800'
             }`}
           >
-            History
+            History {catchUpCount > 0 ? `· ${catchUpCount} waiting` : ''}
           </button>
         </div>
 
@@ -276,7 +311,6 @@ export default function PromptsPage() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
             >
-              {/* Today's Prompt Card */}
               <div className="bg-gradient-to-br from-cyan-500 to-teal-500 rounded-2xl p-6 text-white shadow-xl mb-6">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-2xl">{todayPrompt.category_emoji}</span>
@@ -294,7 +328,6 @@ export default function PromptsPage() {
                 </p>
               </div>
 
-              {/* Response Section */}
               <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur rounded-2xl p-5 shadow-sm">
                 {todayPrompt.my_response ? (
                   <div>
@@ -322,7 +355,7 @@ export default function PromptsPage() {
                                  focus:outline-none focus:ring-2 focus:ring-cyan-300 resize-none"
                     />
                     <button
-                      onClick={submitResponse}
+                      onClick={submitTodayResponse}
                       disabled={!response.trim() || isSubmitting}
                       className="mt-3 w-full py-3 bg-gradient-to-r from-cyan-500 to-teal-500 text-white
                                  rounded-xl font-medium hover:from-cyan-600 hover:to-teal-600
@@ -333,7 +366,6 @@ export default function PromptsPage() {
                   </div>
                 )}
 
-                {/* Partner's Response */}
                 {todayPrompt.my_response && (
                   <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
                     <h3 className="font-medium text-gray-800 dark:text-gray-100 mb-3">
@@ -354,7 +386,7 @@ export default function PromptsPage() {
                       )
                     ) : (
                       <p className="text-gray-400 dark:text-gray-500 italic">
-                        {partnerName} hasn&apos;t responded yet
+                        {partnerName} hasn&apos;t responded yet. They&apos;ll be nudged, and the answer can still be added later.
                       </p>
                     )}
                   </div>
@@ -387,15 +419,28 @@ export default function PromptsPage() {
                     <div className="flex items-start gap-3">
                       <span className="text-2xl">{item.category_emoji}</span>
                       <div className="flex-1">
-                        <p className="text-sm text-gray-400 dark:text-gray-500 mb-1">
-                          {new Date(item.prompt_date).toLocaleDateString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                          })}
-                        </p>
-                        <h3 className="font-medium text-gray-800 dark:text-gray-100 mb-2">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <p className="text-sm text-gray-400 dark:text-gray-500">
+                            {new Date(item.prompt_date).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                            })}
+                          </p>
+                          {item.needs_my_answer && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                              Waiting for you
+                            </span>
+                          )}
+                          {item.both_answered && (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                              Both answered
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="font-medium text-gray-800 dark:text-gray-100 mb-3">
                           {item.prompt_text}
                         </h3>
+
                         {item.both_answered ? (
                           <div className="space-y-2 text-sm">
                             <p className="text-gray-600 dark:text-gray-300">
@@ -405,10 +450,10 @@ export default function PromptsPage() {
                               <strong>{partnerName}:</strong> {item.partner_response}
                             </p>
                           </div>
-                        ) : !item.my_response && item.partner_response ? (
+                        ) : item.needs_my_answer ? (
                           <div className="space-y-3">
-                            <p className="text-gray-500 dark:text-gray-400 text-sm">
-                              {partnerName} answered. Add yours to reveal both responses.
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                              {partnerName} answered on time. You can still answer now and reveal both.
                             </p>
                             <textarea
                               value={lateResponses[item.daily_prompt_id] || ''}
@@ -418,38 +463,36 @@ export default function PromptsPage() {
                                   [item.daily_prompt_id]: e.target.value,
                                 }))
                               }
-                              placeholder="Write your answer..."
+                              placeholder="Add your answer now..."
                               rows={3}
-                              className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm
+                              className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl
                                          text-gray-800 dark:text-gray-100 placeholder-gray-400
                                          focus:outline-none focus:ring-2 focus:ring-cyan-300 resize-none"
                             />
                             <button
-                              onClick={() =>
-                                submitLateResponse(
-                                  item.daily_prompt_id,
-                                  lateResponses[item.daily_prompt_id] || ''
-                                )
-                              }
-                              disabled={
-                                !(lateResponses[item.daily_prompt_id] || '').trim() ||
-                                submittingLateId === item.daily_prompt_id
-                              }
-                              className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-teal-500 text-white text-sm rounded-lg
+                              onClick={() => submitLateResponse(item)}
+                              disabled={!lateResponses[item.daily_prompt_id]?.trim() || submittingLateId === item.daily_prompt_id}
+                              className="w-full py-3 bg-gradient-to-r from-cyan-500 to-teal-500 text-white rounded-xl font-medium
                                          hover:from-cyan-600 hover:to-teal-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                             >
-                              {submittingLateId === item.daily_prompt_id ? 'Submitting...' : 'Submit & Reveal'}
+                              {submittingLateId === item.daily_prompt_id ? 'Submitting...' : 'Answer and reveal both'}
                             </button>
+                          </div>
+                        ) : item.my_response ? (
+                          <div className="space-y-2 text-sm">
+                            <p className="text-gray-600 dark:text-gray-300">
+                              <strong>You:</strong> {item.my_response}
+                            </p>
+                            <p className="text-gray-400 dark:text-gray-500 italic">
+                              {partnerName} still hasn&apos;t answered this one.
+                            </p>
                           </div>
                         ) : (
                           <p className="text-gray-400 dark:text-gray-500 text-sm italic">
-                            {item.my_response ? `${partnerName} didn't respond yet` : "No responses yet"}
+                            Neither of you answered this prompt.
                           </p>
                         )}
                       </div>
-                      {item.both_answered && (
-                        <span className="text-green-500">✓</span>
-                      )}
                     </div>
                   </motion.div>
                 ))
@@ -458,7 +501,6 @@ export default function PromptsPage() {
           )}
         </AnimatePresence>
 
-        {/* Footer */}
         <motion.footer
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -473,7 +515,7 @@ export default function PromptsPage() {
             {' · '}
             <button
               onClick={() => {
-                clearCurrentUser();
+                localStorage.removeItem('currentUser');
                 setCurrentUser(null);
               }}
               className="underline hover:text-gray-600 dark:hover:text-gray-300"

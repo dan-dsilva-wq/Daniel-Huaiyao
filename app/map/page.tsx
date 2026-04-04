@@ -132,12 +132,12 @@ const COUNTRY_TO_REGION: Record<string, string> = {
 
 // Region zoom configurations
 const REGION_ZOOM: Record<string, { center: [number, number]; scale: number }> = {
-  'north-america': { center: [-100, 45], scale: 255 },
-  'south-america': { center: [-60, -20], scale: 255 },
-  'europe': { center: [15, 54], scale: 410 },
-  'africa': { center: [20, 0], scale: 240 },
-  'asia': { center: [100, 35], scale: 215 },
-  'oceania': { center: [140, -25], scale: 295 },
+  'north-america': { center: [-100, 45], scale: 300 },
+  'south-america': { center: [-60, -20], scale: 300 },
+  'europe': { center: [15, 54], scale: 500 },
+  'africa': { center: [20, 0], scale: 280 },
+  'asia': { center: [100, 35], scale: 250 },
+  'oceania': { center: [140, -25], scale: 350 },
 };
 
 // Region colors
@@ -584,207 +584,195 @@ export default function MapPage() {
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="relative mb-6 rounded-2xl bg-white/70 p-4 shadow-lg backdrop-blur dark:bg-gray-800/70 sm:p-6"
+          className="relative bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-2xl shadow-lg p-4 sm:p-6 mb-6 overflow-hidden"
         >
-          <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-            <div className={`${showUSStates || zoomedRegion ? 'min-w-[40rem]' : 'min-w-[36rem]'} sm:min-w-0`}>
-              {showUSStates ? (
-                // US States Map
-                <ComposableMap
-                  width={1100}
-                  height={700}
-                  projection="geoAlbersUsa"
-                  projectionConfig={{ scale: 900 }}
-                  style={{ width: '100%', height: 'auto', overflow: 'visible' }}
-                >
-                  <ZoomableGroup minZoom={0.7} maxZoom={6} zoom={0.92}>
-                    <Geographies geography={usGeoUrl}>
-                      {({ geographies }) =>
-                        geographies.map((geo) => {
-                          const stateName = geo.properties.name;
-                          const stateCode = US_STATES[stateName];
-                          const fillColor = getLocationColor(stateCode, stateName, 'north-america');
-                          const colors = REGION_COLORS['north-america'];
+          {showUSStates ? (
+            // US States Map
+            <ComposableMap
+              projection="geoAlbersUsa"
+              projectionConfig={{ scale: 800 }}
+              style={{ width: '100%', height: 'auto' }}
+            >
+              <Geographies geography={usGeoUrl}>
+                {({ geographies }) =>
+                  geographies.map((geo) => {
+                    const stateName = geo.properties.name;
+                    const stateCode = US_STATES[stateName];
+                    const fillColor = getLocationColor(stateCode, stateName, 'north-america');
+                    const colors = REGION_COLORS['north-america'];
 
-                          return (
-                            <Geography
-                              key={geo.rsmKey}
-                              geography={geo}
-                              onClick={() => handleLocationClick(stateName, stateCode, true)}
-                              style={{
-                                default: {
-                                  fill: fillColor,
-                                  stroke: '#fff',
-                                  strokeWidth: 0.5,
-                                  outline: 'none',
-                                  cursor: 'pointer',
-                                },
-                                hover: {
-                                  fill: colors.hover,
-                                  stroke: '#fff',
-                                  strokeWidth: 0.75,
-                                  outline: 'none',
-                                  cursor: 'pointer',
-                                },
-                                pressed: {
-                                  fill: colors.hover,
-                                  stroke: '#fff',
-                                  strokeWidth: 0.75,
-                                  outline: 'none',
-                                },
-                              }}
-                            />
-                          );
-                        })
-                      }
-                    </Geographies>
+                    return (
+                      <Geography
+                        key={geo.rsmKey}
+                        geography={geo}
+                        onClick={() => handleLocationClick(stateName, stateCode, true)}
+                        style={{
+                          default: {
+                            fill: fillColor,
+                            stroke: '#fff',
+                            strokeWidth: 0.5,
+                            outline: 'none',
+                            cursor: 'pointer',
+                          },
+                          hover: {
+                            fill: colors.hover,
+                            stroke: '#fff',
+                            strokeWidth: 0.75,
+                            outline: 'none',
+                            cursor: 'pointer',
+                          },
+                          pressed: {
+                            fill: colors.hover,
+                            stroke: '#fff',
+                            strokeWidth: 0.75,
+                            outline: 'none',
+                          },
+                        }}
+                      />
+                    );
+                  })
+                }
+              </Geographies>
 
-                    {showMemories && memoryLocations
-                      .filter(m => m.location_lng >= -125 && m.location_lng <= -66 && m.location_lat >= 24 && m.location_lat <= 50)
-                      .map((memory) => (
-                        <Marker key={memory.id} coordinates={[memory.location_lng, memory.location_lat]}>
-                          <g style={{ cursor: 'pointer' }}>
-                            <circle r={6} fill="#a855f7" stroke="#fff" strokeWidth={2} />
-                            <title>{memory.title} - {memory.location_name}</title>
-                          </g>
-                        </Marker>
-                      ))}
-                  </ZoomableGroup>
-                </ComposableMap>
-              ) : zoomedRegion ? (
-                // Zoomed region map
-                <ComposableMap
-                  width={1100}
-                  height={700}
-                  projection="geoMercator"
-                  projectionConfig={{
-                    scale: REGION_ZOOM[zoomedRegion].scale,
-                    center: REGION_ZOOM[zoomedRegion].center,
-                  }}
-                  style={{ width: '100%', height: 'auto', overflow: 'visible' }}
-                >
-                  <ZoomableGroup minZoom={0.7} maxZoom={6} zoom={0.9}>
-                    <Geographies geography={worldGeoUrl}>
-                      {({ geographies }) =>
-                        geographies
-                          .filter((geo) => COUNTRY_TO_REGION[geo.properties.name] === zoomedRegion)
-                          .map((geo) => {
-                            const countryName = geo.properties.name;
-                            const fillColor = getLocationColor(countryName, countryName, zoomedRegion);
-                            const colors = REGION_COLORS[zoomedRegion] || DEFAULT_COLOR;
+              {/* Memory markers in US States view */}
+              {showMemories && memoryLocations
+                .filter(m => m.location_lng >= -125 && m.location_lng <= -66 && m.location_lat >= 24 && m.location_lat <= 50)
+                .map((memory) => (
+                  <Marker key={memory.id} coordinates={[memory.location_lng, memory.location_lat]}>
+                    <g style={{ cursor: 'pointer' }}>
+                      <circle r={6} fill="#a855f7" stroke="#fff" strokeWidth={2} />
+                      <title>{memory.title} - {memory.location_name}</title>
+                    </g>
+                  </Marker>
+                ))}
+            </ComposableMap>
+          ) : zoomedRegion ? (
+            // Zoomed region map
+            <ComposableMap
+              projection="geoMercator"
+              projectionConfig={{
+                scale: REGION_ZOOM[zoomedRegion].scale,
+                center: REGION_ZOOM[zoomedRegion].center,
+              }}
+              style={{ width: '100%', height: 'auto' }}
+            >
+              <Geographies geography={worldGeoUrl}>
+                {({ geographies }) =>
+                  geographies
+                    .filter((geo) => COUNTRY_TO_REGION[geo.properties.name] === zoomedRegion)
+                    .map((geo) => {
+                      const countryName = geo.properties.name;
+                      const fillColor = getLocationColor(countryName, countryName, zoomedRegion);
+                      const colors = REGION_COLORS[zoomedRegion] || DEFAULT_COLOR;
 
-                            return (
-                              <Geography
-                                key={geo.rsmKey}
-                                geography={geo}
-                                onClick={() => handleLocationClick(countryName, countryName, false)}
-                                style={{
-                                  default: {
-                                    fill: fillColor,
-                                    stroke: '#fff',
-                                    strokeWidth: 0.5,
-                                    outline: 'none',
-                                    cursor: 'pointer',
-                                  },
-                                  hover: {
-                                    fill: colors.hover,
-                                    stroke: '#fff',
-                                    strokeWidth: 0.75,
-                                    outline: 'none',
-                                    cursor: 'pointer',
-                                  },
-                                  pressed: {
-                                    fill: colors.hover,
-                                    stroke: '#fff',
-                                    strokeWidth: 0.75,
-                                    outline: 'none',
-                                  },
-                                }}
-                              />
-                            );
-                          })
-                      }
-                    </Geographies>
-
-                    {showMemories && memoryLocations.map((memory) => (
-                      <Marker key={memory.id} coordinates={[memory.location_lng, memory.location_lat]}>
-                        <g style={{ cursor: 'pointer' }}>
-                          <circle r={8} fill="#a855f7" stroke="#fff" strokeWidth={2} />
-                          <title>{memory.title} - {memory.location_name}</title>
-                        </g>
-                      </Marker>
-                    ))}
-                  </ZoomableGroup>
-                </ComposableMap>
-              ) : (
-                // World overview map
-                <ComposableMap
-                  width={1100}
-                  height={650}
-                  projection="geoMercator"
-                  projectionConfig={{ scale: 120, center: [0, 30] }}
-                  style={{ width: '100%', height: 'auto', overflow: 'visible' }}
-                >
-                  <ZoomableGroup minZoom={0.9} maxZoom={5}>
-                    <Geographies geography={worldGeoUrl}>
-                      {({ geographies }) =>
-                        geographies.map((geo) => {
-                          const countryName = geo.properties.name;
-                          const regionCode = COUNTRY_TO_REGION[countryName];
-                          const colors = regionCode ? REGION_COLORS[regionCode] : DEFAULT_COLOR;
-                          const fillColor = regionCode ? getLocationColor(countryName, countryName, regionCode) : colors.default;
-
-                          return (
-                            <Geography
-                              key={geo.rsmKey}
-                              geography={geo}
-                              onClick={() => regionCode && setZoomedRegion(regionCode)}
-                              style={{
-                                default: {
-                                  fill: fillColor,
-                                  stroke: '#fff',
-                                  strokeWidth: 0.3,
-                                  outline: 'none',
-                                  cursor: regionCode ? 'pointer' : 'default',
-                                },
-                                hover: {
-                                  fill: regionCode ? colors.hover : colors.default,
-                                  stroke: '#fff',
-                                  strokeWidth: 0.5,
-                                  outline: 'none',
-                                  cursor: regionCode ? 'pointer' : 'default',
-                                },
-                                pressed: {
-                                  fill: colors.hover,
-                                  stroke: '#fff',
-                                  strokeWidth: 0.5,
-                                  outline: 'none',
-                                },
-                              }}
-                            />
-                          );
-                        })
-                      }
-                    </Geographies>
-
-                    {showMemories && memoryLocations.map((memory) => (
-                      <Marker key={memory.id} coordinates={[memory.location_lng, memory.location_lat]}>
-                        <g
-                          onClick={(e) => {
-                            e.stopPropagation();
+                      return (
+                        <Geography
+                          key={geo.rsmKey}
+                          geography={geo}
+                          onClick={() => handleLocationClick(countryName, countryName, false)}
+                          style={{
+                            default: {
+                              fill: fillColor,
+                              stroke: '#fff',
+                              strokeWidth: 0.5,
+                              outline: 'none',
+                              cursor: 'pointer',
+                            },
+                            hover: {
+                              fill: colors.hover,
+                              stroke: '#fff',
+                              strokeWidth: 0.75,
+                              outline: 'none',
+                              cursor: 'pointer',
+                            },
+                            pressed: {
+                              fill: colors.hover,
+                              stroke: '#fff',
+                              strokeWidth: 0.75,
+                              outline: 'none',
+                            },
                           }}
-                          style={{ cursor: 'pointer' }}
-                        >
-                          <circle r={6} fill="#a855f7" stroke="#fff" strokeWidth={2} />
-                          <title>{memory.title} - {memory.location_name}</title>
-                        </g>
-                      </Marker>
-                    ))}
-                  </ZoomableGroup>
-                </ComposableMap>
-              )}
-            </div>
-          </div>
+                        />
+                      );
+                    })
+                }
+              </Geographies>
+
+              {/* Memory markers in zoomed region */}
+              {showMemories && memoryLocations.map((memory) => (
+                <Marker key={memory.id} coordinates={[memory.location_lng, memory.location_lat]}>
+                  <g style={{ cursor: 'pointer' }}>
+                    <circle r={8} fill="#a855f7" stroke="#fff" strokeWidth={2} />
+                    <title>{memory.title} - {memory.location_name}</title>
+                  </g>
+                </Marker>
+              ))}
+            </ComposableMap>
+          ) : (
+            // World overview map
+            <ComposableMap
+              projection="geoMercator"
+              projectionConfig={{ scale: 120, center: [0, 30] }}
+              style={{ width: '100%', height: 'auto' }}
+            >
+              <Geographies geography={worldGeoUrl}>
+                {({ geographies }) =>
+                  geographies.map((geo) => {
+                    const countryName = geo.properties.name;
+                    const regionCode = COUNTRY_TO_REGION[countryName];
+                    const colors = regionCode ? REGION_COLORS[regionCode] : DEFAULT_COLOR;
+                    const fillColor = regionCode ? getLocationColor(countryName, countryName, regionCode) : colors.default;
+
+                    return (
+                      <Geography
+                        key={geo.rsmKey}
+                        geography={geo}
+                        onClick={() => regionCode && setZoomedRegion(regionCode)}
+                        style={{
+                          default: {
+                            fill: fillColor,
+                            stroke: '#fff',
+                            strokeWidth: 0.3,
+                            outline: 'none',
+                            cursor: regionCode ? 'pointer' : 'default',
+                          },
+                          hover: {
+                            fill: regionCode ? colors.hover : colors.default,
+                            stroke: '#fff',
+                            strokeWidth: 0.5,
+                            outline: 'none',
+                            cursor: regionCode ? 'pointer' : 'default',
+                          },
+                          pressed: {
+                            fill: colors.hover,
+                            stroke: '#fff',
+                            strokeWidth: 0.5,
+                            outline: 'none',
+                          },
+                        }}
+                      />
+                    );
+                  })
+                }
+              </Geographies>
+
+              {/* Memory location markers */}
+              {showMemories && memoryLocations.map((memory) => (
+                <Marker key={memory.id} coordinates={[memory.location_lng, memory.location_lat]}>
+                  <g
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // Could show memory details here
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <circle r={6} fill="#a855f7" stroke="#fff" strokeWidth={2} />
+                    <title>{memory.title} - {memory.location_name}</title>
+                  </g>
+                </Marker>
+              ))}
+            </ComposableMap>
+          )}
 
           {/* Legend */}
           <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500 dark:text-gray-400">
@@ -834,8 +822,8 @@ export default function MapPage() {
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-xl shadow-sm p-4 mb-6">
           <p className="text-center text-gray-500 dark:text-gray-400 text-sm">
             {zoomedRegion
-              ? 'Click a country or state to add it to your wishlist or mark as visited. On phones, pinch or drag the map if it feels too tight.'
-              : 'Click a region to zoom in, then click countries to add them. On phones, you can pinch or drag the map.'}
+              ? 'Click a country or state to add it to your wishlist or mark as visited'
+              : 'Click a region to zoom in, then click countries to add them'}
           </p>
         </motion.div>
 

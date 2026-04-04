@@ -7,7 +7,7 @@ import {
 } from '@/lib/server/push';
 import { getSupabaseAdmin } from '@/lib/server/supabase-admin';
 
-const REMINDER_DAYS = new Set([7, 3, 1, 0]);
+const REMINDER_DAYS = new Set([7, 6, 5, 4, 3, 2, 1, 0]);
 const TARGET_HOUR = 9;
 
 type CountdownEvent = {
