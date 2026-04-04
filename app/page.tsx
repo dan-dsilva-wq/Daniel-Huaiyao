@@ -603,6 +603,7 @@ export default function Home() {
   const [feedIndexes, setFeedIndexes] = useState({ memory: 0, places: 0, countdown: 0 });
   const [todayCountdownEvents, setTodayCountdownEvents] = useState<CountdownThemeEvent[]>([]);
   const [foundCollectibles, setFoundCollectibles] = useState<number[]>([]);
+  const [lastSeenActivityAt, setLastSeenActivityAt] = useState<string | null>(null);
 
   const activeAppTitles = useMemo(
     () => sections.flatMap((section) => section.apps.map((app) => app.title)),
@@ -623,6 +624,21 @@ export default function Home() {
     }
     return `Find ${seasonalMode.collectibleCount - foundCollectibles.length} more ${seasonalMode.collectibleLabel}.`;
   }, [foundCollectibles.length, seasonalMode]);
+  const activityHasUnread = useMemo(() => {
+    if (recentActivity.length === 0) return false;
+    if (!lastSeenActivityAt) return true;
+    return new Date(recentActivity[0].timestamp).getTime() > new Date(lastSeenActivityAt).getTime();
+  }, [lastSeenActivityAt, recentActivity]);
+  const daysTogetherCard = useMemo<FeedItem | null>(() => {
+    if (daysTogether === null) return null;
+    return {
+      id: 'days-together',
+      title: `${daysTogether} days`,
+      detail: 'Together and counting',
+      href: '/',
+      icon: '💞',
+    };
+  }, [daysTogether]);
 
   const revealCollectible = (index: number) => {
     setFoundCollectibles((prev) => (prev.includes(index) ? prev : [...prev, index]));
@@ -891,7 +907,9 @@ export default function Home() {
 
   useEffect(() => {
     const savedUser = localStorage.getItem('currentUser');
+    const savedLastSeenActivityAt = localStorage.getItem('homeLastSeenActivityAt');
     setCurrentUser(savedUser);
+    setLastSeenActivityAt(savedLastSeenActivityAt);
 
     if (savedUser) {
       fetchNewCounts(savedUser);
@@ -903,13 +921,40 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!seasonalMode) {
+      setFoundCollectibles([]);
+      return;
+    }
+
+    const storageKey = `seasonalCollectibles:${seasonalMode.id}:${new Date().getFullYear()}`;
+    const saved = localStorage.getItem(storageKey);
+    if (!saved) {
+      setFoundCollectibles([]);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(saved) as number[];
+      setFoundCollectibles(parsed.filter((value) => Number.isInteger(value)));
+    } catch {
+      setFoundCollectibles([]);
+    }
+  }, [seasonalMode]);
+
+  useEffect(() => {
+    if (!seasonalMode) return;
+    const storageKey = `seasonalCollectibles:${seasonalMode.id}:${new Date().getFullYear()}`;
+    localStorage.setItem(storageKey, JSON.stringify(foundCollectibles));
+  }, [foundCollectibles, seasonalMode]);
+
+  useEffect(() => {
     const interval = setInterval(() => {
       setFeedIndexes((prev) => ({
         memory: memoryFeed.length > 0 ? (prev.memory + 1) % memoryFeed.length : 0,
         places: placesFeed.length > 0 ? (prev.places + 1) % placesFeed.length : 0,
         countdown: countdownFeed.length > 0 ? (prev.countdown + 1) % countdownFeed.length : 0,
       }));
-    }, 5500);
+    }, 9000);
 
     return () => clearInterval(interval);
   }, [memoryFeed, placesFeed, countdownFeed]);
@@ -1088,7 +1133,17 @@ export default function Home() {
       <div className="fixed right-4 top-4 z-50 flex items-center gap-2">
         <div className="relative">
           <button
-            onClick={() => setIsActivityOpen((open) => !open)}
+            onClick={() => {
+              setIsActivityOpen((open) => {
+                const nextOpen = !open;
+                if (nextOpen && recentActivity.length > 0) {
+                  const latestTimestamp = recentActivity[0].timestamp;
+                  setLastSeenActivityAt(latestTimestamp);
+                  localStorage.setItem('homeLastSeenActivityAt', latestTimestamp);
+                }
+                return nextOpen;
+              });
+            }}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-white/85 text-gray-600 shadow-lg backdrop-blur transition-colors hover:text-gray-900 dark:bg-gray-800/85 dark:text-gray-300 dark:hover:text-white"
             aria-label="Recent changes"
           >
@@ -1096,6 +1151,11 @@ export default function Home() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.4-1.4A2 2 0 0118 14.17V11a6 6 0 10-12 0v3.17c0 .53-.21 1.04-.59 1.43L4 17h5m6 0a3 3 0 11-6 0m6 0H9" />
             </svg>
           </button>
+          {activityHasUnread && (
+            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white shadow">
+              !
+            </span>
+          )}
 
           <AnimatePresence>
             {isActivityOpen && (
@@ -1178,23 +1238,23 @@ export default function Home() {
             <button
               key={`${seasonalMode.id}-collectible-${index}`}
               onClick={() => revealCollectible(index)}
-              className={`fixed z-20 hidden rounded-full transition-all md:block ${position} ${
-                found ? 'pointer-events-none opacity-0 scale-75' : 'opacity-90 hover:scale-110'
+              className={`fixed z-20 rounded-full transition-all ${position} ${
+                found ? 'pointer-events-none scale-75 opacity-0' : 'opacity-85 hover:scale-110'
               }`}
               aria-label={`Find ${seasonalMode.collectibleLabel}`}
               type="button"
             >
-              <span className="block text-2xl drop-shadow-md">{seasonalMode.collectibleIcon}</span>
+              <span className="block text-xl drop-shadow-md sm:text-2xl">{seasonalMode.collectibleIcon}</span>
             </button>
           );
         })}
 
-      <main className="relative z-10 mx-auto max-w-4xl px-4 py-12 sm:px-6 sm:py-20">
+      <main className="relative z-10 mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-14">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
-          className="mx-auto mb-10 max-w-2xl text-center sm:mb-12"
+          className="mx-auto mb-7 max-w-2xl text-center sm:mb-8"
         >
           <div className="mb-4 flex justify-center">
             <span className={`rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-gray-600 dark:text-gray-300 ${activeTheme.heroCard}`}>
@@ -1215,7 +1275,7 @@ export default function Home() {
             {activeTheme.subheading}
           </p>
           {seasonalMode && (
-            <div className="mt-5 flex justify-center">
+            <div className="mt-4 flex justify-center">
               <div className={`max-w-lg rounded-2xl border px-4 py-3 text-sm shadow-lg backdrop-blur ${seasonalMode.heroCard}`}>
                 <p className="text-[11px] uppercase tracking-[0.22em] text-gray-400 dark:text-gray-500">
                   Seasonal mode
@@ -1227,7 +1287,7 @@ export default function Home() {
             </div>
           )}
           {todayThemeLabel && (
-            <div className="mt-5 flex justify-center">
+            <div className="mt-4 flex justify-center">
               <div className={`max-w-lg rounded-2xl border px-4 py-3 text-sm shadow-lg backdrop-blur ${activeTheme.heroCard}`}>
                 <p className="text-[11px] uppercase tracking-[0.22em] text-gray-400 dark:text-gray-500">
                   {homeTheme.kicker}
@@ -1244,7 +1304,7 @@ export default function Home() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
-          className="mx-auto mb-8 max-w-2xl"
+          className="mx-auto mb-6 max-w-2xl"
         >
           <div className={`overflow-hidden rounded-2xl border shadow-lg backdrop-blur ${seasonalMode ? seasonalMode.searchCard : 'border-white/60 bg-white/80 dark:border-gray-700 dark:bg-gray-800/75'}`}>
             <div className="relative">
@@ -1260,7 +1320,7 @@ export default function Home() {
                 type="text"
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search across prompts, gratitude, memories, plans, quiz and map"
+                placeholder="Search prompts, gratitude, memories, plans, quiz and map"
                 className="w-full bg-transparent py-4 pl-11 pr-12 text-sm text-gray-800 outline-none placeholder:text-gray-400 dark:text-gray-100 dark:placeholder:text-gray-500 sm:text-base"
               />
               {searchQuery && (
@@ -1323,7 +1383,7 @@ export default function Home() {
           </div>
         </motion.div>
 
-        <div className="space-y-8 sm:space-y-10">
+        <div className="space-y-6 sm:space-y-7">
           {sections.map((section, sectionIndex) => (
             <motion.section
               key={section.title}
@@ -1369,7 +1429,7 @@ export default function Home() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.55 }}
-          className="mt-12"
+          className="mt-8"
         >
           <button
             onClick={() => setShowArchived((value) => !value)}
@@ -1405,9 +1465,9 @@ export default function Home() {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
-          className="mt-12"
+          className="mt-8"
         >
-          <div className="mb-4 text-center">
+          <div className="mb-3 text-center">
             <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100 sm:text-xl">
               Live Feeds
             </h2>
@@ -1416,25 +1476,35 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {[
               {
                 key: 'memory',
                 label: 'Random Memory',
                 empty: 'No memories yet.',
                 item: memoryFeed[feedIndexes.memory],
+                appTitle: 'Memories',
               },
               {
                 key: 'places',
                 label: 'Visited Together',
                 empty: 'No shared places yet.',
                 item: placesFeed[feedIndexes.places],
+                appTitle: 'Map',
               },
               {
                 key: 'countdown',
                 label: 'Looking Forward To',
                 empty: 'No countdowns yet.',
                 item: countdownFeed[feedIndexes.countdown],
+                appTitle: 'Count Down',
+              },
+              {
+                key: 'days',
+                label: 'Days Together',
+                empty: 'Still counting.',
+                item: daysTogetherCard,
+                appTitle: 'Home',
               },
             ].map((feed) => (
               <div
@@ -1447,20 +1517,24 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="min-h-[124px] px-4 py-4">
+                <div className="min-h-[94px] px-4 py-3">
                   <AnimatePresence mode="wait">
                     {feed.item ? (
                       <motion.a
                         key={feed.item.id}
                         href={feed.item.href}
-                        onClick={() => recordVisit(feed.label === 'Visited Together' ? 'Map' : feed.label === 'Looking Forward To' ? 'Count Down' : 'Memories')}
+                        onClick={() => {
+                          if (feed.appTitle !== 'Home') {
+                            recordVisit(feed.appTitle);
+                          }
+                        }}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -10 }}
                         className="block"
                       >
                         <div className="flex items-start gap-3">
-                          <span className="mt-0.5 text-2xl">{feed.item.icon}</span>
+                          <span className="mt-0.5 text-xl">{feed.item.icon}</span>
                           <div>
                             <p className="text-sm font-medium text-gray-800 dark:text-gray-100">
                               {feed.item.title}
@@ -1489,27 +1563,11 @@ export default function Home() {
           </div>
         </motion.section>
 
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.7 }}
-          className="mt-12 text-center"
-        >
-          <div className="mx-auto max-w-sm rounded-3xl border border-white/60 bg-white/75 px-6 py-6 shadow-lg backdrop-blur dark:border-gray-700 dark:bg-gray-800/75">
-            <p className="text-xs uppercase tracking-[0.2em] text-gray-400 dark:text-gray-500">
-              Days Together
-            </p>
-            <p className="mt-3 text-4xl font-bold text-gray-800 dark:text-gray-100">
-              {daysTogether ?? '—'}
-            </p>
-          </div>
-        </motion.div>
-
         <motion.footer
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.75 }}
-          className="mt-10 text-center text-sm text-gray-400 dark:text-gray-500"
+          className="mt-8 text-center text-sm text-gray-400 dark:text-gray-500"
         >
           <p>Built for fun</p>
         </motion.footer>

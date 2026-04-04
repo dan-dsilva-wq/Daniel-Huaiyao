@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { useMarkAppViewed } from '@/lib/useMarkAppViewed';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { EventDetailModal } from './components/EventDetailModal';
 
 interface ImportantDate {
   id: string;
@@ -33,6 +34,7 @@ export default function Countdown() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<'daniel' | 'huaiyao' | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<ImportantDate | null>(null);
   const [newDate, setNewDate] = useState({
     title: '',
     event_date: '',
@@ -227,7 +229,16 @@ export default function Countdown() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="mb-8 p-6 sm:p-8 bg-gradient-to-br from-amber-500 to-rose-500 rounded-2xl text-white shadow-xl"
+            onClick={() => setSelectedEvent(heroDate)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setSelectedEvent(heroDate);
+              }
+            }}
+            className="mb-8 cursor-pointer rounded-2xl bg-gradient-to-br from-amber-500 to-rose-500 p-6 text-white shadow-xl sm:p-8"
           >
             <div className="text-center">
               <motion.div
@@ -282,8 +293,16 @@ export default function Countdown() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
-              className="group p-4 bg-white/70 dark:bg-gray-800/70 backdrop-blur rounded-xl shadow-sm
-                         hover:shadow-md transition-shadow"
+              onClick={() => setSelectedEvent(date)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setSelectedEvent(date);
+                }
+              }}
+              className="group cursor-pointer rounded-xl bg-white/70 p-4 shadow-sm backdrop-blur transition-shadow hover:shadow-md dark:bg-gray-800/70"
             >
               <div className="flex items-center gap-4">
                 <span className="text-3xl">{date.emoji}</span>
@@ -465,6 +484,21 @@ export default function Countdown() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selectedEvent && (
+          <EventDetailModal
+            event={selectedEvent}
+            currentUser={currentUser}
+            onClose={() => setSelectedEvent(null)}
+            onDelete={(id, title) => {
+              deleteDate(id, title);
+              setSelectedEvent(null);
+            }}
+            onNotify={sendNotification}
+          />
         )}
       </AnimatePresence>
     </div>

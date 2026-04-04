@@ -97,28 +97,32 @@ export default function Gratitude() {
       });
       if (error) throw error;
 
-      if (data && data.length > 0) {
-        const receivedNotes = (data[0].received || []) as GratitudeNote[];
-        const sentNotes = (data[0].sent || []) as GratitudeNote[];
-        const noteIds = [...receivedNotes, ...sentNotes].map((note) => note.id);
+      const receivedNotes = (data?.[0]?.received || []) as GratitudeNote[];
+      const sentNotes = (data?.[0]?.sent || []) as GratitudeNote[];
+      const noteIds = [...receivedNotes, ...sentNotes].map((note) => note.id);
 
-        let reactionRows: { note_id: string; user_name: string; emoji: string }[] = [];
-        if (noteIds.length > 0) {
-          const { data: reactions, error: reactionsError } = await supabase
-            .from('gratitude_reactions')
-            .select('note_id, user_name, emoji')
-            .in('note_id', noteIds);
+      let reactionRows: { note_id: string; user_name: string; emoji: string }[] = [];
+      if (noteIds.length > 0) {
+        const { data: reactions, error: reactionsError } = await supabase
+          .from('gratitude_reactions')
+          .select('note_id, user_name, emoji')
+          .in('note_id', noteIds);
 
-          if (reactionsError) throw reactionsError;
+        if (reactionsError) {
+          console.warn('Gratitude reactions unavailable, loading notes without reactions:', reactionsError);
+        } else {
           reactionRows = reactions || [];
         }
-
-        setReceived(mergeReactionsIntoNotes(receivedNotes, reactionRows, currentUser));
-        setSent(mergeReactionsIntoNotes(sentNotes, reactionRows, currentUser));
-        setUnreadCount(data[0].unread_count || 0);
       }
+
+      setReceived(mergeReactionsIntoNotes(receivedNotes, reactionRows, currentUser));
+      setSent(mergeReactionsIntoNotes(sentNotes, reactionRows, currentUser));
+      setUnreadCount(data?.[0]?.unread_count || 0);
     } catch (error) {
       console.error('Error fetching notes:', error);
+      setReceived([]);
+      setSent([]);
+      setUnreadCount(0);
     }
     setIsLoading(false);
   }, [currentUser]);

@@ -58,7 +58,7 @@ interface EventDetailModalProps {
 }
 
 export function EventDetailModal({ event, currentUser, onClose, onDelete, onNotify }: EventDetailModalProps) {
-  const [activeTab, setActiveTab] = useState<Tab>('timeline');
+  const [activeTab, setActiveTab] = useState<Tab>('notes');
   const [plan, setPlan] = useState<EventPlan | null>(null);
   const [loading, setLoading] = useState(true);
 
